@@ -1,0 +1,319 @@
+/* portal.css — shared stylesheet for Manager & Employee portals
+   Mobile-first: bottom nav on phones/tablets, sidebar on desktop */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg:           #f0f2f7;
+    --surface:      #ffffff;
+    --border:       #e5e7eb;
+    --text:         #111827;
+    --text-muted:   #6b7280;
+    --accent:       #3b82f6;
+    --sidebar-bg:   #0f172a;
+    --sidebar-text: #94a3b8;
+    --shadow-sm:    0 1px 3px rgba(0,0,0,.08);
+    --shadow-md:    0 4px 16px rgba(0,0,0,.12);
+    --radius:       10px;
+    --sidebar-w:    230px;
+    --nav-h:        62px;
+    --font:         'Segoe UI', system-ui, sans-serif;
+}
+
+html, body { height: 100%; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.5; }
+
+/* ── Sidebar (desktop) ───────────────────────────────────── */
+.p-sidebar {
+    width: var(--sidebar-w);
+    background: var(--sidebar-bg);
+    display: flex; flex-direction: column; flex-shrink: 0;
+    position: fixed; top: 0; left: 0; height: 100vh;
+    overflow-y: auto; z-index: 100;
+}
+
+.p-sidebar-brand { padding: 20px 18px 16px; border-bottom: 1px solid rgba(255,255,255,.07); margin-bottom: 6px; }
+.p-brand-title   { font-size: 1.1rem; font-weight: 700; color: #fff; display: block; }
+.p-brand-role    { font-size: .72rem; color: #64748b; margin-top: 2px; display: block; }
+
+/* No side padding: the highlight runs the full width of the sidebar. */
+.p-sidebar-nav { flex: 1; padding: 8px 0; }
+
+.p-nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 18px; border-radius: 0;
+    color: var(--sidebar-text); text-decoration: none;
+    font-size: .865rem; font-weight: 500;
+    transition: all .17s;
+}
+.p-nav-item:hover { background: rgba(255,255,255,.06); color: #fff; }
+.p-nav-item.active { background: rgba(59,130,246,.18); color: #fff; font-weight: 600; }
+
+.p-nav-icon { font-size: 1.1rem; width: 20px; text-align: center; flex-shrink: 0; }
+
+.p-sidebar-footer { padding: 8px 0; border-top: 1px solid rgba(255,255,255,.07); }
+.p-logout { color: #ef4444 !important; }
+.p-logout:hover { background: rgba(239,68,68,.12) !important; }
+
+/*
+ * Watermark — same treatment as the admin side (style.css).
+ * Fixed pseudo-element behind the page content. left: var(--sidebar-w)
+ * starts it after the sidebar so the logo sits centered in the content
+ * area, not the whole window. It never scrolls, never takes clicks, and
+ * z-index:-1 keeps it behind everything; .p-content gets z-index:1 so
+ * cards and tables stay crisp on top of it.
+ */
+body::before {
+    content: '';
+    position: fixed;
+    left: var(--sidebar-w);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    background: url('../images/logo.png') center / 42% no-repeat;
+    opacity: 0.10;
+    pointer-events: none;
+    z-index: -1;
+}
+
+/* ── Main content ────────────────────────────────────────── */
+.p-content {
+    margin-left: var(--sidebar-w);
+    padding: 30px 36px;
+    min-height: 100vh;
+    min-width: 0;
+    position: relative;   /* sits above the body::before watermark */
+    z-index: 1;
+}
+
+/* ── Bottom nav (mobile) ─────────────────────────────────── */
+.p-bottom-nav {
+    display: none;
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: var(--nav-h);
+    background: var(--sidebar-bg);
+    border-top: 1px solid rgba(255,255,255,.08);
+    z-index: 200;
+}
+
+.p-bottom-nav-inner {
+    display: flex;
+    height: 100%;
+    overflow-x: auto;          /* allows scroll if many items */
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+.p-bottom-nav-inner::-webkit-scrollbar { display: none; }
+
+.p-bn-item {
+    flex: 1; min-width: 56px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--sidebar-text); text-decoration: none;
+    font-size: .68rem; font-weight: 500; gap: 3px; padding: 4px 6px;
+    transition: color .15s; white-space: nowrap;
+}
+.p-bn-item.active { color: #3b82f6; }
+.p-bn-item:hover  { color: #fff; }
+.p-bn-icon { font-size: 1.3rem; line-height: 1; }
+
+/* ── Page header ─────────────────────────────────────────── */
+.p-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
+.p-header h1 { font-size: 1.45rem; font-weight: 700; letter-spacing: -.02em; }
+.p-header p  { color: var(--text-muted); font-size: .865rem; margin-top: 3px; }
+
+/* ── Cards ───────────────────────────────────────────────── */
+.p-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-bottom: 22px; }
+
+.p-card {
+    background: var(--surface); border-radius: var(--radius);
+    box-shadow: var(--shadow-sm); padding: 18px;
+    border: 1px solid var(--border);
+    transition: box-shadow .18s, transform .18s;
+}
+.p-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+
+.p-card-label { font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); margin-bottom: 8px; }
+.p-card-value { font-size: 1.5rem; font-weight: 700; }
+.p-card-sub   { font-size: .74rem; color: var(--text-muted); margin-top: 4px; }
+
+/* Colour variants intentionally neutral — every card renders plain. */
+.p-card-blue,
+.p-card-green,
+.p-card-red,
+.p-card-yellow,
+.p-card-purple,
+.p-card-sky { border-top: 1px solid var(--border); }
+
+/* ── Box ─────────────────────────────────────────────────── */
+.p-box { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow-sm); border: 1px solid var(--border); overflow: hidden; margin-bottom: 20px; }
+
+.p-box-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.p-box-header h2 { font-size: .95rem; font-weight: 600; }
+.p-box-body { padding: 18px; }
+
+/* ── Tables ──────────────────────────────────────────────── */
+.p-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+.p-table { width: 100%; border-collapse: collapse; font-size: .875rem; min-width: 480px; }
+.p-table th { background: #1e293b; color: #f1f5f9; padding: 10px 14px; text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+.p-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.p-table tr:last-child td { border-bottom: none; }
+.p-table tr:hover td { background: #f8fafc; }
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 9px 18px; border-radius: 7px; border: none;
+    font-size: .875rem; font-weight: 600; cursor: pointer;
+    transition: all .18s; text-decoration: none; white-space: nowrap;
+    font-family: var(--font);
+}
+.btn-primary { background: #111827; color: #fff; }
+.btn-primary:hover { background: #1f2937; }
+.btn-green   { background: #166534; color: #fff; }
+.btn-green:hover { background: #15803d; }
+.btn-red     { background: #dc2626; color: #fff; }
+.btn-red:hover { background: #b91c1c; }
+.btn-blue    { background: #1e40af; color: #fff; }
+.btn-blue:hover { background: #1d4ed8; }
+.btn-ghost   { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--bg); }
+.btn-sm      { padding: 6px 12px; font-size: .8rem; }
+
+/* Print actions look identical on every page and are always the last
+   control in the page header, so "Print All" is in the same corner
+   wherever you are. Navy matches the printed documents. */
+.btn-print {
+    background: var(--surface); color: #1a3a8f;
+    border: 1.5px solid #1a3a8f; font-weight: 600;
+}
+.btn-print:hover { background: #1a3a8f; color: #fff; }
+
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Forms ───────────────────────────────────────────────── */
+.p-form-grid  { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.p-form-group { display: flex; flex-direction: column; gap: 5px; }
+
+.p-form-group label { font-size: .78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+.p-form-control {
+    padding: 10px 12px; border-radius: 7px; border: 1.5px solid var(--border);
+    font-size: .9rem; font-family: var(--font); color: var(--text);
+    background: var(--surface); transition: border-color .15s; width: 100%;
+}
+.p-form-control:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+
+textarea.p-form-control { resize: vertical; min-height: 80px; }
+
+.p-form-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ── Alerts ──────────────────────────────────────────────── */
+.p-alert { padding: 11px 16px; border-radius: 8px; font-size: .875rem; margin-bottom: 18px; }
+.p-alert-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+.p-alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.p-alert-info    { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+.p-alert-warn    { background: #fffbeb; color: #92400e; border: 1px solid #fbbf24; }
+
+/* ── Badges ──────────────────────────────────────────────── */
+.badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: .72rem; font-weight: 700; letter-spacing: .03em; }
+.badge-green  { background: #dcfce7; color: #166534; }
+.badge-red    { background: #fee2e2; color: #991b1b; }
+.badge-blue   { background: #dbeafe; color: #1e40af; }
+.badge-yellow { background: #fffbeb; color: #92400e; }
+.badge-purple { background: #f3e8ff; color: #7e22ce; }
+
+/* ── Toolbar ─────────────────────────────────────────────── */
+.p-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.p-search { padding: 9px 14px; border-radius: 7px; border: 1.5px solid var(--border); font-size: .875rem; min-width: 180px; font-family: var(--font); }
+.p-search:focus { outline: none; border-color: var(--accent); }
+
+/* ── Signature canvas ────────────────────────────────────── */
+.sig-wrap { border: 2px solid var(--border); border-radius: 10px; background: #fff; touch-action: none; }
+.sig-canvas { display: block; width: 100%; cursor: crosshair; }
+.sig-hint { text-align: center; font-size: .8rem; color: var(--text-muted); margin-top: 8px; }
+
+/* ── Modal ───────────────────────────────────────────────── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); backdrop-filter: blur(3px); z-index: 500; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal-box { background: var(--surface); border-radius: 14px; padding: 26px; width: 100%; max-width: 500px; box-shadow: var(--shadow-md); position: relative; max-height: 90vh; overflow-y: auto; }
+.modal-close { position: absolute; top: 12px; right: 14px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: .78rem; cursor: pointer; color: var(--text-muted); }
+.modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 18px; }
+
+/* ── Hamburger toggle (portal — shown on mobile/tablet) ──── */
+.p-sidebar-toggle {
+    display: none;
+    position: fixed;
+    top: 12px; left: 14px;
+    z-index: 300;
+    background: #0f172a; color: #fff;
+    border: none; border-radius: 8px;
+    width: 42px; height: 42px;
+    font-size: 1.25rem; line-height: 1;
+    cursor: pointer;
+    align-items: center; justify-content: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,.35);
+    transition: background .15s;
+}
+.p-sidebar-toggle:hover { background: #1e293b; }
+
+.p-sidebar-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 99;
+    backdrop-filter: blur(2px);
+}
+.p-sidebar-overlay.open { display: block; }
+
+/* ── Print ───────────────────────────────────────────────── */
+@media print {
+    .p-sidebar, .p-sidebar-toggle, .p-bottom-nav, .no-print { display: none !important; }
+    body::before { display: none !important; }
+    .p-content { margin-left: 0 !important; padding: 16px !important; }
+}
+
+/* ── Responsive — tablet/mobile (hamburger drawer) ────────── */
+@media (max-width: 900px) {
+    .p-sidebar-toggle { display: flex; }
+
+    .p-sidebar {
+        transform: translateX(-100%);
+        transition: transform .25s cubic-bezier(.4, 0, .2, 1);
+        z-index: 100;
+    }
+    .p-sidebar.open { transform: translateX(0); }
+
+    .p-bottom-nav { display: block; }
+
+    /* Sidebar is off-canvas on small screens — center the watermark on the whole page */
+    body::before { left: 0; }
+
+    .p-content {
+        margin-left: 0;
+        padding: 18px 14px;
+        padding-top: 68px;                          /* room for hamburger */
+        padding-bottom: calc(var(--nav-h) + 20px);  /* room for bottom nav */
+    }
+
+    .p-cards     { grid-template-columns: repeat(2, 1fr); }
+    .p-form-grid { grid-template-columns: 1fr; }
+    .p-header h1 { font-size: 1.3rem; }
+}
+
+@media (max-width: 480px) {
+    .p-cards     { grid-template-columns: 1fr 1fr; }
+    .p-header h1 { font-size: 1.2rem; }
+    .p-content   { padding: 14px 10px; padding-top: 62px; padding-bottom: calc(var(--nav-h) + 16px); }
+    .p-box-body  { padding: 12px; }
+    .modal-box   { padding: 18px 12px; }
+    .p-form-grid { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 360px) {
+    .p-cards     { grid-template-columns: 1fr; }
+    .p-content   { padding: 10px 8px; padding-top: 60px; padding-bottom: calc(var(--nav-h) + 12px); }
+    .p-header h1 { font-size: 1.1rem; }
+    .p-bn-item     { font-size: .6rem; min-width: 48px; }
+    .p-bn-icon     { font-size: 1.1rem; }
+    .btn           { padding: 8px 12px; font-size: .83rem; }
+    .btn-sm        { padding: 5px 8px; font-size: .74rem; }
+}

@@ -1,0 +1,52 @@
+/* assets/css/employee.css */
+
+.modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.4);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay.open { display: flex; }
+
+.modal-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 32px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 92vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    position: relative;
+}
+
+.modal-close {
+    position: absolute; top: 16px; right: 16px;
+    background: none; border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 3px 10px;
+    font-size: .78rem; cursor: pointer; color: #6b7280;
+}
+
+.modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; color: #111827; }
+
+/* ── Responsive modals ───────────────────────────────────── */
+@media (max-width: 600px) {
+    .modal-overlay {
+        align-items: flex-end;
+        padding: 0;
+    }
+    .modal-box {
+        border-radius: 16px 16px 0 0;
+        padding: 24px 16px;
+        max-height: 94vh;
+    }
+}
+
+@media (max-width: 480px) {
+    .modal-box { padding: 18px 12px; }
+    /* Collapse any hardcoded 2-column grids inside the modal */
+    .modal-box .form-grid { grid-template-columns: 1fr !important; }
+}

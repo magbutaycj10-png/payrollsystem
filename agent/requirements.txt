@@ -1,0 +1,11 @@
+pyserial>=3.5
+pymysql>=1.1.0
+
+# Only if you use [network] (terminal on LAN, port 4370)
+pyzk>=0.9
+
+# Only if database.driver = postgres
+# psycopg2-binary>=2.9
+
+# Build-time only
+pyinstaller>=6.0

@@ -1,0 +1,76 @@
+/* assets/css/login.css */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    /* same stack as assets/css/style.css so login and dashboard match */
+    --font: 'Segoe UI', system-ui, sans-serif;
+}
+
+body {
+    font-family: var(--font);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+}
+
+.login-wrap {
+    width: 100%;
+    max-width: 380px;
+    padding: 20px;
+}
+
+.login-logo {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.login-logo h1 { color: #fff; font-size: 1.4rem; font-weight: 700; }
+.login-logo p  { color: #94a3b8; font-size: .85rem; margin-top: 4px; }
+
+.login-card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 32px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+}
+
+.login-card h2 { font-size: 1.1rem; font-weight: 700; color: #111827; margin-bottom: 6px; }
+.login-card .sub { color: #6b7280; font-size: .85rem; margin-bottom: 24px; }
+
+.login-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+
+.login-field label {
+    font-size: .8rem; font-weight: 600; color: #374151;
+    text-transform: uppercase; letter-spacing: .04em;
+}
+
+.login-field input {
+    padding: 12px 14px; border-radius: 8px; border: 1.5px solid #e5e7eb;
+    font-size: .95rem; width: 100%; transition: border-color .15s; font-family: inherit;
+}
+
+.login-field input:focus {
+    outline: none; border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+
+.login-btn {
+    width: 100%; padding: 12px;
+    background: #111827; color: #fff;
+    border: none; border-radius: 8px;
+    font-size: .95rem; font-weight: 600;
+    cursor: pointer; transition: background .18s;
+    margin-top: 8px; font-family: inherit;
+}
+
+.login-btn:hover { background: #1f2937; }
+
+.error-msg {
+    background: #fee2e2; color: #991b1b;
+    border: 1px solid #fca5a5;
+    padding: 10px 14px; border-radius: 7px;
+    font-size: .875rem; margin-bottom: 16px;
+}

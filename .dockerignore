@@ -1,0 +1,13 @@
+php/
+samples/
+info/
+backups/
+agent/
+.git/
+*.bat
+*.vbs
+*.log
+*.pem
+*.env
+php.ini
+SETUP_README.txt
