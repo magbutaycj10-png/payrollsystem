@@ -68,7 +68,7 @@ function toHours(v) {
     if (v instanceof Date) {
         return +(v.getHours() + v.getMinutes() / 60 + v.getSeconds() / 3600).toFixed(4);
     }
-    if (typeof v === 'number') return v;
+    if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
 
     const s = String(v).trim();
     if (!s) return 0;
@@ -79,7 +79,19 @@ function toHours(v) {
         const mag = (+m[2]) + (+m[3]) / 60 + (m[4] ? (+m[4]) / 3600 : 0);
         return +((m[1] ? -mag : mag).toFixed(4));
     }
-    return num(s);
+    /* A plain decimal: "8", "8.5", ".5", "-1.25" (and "1,160" with a thousands comma) */
+    if (/^-?(\d+\.?\d*|\.\d+)$/.test(s)) return parseFloat(s);
+    if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) return parseFloat(s.replace(/,/g, ''));
+    /* Text without a single digit ("-", "N/A", "ABSENT") is just "no hours" */
+    if (!/\d/.test(s)) return 0;
+    /* Digits that are neither a duration nor a decimal: "08:60", "8h30m", "1,5", "8:5:3:1". These are NaN — unreadable —
+       never a made-up number. They used to go through num(), which strips the punctuation: "08:60" became 860 hours. */
+    return NaN;
+}
+
+/* Is every value a usable duration? (NaN means "could not be read") */
+function hoursOk(...vals) {
+    return vals.every(x => x === null || !Number.isNaN(x));
 }
 
 /*
@@ -439,7 +451,7 @@ function todayIso() {
 function looksLikeOneDay() {
     const c = getMappedCols();
     if (c.hours === null || !parsedData.length) return false;
-    return parsedData.every(r => toHours(r[c.hours]) <= 24);
+    return parsedData.every(r => { const h = toHours(r[c.hours]); return !Number.isNaN(h) && h <= 24; });
 }
 
 function setOneDay(date) {
@@ -495,7 +507,7 @@ function renderPreview() {
             let v = row[i];
             if (l === 'Name' && !String(v ?? '').trim() && idCol >= 0) v = 'Device ID ' + row[idCol];
             if (l === 'Date') v = toDate(v);
-            if (['Hours', 'Overtime', 'Late'].includes(l)) v = toHours(v).toFixed(2);
+            if (['Hours', 'Overtime', 'Late'].includes(l)) { const h = toHours(v); v = Number.isNaN(h) ? '⚠ unreadable: ' + String(v) : h.toFixed(2); }
             return `<td>${esc(v instanceof Date ? toDate(v) : v)}</td>`;
         }).join('') + '</tr>').join('');
     document.getElementById('previewNote').textContent =
@@ -614,9 +626,17 @@ async function saveDaily(p, c, nameCol, idCol, links) {
         /* a day the timesheet marks OFF: a day off, not an absence */
         day_off:        remarkCol >= 0 && OFF_REMARKS.includes(normHeader(row[remarkCol])),
     })).filter(r => r.emp_name && r.att_date);
-    const rows = all.filter(r => r.att_date >= p.start && r.att_date <= p.end);
+    /* A cell that could not be read ("08:60") is never sent on as a number — a day sent without hours is paid as a
+       full duty day. Those days are held back and named. */
+    const unreadable = all.filter(r => !hoursOk(r.hours_worked, r.overtime_hours, r.late_hours, r.undertime_hours));
+    const rows = all.filter(r => hoursOk(r.hours_worked, r.overtime_hours, r.late_hours, r.undertime_hours))
+                    .filter(r => r.att_date >= p.start && r.att_date <= p.end);
+    const unreadableNote = unreadable.length
+        ? `${unreadable.length} day record(s) were NOT saved because their hours could not be read (e.g. ${unreadable[0].emp_name}, ${unreadable[0].att_date}). Fix them in the file and upload again.`
+        : '';
     if (!rows.length) {
-        showStatus(`None of the file's days fall inside ${p.label}. Choose the pay period that matches the file's dates.`, 'error');
+        showStatus(unreadable.length ? unreadableNote
+            : `None of the file's days fall inside ${p.label}. Choose the pay period that matches the file's dates.`, 'error');
         return;
     }
 
@@ -630,7 +650,13 @@ async function saveDaily(p, c, nameCol, idCol, links) {
 
     const skipped = (data.unmatched || []).concat(data.out_of_scope || []);
     const notes = [];
-    if (all.length > rows.length) notes.push(`${all.length - rows.length} day record(s) outside the pay period were skipped.`);
+    if (unreadableNote) notes.push(unreadableNote);
+    if (data.invalid_count) {
+        const f = data.invalid[0];
+        notes.push(`${data.invalid_count} day record(s) were NOT saved because their hours cannot be right (e.g. ${f.emp_name}, ${f.att_date}: ${f.why}). Fix them in the file and upload again.`);
+    }
+    const outside = all.length - unreadable.length - rows.length;
+    if (outside > 0) notes.push(`${outside} day record(s) outside the pay period were skipped.`);
     Object.entries(data.elsewhere || {}).forEach(([label, n]) =>
         notes.push(`${n} day record(s) are already saved in ${label} and were not counted again.`));
     if (skipped.length) notes.push(`Not saved — no matching employee: ${skipped.slice(0, 6).join(', ')}${skipped.length > 6 ? ' and ' + (skipped.length - 6) + ' more' : ''}. Check the spelling in Employee Management.`);
@@ -649,9 +675,17 @@ async function saveTotals(p, c, nameCol, idCol, links, replaceDays = false) {
     })).filter(r => r.emp_name);
     if (!lines.length) { showStatus('No rows with an employee name. Check the Column matching.', 'error'); return; }
 
+    /* A line whose hours could not be read ("08:60") is held back and named, never sent on as a number */
+    const unreadableLines = lines.filter(r => !hoursOk(r.hours_worked, r.overtime_hours, r.late_hours));
+    const readableLines   = lines.filter(r => hoursOk(r.hours_worked, r.overtime_hours, r.late_hours));
+    const unreadableNote  = unreadableLines.length
+        ? `${unreadableLines.length} line(s) were NOT saved because their hours could not be read (${unreadableLines.slice(0, 5).map(r => r.emp_name).join(', ')}${unreadableLines.length > 5 ? ' …' : ''}). Fix them in the file and upload again.`
+        : '';
+    if (!readableLines.length) { showStatus(unreadableNote, 'error'); return; }
+
     /* One payroll line per employee: a person on several lines is added up */
     const byName = {};
-    lines.forEach(r => {
+    readableLines.forEach(r => {
         const k = nameKeyJs(r.emp_name);
         if (!byName[k]) { byName[k] = Object.assign({}, r); return; }
         ['hours_worked', 'overtime_hours', 'late_hours', 'gross_pay', 'withholding_tax']
@@ -682,7 +716,13 @@ Replace anyway?`)) {
     }
     if (!data.success) { showStatus('Error: ' + data.error, 'error'); return; }
 
-    showResult(p, `${data.count} employee(s) saved to ${p.label}.`, []);
+    const notes = [];
+    if (unreadableNote) notes.push(unreadableNote);
+    if (data.invalid && data.invalid.length) {
+        const f = data.invalid[0];
+        notes.push(`${data.invalid.length} line(s) were NOT saved because their hours cannot be right (e.g. ${f.emp_name}: ${f.why}). Fix them in the file and upload again.`);
+    }
+    showResult(p, `${data.count} employee(s) saved to ${p.label}.`, notes);
     if (data.mismatches && data.mismatches.length) showMismatchModal(data.mismatches, data.count);
 }
 

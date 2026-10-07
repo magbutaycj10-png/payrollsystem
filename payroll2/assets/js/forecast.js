@@ -113,20 +113,50 @@ class RegressionTree {
 }
 
 /*
+ * A small seeded random-number generator (mulberry32). The forest used Math.random(), so the same payroll
+ * history gave a different budget on every page load — an auditor could never reproduce the number. Seeded
+ * from the data itself (see seedFrom), the same history now always gives the same forecast.
+ */
+function makeRng(seed) {
+    let a = seed >>> 0;
+    return function () {
+        a = (a + 0x6D2B79F5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+/* A 32-bit hash of the numbers the forest is trained on */
+function seedFrom(X, y) {
+    let h = 2166136261;
+    const feed = v => { const s = String(Math.round(v * 100)); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } };
+    X.forEach(row => row.forEach(feed));
+    y.forEach(feed);
+    return h >>> 0;
+}
+
+/*
  * RandomForestRegressor
  * Trains nTrees independent RegressionTrees, each on a bootstrap sample
  * (random rows with replacement) and a random column subset.
  * Final prediction is the average of all tree outputs.
+ * Reproducible: the random choices come from a generator seeded with `seed`
+ * (default: a hash of the training data).
  */
 class RandomForestRegressor {
-    constructor(nTrees = 100, maxDepth = 4) {
+    constructor(nTrees = 100, maxDepth = 4, seed = null) {
         this.nTrees   = nTrees;
         this.maxDepth = maxDepth;
+        this.seed     = seed;
         this.trees    = [];
+        this.rng      = Math.random;
     }
 
     fit(X, y) {
         this.trees = [];
+        this.rng   = makeRng(this.seed !== null ? this.seed : seedFrom(X, y));
         const n       = X.length;
         const nFeat   = X[0].length;
         /* sqrt(nFeatures) is the standard RF column subset size */
@@ -134,7 +164,7 @@ class RandomForestRegressor {
 
         for (let t = 0; t < this.nTrees; t++) {
             /* Bootstrap: sample n rows with replacement */
-            const idx   = Array.from({ length: n }, () => Math.floor(Math.random() * n));
+            const idx   = Array.from({ length: n }, () => Math.floor(this.rng() * n));
             const bootX = idx.map(i => X[i]);
             const bootY = idx.map(i => y[i]);
 
@@ -159,7 +189,7 @@ class RandomForestRegressor {
     _shuffle(arr) {
         const a = [...arr];
         for (let i = a.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = Math.floor(this.rng() * (i + 1));
             [a[i], a[j]] = [a[j], a[i]];
         }
         return a;
@@ -279,13 +309,13 @@ function arimaForecast(series, steps = 1, p = 2, d = 1) {
     const diffForecast = [];
 
     for (let s = 0; s < steps; s++) {
-        /* Long-run mean adjustment term */
-        let next = mu * (1 - coeffs.reduce((a, b) => a + b, 0));
-        /* AR contribution from each lagged differenced value */
+        /* d_t = mu + phi1*(d_{t-1} - mu) + phi2*(d_{t-2} - mu)
+           The average change (mu) is counted ONCE. It used to be added a second time through a separate
+           "long-run mean" term, which doubled the drift: a payroll rising ₱10k a period was forecast to rise ₱20k. */
+        let next = mu;
         for (let i = 0; i < coeffs.length; i++) {
             next += coeffs[i] * (history[history.length - 1 - i] - mu);
         }
-        next += mu;
         diffForecast.push(next);
         history.push(next); /* feed forecast back for multi-step prediction */
     }
@@ -419,7 +449,7 @@ function buildFeatures(record, prevNet) {
  * kinsena on a semi-monthly calendar, the next month on a monthly one.
  * We assume employee count and avg gross stay close to the last known values.
  */
-function buildNextFeatures(history) {
+function buildNextFeatures(history, field = 'total_net') {
     const last = history[history.length - 1];
     const next = nextPeriodOf(last);
 
@@ -429,8 +459,28 @@ function buildNextFeatures(history) {
         next.half,
         last.employee_count,                            /* assume same headcount */
         last.avg_gross,                                 /* assume same pay rates */
-        last.total_net,                                 /* previous net as momentum */
+        last[field],                                    /* previous period's total as momentum */
     ];
+}
+
+/*
+ * randomForestForecast()
+ * The forest is taught the CHANGE from one period to the next, and the forecast is the last
+ * actual value plus the change it predicts. A tree can only answer with numbers it has seen, so a
+ * forest that predicts the LEVEL can never forecast above the highest payroll on record — a payroll
+ * rising ₱10k a period would be "forecast" to stop rising. Changes can repeat, levels cannot.
+ * `field` is the series being forecast: 'total_labor_cost' (default for budgeting) or 'total_net'.
+ */
+function randomForestForecast(history, field = 'total_net') {
+    const level = history.map(r => r[field]);
+    const X = [], change = [];
+    for (let i = 1; i < history.length; i++) {
+        X.push(buildFeatures(history[i], level[i - 1]));
+        change.push(level[i] - level[i - 1]);
+    }
+    const rf = new RandomForestRegressor(120, 4);
+    rf.fit(X, change);
+    return level[level.length - 1] + rf.predict(buildNextFeatures(history, field));
 }
 
 /* ============================================================
@@ -476,46 +526,65 @@ async function runForecast() {
         return;
     }
 
-    /* Extract the net pay series for ARIMA */
-    const netSeries = history.map(r => r.total_net);
+    /* What is forecast: the company's LABOR COST (pay + bonus + employer SSS / EC / PhilHealth / Pag-IBIG — what a
+       budget has to cover) or the employees' take-home net pay. Chosen on the page; labor cost is the default. */
+    const field  = pickTarget(history);
+    const series = history.map(r => r[field]);
 
-    /* ── Train ARIMA ── */
-    const arimaResult = arimaForecast(netSeries, 1, 2, 1);
+    /* ── ARIMA ── */
+    const arimaResult = arimaForecast(series, 1, 2, 1);
     const arimaPred   = arimaResult ? arimaResult[0] : null;
 
-    /* ── Train Random Forest ── */
-    /* Build training pairs: features -> target (total_net) */
-    const X = [], y = [];
-    for (let i = 0; i < history.length; i++) {
-        const prevNet = i > 0 ? history[i - 1].total_net : history[i].total_net;
-        X.push(buildFeatures(history[i], prevNet));
-        y.push(history[i].total_net);
-    }
-
-    const rf = new RandomForestRegressor(120, 4);
-    rf.fit(X, y);
-
-    const nextFeatures = buildNextFeatures(history);
-    const rfPred       = rf.predict(nextFeatures);
+    /* ── Random Forest: seeded (same data, same answer) and trained on period-to-period change ── */
+    const rfPred = randomForestForecast(history, field);
 
     /* ── Turning points ── */
-    const turningPoints = detectTurningPoints(netSeries);
-    const nextLabel     = classifyNextPeriod(netSeries, (rfPred + (arimaPred || rfPred)) / 2);
+    const turningPoints = detectTurningPoints(series);
+    const nextLabel     = classifyNextPeriod(series, (rfPred + (arimaPred || rfPred)) / 2);
 
     /* ── Render everything ── */
     showStatus('done');
-    renderCards(rfPred, arimaPred, history, nextLabel);
-    renderChart(history, rfPred, arimaPred);
-    renderTurningPoints(turningPoints, history, nextLabel, rfPred, arimaPred);
+    renderTargetLabels(field);
+    renderCards(rfPred, arimaPred, history, nextLabel, field);
+    renderChart(history, rfPred, arimaPred, field);
+    renderTurningPoints(turningPoints, history, nextLabel, rfPred, arimaPred, field);
     renderTable(history);
+}
+
+/* The series being forecast, from the page's selector (default: labor cost, when the API provides it) */
+const TARGETS = {
+    total_labor_cost: { name: 'Total labor cost', note: 'pay + bonus + the employer\'s SSS, EC, PhilHealth and Pag-IBIG' },
+    total_net:        { name: 'Net pay',          note: 'what employees take home' },
+};
+function pickTarget(history) {
+    const sel  = document.getElementById('fcTarget');
+    const want = sel && sel.value ? sel.value : 'total_labor_cost';
+    const ok   = f => history.every(r => typeof r[f] === 'number' && r[f] > 0);
+    if (TARGETS[want] && ok(want)) return want;
+    return ok('total_labor_cost') && want !== 'total_net' ? 'total_labor_cost' : 'total_net';
 }
 
 /* ============================================================
    SECTION 6 — Rendering helpers
    ============================================================ */
 
-const fmt  = n  => '₱' + parseFloat(n).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+/* Money is always shown to the centavo (two decimals) — a forecast is a float with many — and a negative amount keeps its sign in front */
+const fmt  = n  => {
+    const v = parseFloat(n);
+    return (v < 0 ? '−' : '') + '₱' + Math.abs(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+const fmtSigned = n => (n >= 0 ? '+' : '') + fmt(n);
 const pct  = (a, b) => b ? (((a - b) / Math.abs(b)) * 100).toFixed(1) + '%' : '—';
+
+/* Put the name of the series being forecast into the page's headings */
+function renderTargetLabels(field) {
+    const t = TARGETS[field] || TARGETS.total_net;
+    const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+    set('cardConsensusLabel', 'Consensus Forecast — ' + (typeof FC_NOUN !== 'undefined' ? FC_NOUN : 'Next Period') + ' ' + t.name);
+    set('chartTitle', 'Historical ' + t.name + ' + Forecast');
+    set('thTpValue', t.name);
+    set('fcTargetNote', t.name + ': ' + t.note);
+}
 
 function showStatus(state, msg = '') {
     document.getElementById('fcStatus').style.display     = state === 'loading' ? 'block' : 'none';
@@ -524,15 +593,15 @@ function showStatus(state, msg = '') {
     if (state === 'error') document.getElementById('fcError').textContent = msg;
 }
 
-function renderCards(rfPred, arimaPred, history, nextLabel) {
-    const last      = history[history.length - 1].total_net;
+function renderCards(rfPred, arimaPred, history, nextLabel, field = 'total_net') {
+    const last      = history[history.length - 1][field];
     const consensus = arimaPred ? (rfPred + arimaPred) / 2 : rfPred;
 
     /* Consensus card */
     document.getElementById('cardConsensus').textContent = fmt(consensus);
     const diffEl = document.getElementById('cardDiff');
     const diff   = consensus - last;
-    diffEl.textContent = (diff >= 0 ? '+' : '') + fmt(diff) + '  (' + pct(consensus, last) + ')';
+    diffEl.textContent = fmtSigned(diff) + '  (' + pct(consensus, last) + ')';
     diffEl.className   = 'card-sub ' + (diff >= 0 ? 'text-green' : 'text-red');
 
     /* RF card */
@@ -569,9 +638,12 @@ function renderCards(rfPred, arimaPred, history, nextLabel) {
     }
 }
 
-function renderChart(history, rfPred, arimaPred) {
+let fcChart = null;   /* the drawn chart, so a change of target replaces it instead of stacking a second one */
+
+function renderChart(history, rfPred, arimaPred, field = 'total_net') {
     const labels     = history.map(r => r.label);
-    const actuals    = history.map(r => r.total_net);
+    const actuals    = history.map(r => r[field]);
+    const seriesName = (TARGETS[field] || TARGETS.total_net).name;
     const lastLabel  = history[history.length - 1];
 
     /* Label for the next payroll run — next kinsena or next month, per the calendar */
@@ -589,13 +661,14 @@ function renderChart(history, rfPred, arimaPred) {
         : null;
 
     const ctx = document.getElementById('forecastChart').getContext('2d');
-    new Chart(ctx, {
+    if (fcChart) fcChart.destroy();
+    fcChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: allLabels,
             datasets: [
                 {
-                    label:           'Actual Net Pay',
+                    label:           'Actual ' + seriesName,
                     data:            actualLine,
                     borderColor:     '#3b82f6',
                     backgroundColor: 'rgba(59,130,246,0.08)',
@@ -657,7 +730,7 @@ function renderChart(history, rfPred, arimaPred) {
                     ticks: {
                         callback: v => '₱' + (v / 1000).toFixed(0) + 'k',
                     },
-                    title: { display: true, text: 'Total Net Pay (₱)' }
+                    title: { display: true, text: seriesName + ' (₱)' }
                 },
                 x: { title: { display: true, text: 'Payroll Period' } }
             }
@@ -665,7 +738,7 @@ function renderChart(history, rfPred, arimaPred) {
     });
 }
 
-function renderTurningPoints(points, history, nextLabel, rfPred, arimaPred) {
+function renderTurningPoints(points, history, nextLabel, rfPred, arimaPred, field = 'total_net') {
     const tbody = document.getElementById('tpBody');
     tbody.innerHTML = '';
 
@@ -726,6 +799,8 @@ function renderTable(history) {
             <td>${r.total_bonus > 0 ? '<span style="color:#16a34a;">' + fmt(r.total_bonus) + '</span>' : '—'}</td>
             <td>${r.total_deductions > 0 ? '<span style="color:#dc2626;">' + fmt(r.total_deductions) + '</span>' : '—'}</td>
             <td><strong>${fmt(r.total_net)}</strong></td>
+            <td title="The company's share of SSS, Employees' Compensation, PhilHealth and Pag-IBIG">${fmt(r.total_employer_share || 0)}</td>
+            <td><strong>${fmt(r.total_labor_cost || (r.total_gross + r.total_bonus))}</strong></td>
             <td>
                 <button class="btn btn-ghost btn-sm"
                         onclick="event.stopPropagation(); openDetail(${r.id}, '${safeLabel}')">
@@ -744,11 +819,13 @@ function exportCSV(history) {
     if (!history || !history.length) { alert('No data to export yet.'); return; }
 
     const header = ['period_index','month','year','label','employee_count',
-                    'total_gross','total_net','total_bonus','total_deductions','avg_gross'];
+                    'total_gross','total_net','total_bonus','total_deductions','avg_gross',
+                    'total_employer_share','total_labor_cost'];
     const rows   = history.map(r =>
         [r.period_index, r.month, r.year, `"${r.label}"`,
          r.employee_count, r.total_gross.toFixed(2), r.total_net.toFixed(2),
-         r.total_bonus.toFixed(2), r.total_deductions.toFixed(2), r.avg_gross.toFixed(2)].join(',')
+         r.total_bonus.toFixed(2), r.total_deductions.toFixed(2), r.avg_gross.toFixed(2),
+         (r.total_employer_share || 0).toFixed(2), (r.total_labor_cost || 0).toFixed(2)].join(',')
     );
     const csv  = [header.join(','), ...rows].join('\n');
     const a    = document.createElement('a');

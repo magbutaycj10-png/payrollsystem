@@ -507,6 +507,83 @@ function jsonResponse(array $data, int $code = 200): void {
  * When an agency changes a rate, edit it here.
  * Last checked October 2026 — unchanged for 2026 by all four agencies.
  */
+/* Marks this copy of the app as carrying the 2026-10-07 payroll audit fixes (tests/AUDIT_FINDINGS.md). No schema changes. */
+const PAYROLL_AUDIT_FIXES = '2026-10-07';
+
+/* Tax-exempt yearly ceiling for 13th-month pay and other benefits (TRAIN law, Sec. 32(B)(7)(e)) */
+const BIR_EXEMPT_BENEFITS = 90000.0;
+
+/* Sanity limits for what a single day (or a pay period) may hold — a typo must not become pay */
+const MAX_DAY_HOURS    = 24.0;    /* worked in one day */
+const MAX_DAY_OVERTIME = 16.0;    /* overtime in one day */
+const MAX_RATE_PESOS   = 100000.0;/* an hourly overtime / late rate, or a daily salary rate */
+const MAX_SALARY_PESOS = 10000000.0;
+
+/* "8", "8.5", " 8 " → a finite float; anything else (text, "1e999", "08:60", "", null) → null */
+function numberOrNull($v): ?float {
+    if (is_int($v) || is_float($v)) return is_finite((float)$v) ? (float)$v : null;
+    if (!is_string($v)) return null;
+    $v = trim($v);
+    return preg_match('/^-?\d+(\.\d+)?$|^-?\.\d+$/', $v) ? (float)$v : null;
+}
+
+/* 8 → "8", 8.5 → "8.5", 80.25 → "80.25" (for the messages below) */
+function plainNum(float $n): string {
+    return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+}
+
+/*
+ * Is this one day's attendance possible? Returns why not, or null when it is fine.
+ * Hours, overtime, late and undertime must be real, non-negative numbers; a day holds at most 24 hours; overtime past
+ * MAX_DAY_OVERTIME is a typing error. Before these limits a day of 80 h + 30 OT h was paid (₱1,830 for one day), a device
+ * report with 80 h became 72 h of overtime, and a negative figure was quietly turned into 0 (a day that looked absent).
+ * $hours is null for "a full duty day" (the file had no hours column).
+ */
+function dayHoursProblem($hours, $ot, $late, $under = null): ?string {
+    $v = [];
+    foreach (['hours' => $hours, 'overtime' => $ot, 'late hours' => $late, 'undertime' => $under] as $what => $raw) {
+        if ($raw === null || $raw === '') { $v[$what] = 0.0; continue; }
+        $n = numberOrNull($raw);
+        if ($n === null) return "$what is not a number";
+        if ($n < 0)      return "$what is negative (" . plainNum($n) . ')';
+        $v[$what] = $n;
+    }
+    if ($v['hours'] > MAX_DAY_HOURS)       return plainNum($v['hours']) . ' hours worked in one day';
+    if ($v['overtime'] > MAX_DAY_OVERTIME) return plainNum($v['overtime']) . ' overtime hours in one day';
+    if ($v['late hours'] > MAX_DAY_HOURS)  return plainNum($v['late hours']) . ' late hours in one day';
+    if ($v['undertime'] > MAX_DAY_HOURS)   return plainNum($v['undertime']) . ' undertime hours in one day';
+    if ($v['hours'] + $v['overtime'] > MAX_DAY_HOURS) {
+        return plainNum($v['hours']) . ' h + ' . plainNum($v['overtime']) . ' h overtime is more than 24 hours in one day';
+    }
+    return null;
+}
+
+/* The same for a whole pay period's totals (a totals file): at most 24 h — and MAX_DAY_OVERTIME h of overtime — for every calendar day of the period */
+function periodHoursProblem($hours, $ot, $late, int $days): ?string {
+    $days = max(1, $days);
+    $v = [];
+    foreach (['hours' => $hours, 'overtime' => $ot, 'late hours' => $late] as $what => $raw) {
+        if ($raw === null || $raw === '') { $v[$what] = 0.0; continue; }
+        $n = numberOrNull($raw);
+        if ($n === null) return "$what is not a number";
+        if ($n < 0)      return "$what is negative (" . plainNum($n) . ')';
+        $v[$what] = $n;
+    }
+    if ($v['hours'] > MAX_DAY_HOURS * $days)       return plainNum($v['hours']) . " hours in a $days-day period";
+    if ($v['overtime'] > MAX_DAY_OVERTIME * $days) return plainNum($v['overtime']) . " overtime hours in a $days-day period";
+    if ($v['late hours'] > MAX_DAY_HOURS * $days)  return plainNum($v['late hours']) . " late hours in a $days-day period";
+    return null;
+}
+
+/* A peso setting or rate: a real number from 0 up to $max. Returns why not, or null. */
+function pesoProblem(string $what, $raw, float $max): ?string {
+    $n = numberOrNull($raw);
+    if ($n === null) return "$what must be a number";
+    if ($n < 0)      return "$what cannot be negative";
+    if ($n > $max)   return "$what cannot be more than ₱" . number_format($max, 2);
+    return null;
+}
+
 const PH_RULES = [
     'sss' => [
         'name'     => 'SSS',
@@ -591,16 +668,22 @@ function pagibigMonthly(float $monthlyPay): float {
  * from the Annex E table of that period: 'daily', 'weekly', 'semi', 'monthly'.
  * Taxable = pay minus the employee's own SSS, PhilHealth and Pag-IBIG,
  * which are non-taxable — computePayLine() takes them off before calling this.
+ *
+ * Worked in WHOLE CENTAVOS: the excess over the bracket is a difference of two
+ * floats, and that subtraction leaves ~1e-13 of noise, so a tax of exactly half a
+ * centavo (₱0.30 × 15% = ₱0.045) could round down to ₱0.04. As integers it is
+ * exact, and a half centavo always rounds up like every other payslip figure.
  */
 function birTax(float $taxable, string $table = 'monthly'): float {
+    $cents = (int)round($taxable * 100);
     foreach (PH_RULES['bir']['tables'][$table] as [$over, $base, $rate]) {
-        if ($taxable > $over) return round($base + ($taxable - $over) * $rate, 2);
+        $overC = (int)round($over * 100);
+        if ($cents > $overC) {
+            $excess = ($cents - $overC) * (int)round($rate * 100);      /* centavos × percent */
+            return ((int)round($base * 100) + intdiv($excess + 50, 100)) / 100;
+        }
     }
     return 0.0;
-}
-
-function birMonthlyTax(float $taxable): float {
-    return birTax($taxable, 'monthly');
 }
 
 /*
@@ -819,13 +902,16 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
     $under     = max(0.0, (float)($abs['undertime'] ?? 0));
     $absentDed = 0.0;
     /* late is charged on its own only without day-by-day records (see $perDay) */
-    $lateDeduction = $perDay ? 0.0 : $late * $ctx['late_rate'];
+    $lateDeduction = $perDay ? 0.0 : round($late * $ctx['late_rate'], 2);
 
+    /* what one duty hour is worth, in centavos × denominator (kept as integers: Labor Code overtime below) */
     if ($type === 'daily') {
         /* Daily rate × days worked, a day being the employee's duty hours.
            Undertime is already out of $paidHours; its cost is shown, not taken again. */
         $basic   = round($rate * $paidHours / $dayHours, 2);
         $underDed = round($rate * $under / $dayHours, 2);
+        $payCents = (int)round($rate * 100);                       /* a day's pay … */
+        $payDen   = 1;                                             /* … on one day */
     } else {
         /* Salaried, monthly or kinsenas: the slice of the month this run covers,
            less one day's rate (the month's pay over its working days) per absent
@@ -835,25 +921,19 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
         $absentDed = round((float)($abs['absent'] ?? 0) * $dayRate, 2);
         $underDed  = round($under * $dayRate / $dayHours, 2);
         $basic     = max(0.0, round($monthly * $frac, 2) - $absentDed - $underDed);
+        $payCents  = (int)round($monthly * 100);                   /* a month's pay … */
+        $payDen    = $workDays;                                    /* … over its working days */
     }
 
-    $otLate = round($ot * $ctx['overtime_rate'] - $lateDeduction, 2);
+    $otPay  = overtimePay($ot, $payCents, $payDen, $dayHours, $ctx);
+    $otLate = round($otPay - $lateDeduction, 2);
     $gross  = round($basic + $otLate, 2);
 
     $c = contributionBreakdown($emp, $basic, $gross, $ctx);
     ['sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag] = $c['ee'];
     $contrib = $sss + $ph + $pag;
 
-    /* Withholding tax on taxable pay: gross minus the employee's own
-       contributions, which the law exempts */
-    $taxable = max(0.0, $gross - $contrib);
-    if ($ctx['final']) {
-        $p     = $c['earlier'];
-        $month = max(0.0, $p['g'] - $p['sss'] - $p['philhealth'] - $p['pagibig']) + $taxable;
-        $tax   = round(max(0.0, birTax($month, 'monthly') - $p['tax']), 2);
-    } else {
-        $tax   = birTax($taxable, $ctx['tax_table']);
-    }
+    [$tax, $taxable] = settleWithholdingTax($gross, $c, $ctx);
 
     $net = round($gross - ($tax + $contrib), 2);
 
@@ -861,6 +941,47 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
             'sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag, 'net' => $net,
             'absent_deduction' => $absentDed, 'undertime_hours' => round($under, 2),
             'undertime_deduction' => $underDed, 'taxable' => round($taxable, 2)];
+}
+
+/*
+ * Overtime pay for $ot hours, to the centavo.
+ *   flat        every overtime hour pays Settings' overtime rate (the pharmacy's own sheets: ₱45)
+ *   labor_code  the employee's hourly rate × the Settings multiplier (1.25 = Labor Code Art. 87, an ordinary day).
+ *               The hourly rate is a day's pay ÷ the duty hours; a salaried employee's day's pay is the month's pay ÷
+ *               working days. Worked in integers so a half centavo always rounds up.
+ * $payCents ÷ $payDen is the pay of one duty day, in centavos.
+ */
+function overtimePay(float $ot, int $payCents, int $payDen, float $dayHours, array $ctx): float {
+    if ($ot <= 0) return 0.0;
+    if (($ctx['ot_method'] ?? 'flat') !== 'labor_code') return round($ot * $ctx['overtime_rate'], 2);
+    $hh   = (int)round($ot * 100);                       /* hundredths of an hour */
+    $dayH = (int)round($dayHours * 100);
+    $mult = (int)round(($ctx['ot_multiplier'] ?? 1.25) * 100);
+    $num  = $hh * $payCents * $mult;
+    $den  = $dayH * 100 * max(1, $payDen);
+    return intdiv(2 * $num + $den, 2 * $den) / 100;
+}
+
+/*
+ * Withholding tax of one pay run: [tax, taxable pay].
+ *   taxable pay   gross minus the employee's own SSS / PhilHealth / Pag-IBIG (the law exempts them)
+ *   not the month's last run   the run's own BIR table (semi-monthly, weekly)
+ *   the month's last run       the monthly table on the WHOLE month, minus what the earlier runs withheld. If they
+ *                              withheld more than the month owes (a big first half, a small second) the difference
+ *                              comes back as a NEGATIVE tax — a refund — so the month always ends exact.
+ * $c is contributionBreakdown()'s result for this run.
+ */
+function settleWithholdingTax(float $gross, array $c, array $ctx): array {
+    $contrib = $c['ee']['sss'] + $c['ee']['philhealth'] + $c['ee']['pagibig'];
+    $taxable = max(0.0, $gross - $contrib);
+    if ($ctx['final']) {
+        $p     = $c['earlier'];
+        $month = max(0.0, $p['g'] - $p['sss'] - $p['philhealth'] - $p['pagibig']) + $taxable;
+        $tax   = round(birTax($month, 'monthly') - $p['tax'], 2);
+    } else {
+        $tax   = birTax($taxable, $ctx['tax_table']);
+    }
+    return [$tax, $taxable];
 }
 
 /* employees.rest_days ("6,7") -> [6, 7]; ISO weekdays, 1 = Monday … 7 = Sunday */
@@ -1035,6 +1156,10 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
 
     return [
         'overtime_rate'    => (float)getSetting('overtime_rate', '150'),
+        /* how overtime is paid: 'flat' = Settings' peso rate for everybody (the default, as the pharmacy's sheets do);
+           'labor_code' = the employee's own hourly rate × ot_multiplier (1.25 on an ordinary day, Labor Code Art. 87) */
+        'ot_method'        => getSetting('overtime_method', 'flat') === 'labor_code' ? 'labor_code' : 'flat',
+        'ot_multiplier'    => min(3.0, max(1.0, (float)getSetting('overtime_multiplier', '1.25'))),
         'late_rate'        => (float)getSetting('late_rate', '80'),
         'period_type'      => $type,
         'fraction'         => periodFraction($type),
@@ -1092,21 +1217,40 @@ function monthlyEquivalent(string $salaryType, float $baseSalary, int $workingDa
     };
 }
 
+/*
+ * Labor Code Art. 87: overtime on an ordinary working day is paid at the hourly rate PLUS at least 25% of it.
+ * Under the default 'flat' method every employee gets Settings' one peso rate per overtime hour, which for a
+ * ₱480 day (₱60/h) is below the legal ₱75/h. This lists the active employees the flat rate underpays:
+ *   [ ['emp_id', 'full_name', 'legal' => ₱/h the law requires, 'paid' => ₱/h the flat rate pays, 'gap' => ₱/h short], … ]
+ * Empty when overtime is paid by the Labor Code method, or when the flat rate is high enough for everyone.
+ * (Rest-day, holiday and night-shift premiums are higher still — they are not modelled; see tests/AUDIT_FINDINGS.md D-14.)
+ */
+function overtimeShortfalls(PDO $db): array {
+    if (getSetting('overtime_method', 'flat') === 'labor_code') return [];
+    $flat = (float)getSetting('overtime_rate', '150');
+    $std  = max(1.0, (float)getSetting('standard_hours', '8'));
+    $out  = [];
+    foreach ($db->query("SELECT * FROM employees WHERE status = 'Active' ORDER BY full_name")->fetchAll() as $row) {
+        $e = payEmployee($row);
+        if ($e['base_salary'] <= 0) continue;
+        $workDays = max(1, workingDaysInMonth(date('Y-m-01'), restDayList($e['rest_days'])));
+        $dayRate  = monthlyEquivalent($e['salary_type'], $e['base_salary'], $workDays) / $workDays;
+        $hours    = $e['hours_per_day'] !== null && $e['hours_per_day'] > 0 ? $e['hours_per_day'] : $std;
+        $legal    = round($dayRate / $hours * 1.25, 2);
+        if ($legal > $flat + 0.004) {
+            $out[] = ['emp_id' => $e['emp_id'], 'full_name' => $e['full_name'], 'legal' => $legal, 'paid' => round($flat, 2),
+                      'gap' => round($legal - $flat, 2)];
+        }
+    }
+    return $out;
+}
+
 /* How a salary type is written on screen. */
 function salaryTypeLabel(string $salaryType): string {
     return match ($salaryType) {
         'kinsenas' => 'Kinsenas',
         'daily'    => 'Daily',
         default    => 'Monthly',
-    };
-}
-
-/* The unit a base_salary figure is quoted in, for form hints. */
-function salaryRateUnit(string $salaryType): string {
-    return match ($salaryType) {
-        'kinsenas' => 'per kinsena',
-        'daily'    => 'per day',
-        default    => 'per month',
     };
 }
 
@@ -1365,14 +1509,20 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     $payRows = [];
     foreach (array_keys($lines) as $id) {
         $emp    = $emps[$id];
-        $absent = $leave = $off = 0;
+        $absent = $leave = $off = $prehire = 0;
         $upTo   = $judgedTo[$cal[$id]['branch'] ?? ''] ?? '';
         for ($d = $per['period_start']; $d <= $per['period_end']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
             $s = dayStatus($cal[$id] ?? null, $d, isset($worked[$id][$d]), isset($offDay[$id][$d]));
             if ($s === 'leave')                    $leave++;
             if ($s === 'absent' && $d <= $upTo)    $absent++;
             if ($s === 'off'    && $d <= $upTo)    $off++;
+            /* A salaried employee is not paid for the working days before the hire date
+               (a daily-rate employee never is: they are paid for the days they worked) */
+            if ($s === 'nothired' && $emp['salary_type'] !== 'daily'
+                && !in_array((int)date('N', strtotime($d)), $cal[$id]['rest'] ?? [7], true)) $prehire++;
         }
+        /* …they are unpaid days exactly like absences: same day rate, same column (absent_days / absent_deduction) */
+        $absent += $prehire;
 
         /* Each duty day pays one full day of the employee's duty hours, less
            undertime (payHoursFromDays). Approved leave is paid: a daily-rate
@@ -1506,6 +1656,302 @@ function recomputeMonthFrom(PDO $db, int $periodId, array $who): int {
     $n = recomputePeriodFromDaily($db, $periodId, $who);
     foreach (laterPeriodsInMonth($db, $periodId) as $later) recomputePeriodFromDaily($db, $later, $who);
     return $n;
+}
+
+/*
+ * Does this pay run still settle its month the way the cut-offs BEFORE it now stand?
+ *
+ * Each run takes SSS / PhilHealth / Pag-IBIG and tax for the month so far, minus what earlier runs already took, so a later
+ * run is only right while the earlier ones are unchanged. Open later runs are re-settled automatically; a FINALIZED one is
+ * never changed behind the admin's back — so if an earlier cut-off is unlocked and corrected, the finalized one quietly
+ * stops adding up. This finds those lines by working out what the same pay would be settled at against the month as it is
+ * NOW (the same arithmetic as computePayLine) and comparing with what is stored. Nothing is stored or changed.
+ * Returns emp_id => [column => [stored, now]] for every line that differs.
+ */
+function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
+    $ctx ??= payContext($db, $periodId);
+    $emps = [];
+    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['emp_id']] = payEmployee($er);
+    $st = $db->prepare("SELECT * FROM payroll WHERE period_id = ?");
+    $st->execute([$periodId]);
+    $out = [];
+    foreach ($st->fetchAll() as $r) {
+        $emp   = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
+        $gross = (float)$r['gross_pay'];
+        $c     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $gross, $ctx);
+        [$tax] = settleWithholdingTax($gross, $c, $ctx);
+        $now = ['sss' => $c['ee']['sss'], 'philhealth' => $c['ee']['philhealth'], 'pagibig' => $c['ee']['pagibig'], 'withholding_tax' => $tax];
+        foreach ($now as $col => $v) {
+            if (abs($v - (float)$r[$col]) >= 0.005) $out[$r['emp_id']][$col] = [(float)$r[$col], $v];
+        }
+    }
+    return $out;
+}
+
+/*
+ * Should a FINALIZED period be reported as out of date? Only when an earlier cut-off of its own month was changed AFTER it
+ * was finalized: still open for correction, or finalized again later. A raise, an employee switch or a Settings change made
+ * months afterwards does not make last month's payroll wrong — and "recomputing" it would rewrite history.
+ */
+function earlierRunChangedAfterFinalize(PDO $db, int $periodId): bool {
+    $st = $db->prepare("SELECT period_start, finalized_at FROM payroll_periods WHERE id = ?");
+    $st->execute([$periodId]);
+    $p = $st->fetch();
+    if (!$p) return false;
+    $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods e
+                         WHERE e.id <> ? AND e.period_start >= ? AND e.period_end < ?
+                           AND (e.status = 'Open' OR (? IS NOT NULL AND e.finalized_at >= ?))");
+    $st->execute([$periodId, date('Y-m-01', strtotime($p['period_start'])), $p['period_start'], $p['finalized_at'], $p['finalized_at']]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+/* "₱1,234.50", and "−₱289.95" for a negative amount (a tax refund, a negative net pay) — number_format alone prints "₱-289.95" */
+function pesoFmt($n, int $decimals = 2): string {
+    $n = (float)$n;
+    return ($n < 0 ? '−' : '') . '₱' . number_format(abs($n), $decimals);
+}
+
+/* Payroll lines whose net pay is below zero — the statutory minimums or a deduction exceed what was earned.
+   [['emp_id','emp_name','net_pay'], …] */
+function negativeNetLines(PDO $db, int $periodId): array {
+    $st = $db->prepare("SELECT emp_id, emp_name, net_pay FROM payroll WHERE period_id = ? AND net_pay < 0 ORDER BY emp_name");
+    $st->execute([$periodId]);
+    return $st->fetchAll();
+}
+
+/*
+ * 13th-month pay (Presidential Decree 851) for one calendar year, employee by employee.
+ *
+ *     13th-month pay  =  total BASIC pay earned in the calendar year  ÷  12
+ *
+ * Basic pay is the payroll's own Basic Pay column — gross pay less the overtime / tardiness adjustment — so pay for days worked and
+ * paid leave counts, absences and undertime are already out, and overtime, bonuses and allowances are not in (they are not
+ * "basic salary" for this purpose). A year's pay is every payroll line of a pay period that STARTS in that year, grouped by month
+ * for the computation sheet. Someone who worked only part of the year simply has fewer months in the total (pro-rated); someone
+ * who has left is still listed — pay is due on separation. The result is rounded half a centavo UP, in whole centavos.
+ *
+ * "Paid" is every Bonus entry whose reason starts with "13th Month Pay" in a period of that year (those recorded by the 13th Month
+ * Pay page and those typed by hand on Bonus & Deductions), so a mid-year advance and the December balance add up.
+ *
+ * Returns
+ *   year, rows  emp_id => [emp_id, full_name, status, months [1..12 => pesos], basic, months_paid, due, paid, balance,
+ *                          other_bonus (bonuses that are not 13th month), taxable_excess (if the balance were paid in full)]
+ *   periods, open_periods, last_end      the pay periods of that year that hold payroll, how many are still Open, the last day covered
+ *   totals      basic, due, paid, balance, accrual [1..12 => basic of the month ÷ 12]
+ */
+function thirteenthMonthData(PDO $db, int $year): array {
+    $names = [];
+    foreach ($db->query("SELECT emp_id, full_name, status FROM employees")->fetchAll() as $e) $names[$e['emp_id']] = $e;
+
+    $cents = fn($v): int => (int)round((float)$v * 100);
+    $rows  = [];
+
+    $st = $db->prepare("SELECT p.emp_id, MAX(p.emp_name) AS emp_name, MONTH(pp.period_start) AS m, SUM(p.gross_pay - p.ot_late_adj) AS basic
+                          FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
+                         WHERE YEAR(pp.period_start) = ?
+                         GROUP BY p.emp_id, MONTH(pp.period_start)");
+    $st->execute([$year]);
+    foreach ($st->fetchAll() as $r) {
+        $id = (string)$r['emp_id'];
+        $rows[$id] ??= ['emp_id' => $id, 'full_name' => $names[$id]['full_name'] ?? $r['emp_name'], 'status' => $names[$id]['status'] ?? 'Removed',
+                        'cents' => array_fill(1, 12, 0), 'sum' => 0];
+        $rows[$id]['cents'][(int)$r['m']] += $cents($r['basic']);
+        $rows[$id]['sum']                 += $cents($r['basic']);
+    }
+
+    /* bonuses recorded for that year: all of them, and the 13th-month ones among them (a history row with no period counts in the year it was entered) */
+    $paid = $bonus = [];
+    $st = $db->prepare("SELECT p.emp_id, SUM(p.bonus) AS b FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
+                         WHERE YEAR(pp.period_start) = ? GROUP BY p.emp_id");
+    $st->execute([$year]);
+    foreach ($st->fetchAll() as $r) $bonus[(string)$r['emp_id']] = $cents($r['b']);
+    $st = $db->prepare("SELECT h.emp_id, SUM(h.amount) AS a FROM bonus_deduction_history h LEFT JOIN payroll_periods pp ON pp.id = h.period_id
+                         WHERE h.entry_type = 'Bonus' AND h.reason LIKE '13th Month Pay%'
+                           AND COALESCE(YEAR(pp.period_start), YEAR(h.entry_date)) = ?
+                         GROUP BY h.emp_id");
+    $st->execute([$year]);
+    foreach ($st->fetchAll() as $r) $paid[(string)$r['emp_id']] = $cents($r['a']);
+
+    $out = [];
+    $totals = ['basic' => 0, 'due' => 0, 'paid' => 0, 'balance' => 0, 'accrual' => array_fill(1, 12, 0)];
+    $monthSum = array_fill(1, 12, 0);
+    foreach ($rows as $id => $r) {
+        $due     = $r['sum'] > 0 ? intdiv(2 * $r['sum'] + 12, 24) : 0;              /* sum ÷ 12, half a centavo up */
+        $p       = $paid[$id] ?? 0;
+        $other   = max(0, ($bonus[$id] ?? 0) - $p);
+        $balance = $due - $p;
+        $excess  = max(0, $other + $p + max(0, $balance) - (int)round(BIR_EXEMPT_BENEFITS * 100));
+        $out[$id] = ['emp_id' => $id, 'full_name' => $r['full_name'], 'status' => $r['status'],
+                     'months' => array_map(fn($c) => $c / 100, $r['cents']), 'basic' => $r['sum'] / 100,
+                     'months_paid' => count(array_filter($r['cents'], fn($c) => $c > 0)),
+                     'due' => $due / 100, 'paid' => $p / 100, 'balance' => $balance / 100,
+                     'other_bonus' => $other / 100, 'taxable_excess' => $excess / 100];
+        $totals['basic'] += $r['sum']; $totals['due'] += $due; $totals['paid'] += $p; $totals['balance'] += max(0, $balance);
+        foreach ($r['cents'] as $m => $c) $monthSum[$m] += $c;
+    }
+    uasort($out, fn($a, $b) => strcasecmp($a['full_name'], $b['full_name']));
+    foreach ($monthSum as $m => $c) $totals['accrual'][$m] = intdiv(2 * $c + 12, 24) / 100;
+    foreach (['basic', 'due', 'paid', 'balance'] as $k) $totals[$k] /= 100;
+
+    $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(pp.status = 'Open'), 0) AS open_n, MAX(pp.period_end) AS last_end
+                          FROM payroll_periods pp
+                         WHERE YEAR(pp.period_start) = ? AND EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)");
+    $st->execute([$year]);
+    $meta = $st->fetch();
+    return ['year' => $year, 'rows' => $out, 'periods' => (int)$meta['n'], 'open_periods' => (int)$meta['open_n'],
+            'last_end' => $meta['last_end'], 'totals' => $totals];
+}
+
+/*
+ * recordAdjustments() — add bonuses or deductions to the payroll lines of ONE open period. The single code path behind the
+ * Adjustments page and the 13th Month Pay page, so both obey the same rules and leave the same trail.
+ *
+ *   $period  a payroll_periods row (id, period_start, finalize_count) — the caller has checked that it is Open
+ *   $lines   emp_id => amount (pesos, > 0): one entry per employee
+ *   $type    'Bonus' | 'Deduction'
+ *
+ * Each line and its history row are written together in one transaction. Two guards hold a line back (it is reported, never
+ * half-applied):
+ *   · a Deduction that would take net pay below zero (the Labor Code, Art. 113, limits what may be withheld from wages)
+ *   · a Bonus that takes the employee's bonuses for the period's calendar year over ₱90,000, the tax-exempt ceiling for
+ *     13th-month pay and other benefits — unless $confirmOverExempt says a person decided to record it anyway
+ *
+ * Returns ['applied', 'applied_ids', 'skipped' (no payroll line), 'negative' / 'over' (texts), 'over_ids', 'cycle', 'is_revision'].
+ * A database error rolls everything back and is thrown.
+ */
+function recordAdjustments(PDO $db, array $period, array $lines, string $type, string $reason, bool $confirmOverExempt = false): array {
+    $periodId   = (int)$period['id'];
+    $cycle      = (int)($period['finalize_count'] ?? 0);
+    $isRevision = $cycle > 0;          /* finalized, re-opened and now being corrected: stamped on the history row and the payroll row */
+    $who        = currentActor();
+    $periodYear = (int)date('Y', strtotime($period['period_start']));
+
+    $getPR = $db->prepare(
+        "SELECT id, emp_id, emp_name, gross_pay, withholding_tax, ot_late_adj,
+                sss, philhealth, pagibig, bonus, other_deductions
+           FROM payroll WHERE period_id = ? AND emp_id = ?"
+    );
+    /* status stays Draft: the period is open, so these rows are not final */
+    $updPR    = $db->prepare("UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft' WHERE id = ?");
+    $updPRrev = $db->prepare("UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft',
+                                     revised_after_finalize = 1, revised_at = NOW() WHERE id = ?");
+    $histIns  = $db->prepare("INSERT INTO bonus_deduction_history
+                              (entry_date, emp_id, emp_name, entry_type, amount, reason, processed_by, period_id, finalize_cycle)
+                              VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?)");
+    /* Bonuses already on this employee's payroll rows in the period's calendar year (this row included) */
+    $ytdBonus = $db->prepare("SELECT COALESCE(SUM(p.bonus), 0) FROM payroll p
+                                JOIN payroll_periods pp ON pp.id = p.period_id
+                               WHERE p.emp_id = ? AND YEAR(pp.period_start) = ?");
+
+    $applied = [];
+    $skipped = $negative = $over = $overIds = [];
+    $total   = 0.0;
+    try {
+        $db->beginTransaction();
+        foreach ($lines as $eid => $amount) {
+            $eid    = trim((string)$eid);
+            $amount = round((float)$amount, 2);
+            if ($eid === '' || $amount <= 0) continue;
+
+            $getPR->execute([$periodId, $eid]);
+            $row = $getPR->fetch();
+            if (!$row) { $skipped[] = $eid; continue; }
+
+            $bonus = (float)$row['bonus'];
+            $ded   = (float)$row['other_deductions'];
+            if ($type === 'Bonus') $bonus += $amount; else $ded += $amount;
+
+            /* net = gross (overtime already in it) + bonus − (tax + SSS + PhilHealth + Pag-IBIG + deductions) */
+            $net = ((float)$row['gross_pay'] + $bonus)
+                 - ((float)$row['withholding_tax'] + (float)$row['sss'] + (float)$row['philhealth'] + (float)$row['pagibig'] + $ded);
+
+            if ($type === 'Deduction' && round($net, 2) < 0) {
+                $negative[] = $row['emp_name'] . ' (net pay would be −₱' . number_format(-$net, 2) . ')';
+                continue;
+            }
+
+            /* This system does not withhold on a bonus, so one that crosses the ceiling needs a person's decision first. */
+            if ($type === 'Bonus' && !$confirmOverExempt) {
+                $ytdBonus->execute([$eid, $periodYear]);
+                $ytd = (float)$ytdBonus->fetchColumn() + $amount;      /* the row's own bonus is already in the sum */
+                if ($ytd > BIR_EXEMPT_BENEFITS + 0.004) {
+                    $over[]    = $row['emp_name'] . ' (' . $periodYear . ' bonuses would be ₱' . number_format($ytd, 2)
+                               . ', ₱' . number_format($ytd - BIR_EXEMPT_BENEFITS, 2) . ' over)';
+                    $overIds[] = $eid;
+                    continue;
+                }
+            }
+
+            ($isRevision ? $updPRrev : $updPR)->execute([$bonus, $ded, round($net, 2), $row['id']]);
+            $histIns->execute([$eid, $row['emp_name'], $type, $amount, $reason, $who, $periodId, $cycle]);
+            $applied[$eid] = $amount;
+            $total += $amount;
+        }
+        $db->commit();
+    } catch (PDOException $e) {
+        if ($db->inTransaction()) $db->rollBack();
+        throw $e;
+    }
+
+    /* The audit trail records the correction itself, not just its effect. */
+    if ($applied && $isRevision) {
+        $same = count(array_unique($applied)) === 1;
+        logPeriodAudit($periodId, 'Revised', $cycle,
+            ($same ? "$type of PHP " . number_format(reset($applied), 2) : "$type totalling PHP " . number_format($total, 2))
+          . " ($reason) applied to " . count($applied) . " employee(s) after finalize #$cycle.");
+    }
+    return ['applied' => count($applied), 'applied_ids' => array_keys($applied), 'skipped' => $skipped,
+            'negative' => $negative, 'over' => $over, 'over_ids' => $overIds, 'cycle' => $cycle, 'is_revision' => $isRevision];
+}
+
+/*
+ * What the COMPANY adds on top of the pay it hands out, per pay period: its share of SSS (10% of the credit), the Employees'
+ * Compensation amount, its half of PhilHealth and its 2% of Pag-IBIG — worked out with the same month-to-date
+ * contributionBreakdown() that payroll.php's "company cost" uses, from the stored payroll lines.
+ * Labor cost of a period = Σ gross pay + Σ bonus + these shares (deductions such as loans are the employee's money, not a saving).
+ * Returns period_id => ['sss','ec','philhealth','pagibig','total'] in pesos.
+ */
+function employerSharesByPeriod(PDO $db): array {
+    $periods = $db->query("SELECT id, period_start, period_end, period_type FROM payroll_periods ORDER BY period_start, id")->fetchAll();
+    $emps = [];
+    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $e) $emps[$e['emp_id']] = payEmployee($e);
+    $lines = [];
+    foreach ($db->query("SELECT period_id, emp_id, gross_pay, ot_late_adj, sss, philhealth, pagibig, withholding_tax FROM payroll")->fetchAll() as $r) {
+        $lines[$r['period_id']][] = $r;
+    }
+    $out = [];
+    foreach ($periods as $p) {
+        $monthStart = date('Y-m-01', strtotime($p['period_start']));
+        $earlier = [];
+        $runs = 0;
+        foreach ($periods as $q) {      /* runs of the same month that ended before this one began (as payContext() does) */
+            if ((int)$q['id'] === (int)$p['id'] || $q['period_start'] < $monthStart || $q['period_end'] >= $p['period_start']) continue;
+            $runs++;
+            foreach ($lines[$q['id']] ?? [] as $r) {
+                $e = &$earlier[$r['emp_id']];
+                $e ??= ['g' => 0.0, 'basic' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'tax' => 0.0];
+                $e['g']     += (float)$r['gross_pay'];
+                $e['basic'] += (float)$r['gross_pay'] - (float)$r['ot_late_adj'];
+                $e['sss']   += (float)$r['sss'];
+                $e['philhealth'] += (float)$r['philhealth'];
+                $e['pagibig']    += (float)$r['pagibig'];
+                $e['tax']   += (float)$r['withholding_tax'];
+                unset($e);
+            }
+        }
+        $ctx = buildPayContext($p, $earlier, $runs);
+        $tot = ['sss' => 0.0, 'ec' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
+        foreach ($lines[$p['id']] ?? [] as $r) {
+            $emp   = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
+            $gross = (float)$r['gross_pay'];
+            $b     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $gross, $ctx);
+            foreach ($tot as $k => $_) $tot[$k] += $b['er'][$k];
+        }
+        $row = array_map(fn($v) => round($v, 2), $tot);
+        $row['total'] = round(array_sum($row), 2);
+        $out[(int)$p['id']] = $row;
+    }
+    return $out;
 }
 
 /*

@@ -5,10 +5,15 @@ requireAuth();
 $activePage = 'dashboard';
 $db         = getDB();
 
-/* Most recent payroll period (by insertion order) */
-$latestPeriodRow   = $db->query("SELECT id, period_label, status FROM payroll_periods ORDER BY id DESC LIMIT 1")->fetch();
+/* Most recent payroll period BY DATE that has payroll — a period entered later for an older month is not "latest" */
+$latestPeriodRow   = $db->query("SELECT pp.id, pp.period_label, pp.status, pp.period_type FROM payroll_periods pp
+                                  WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
+                                  ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1")->fetch()
+                  ?: $db->query("SELECT id, period_label, status, period_type FROM payroll_periods ORDER BY period_start DESC, id DESC LIMIT 1")->fetch();
 $latestPeriod      = $latestPeriodRow['id']           ?? null;
 $latestPeriodLabel = $latestPeriodRow['period_label'] ?? null;
+/* What one point of the trend below is: a month, a cut-off or a week — the card must say what it predicts */
+$nextWord = match (periodType($latestPeriodRow['period_type'] ?? null)) { 'Semi-Monthly' => 'Cut-off', 'Weekly' => 'Week', default => 'Month' };
 
 /* Aggregate totals for the latest period, including bonuses and deductions */
 $totals = ['headcount'=>0,'total_gross'=>0,'total_net'=>0,'total_tax'=>0,
@@ -35,19 +40,23 @@ if ($latestPeriod) {
  * Uses ALL periods (Open + Locked) — no longer requires Finalized status —
  * so the prediction works as soon as attendance is uploaded.
  */
+/* The SIX MOST RECENT periods (newest first inside, oldest first outside) — the trend is about now, not about the first six ever */
 $monthly = $db->query("
-    SELECT pp.id, pp.period_label, pp.period_start,
-           COALESCE(SUM(p.net_pay),0)   AS total_net,
-           COALESCE(SUM(p.gross_pay),0) AS total_gross
-    FROM payroll_periods pp
-    LEFT JOIN payroll p ON p.period_id = pp.id
-    GROUP BY pp.id
-    HAVING total_net > 0
-    ORDER BY pp.period_start ASC, pp.id ASC
-    LIMIT 6
+    SELECT * FROM (
+        SELECT pp.id, pp.period_label, pp.period_start,
+               COALESCE(SUM(p.net_pay),0)   AS total_net,
+               COALESCE(SUM(p.gross_pay),0) AS total_gross
+        FROM payroll_periods pp
+        LEFT JOIN payroll p ON p.period_id = pp.id
+        GROUP BY pp.id
+        HAVING total_net > 0
+        ORDER BY pp.period_start DESC, pp.id DESC
+        LIMIT 6
+    ) latest
+    ORDER BY period_start ASC, id ASC
 ")->fetchAll();
 
-/* Linear regression on the net pay series to forecast next month */
+/* Linear regression on the net pay series to forecast the next point (next month / cut-off / week, see $nextWord) */
 $nets      = array_map('floatval', array_column($monthly, 'total_net'));
 $n         = count($nets);
 $predicted = 0;
@@ -88,6 +97,8 @@ $totalEmployeesDB = (int)$db->query("SELECT COUNT(*) FROM employees")->fetchColu
  */
 $attRows = $attApproved = $payrollRows = 0;
 $periodStatus = $latestPeriodRow['status'] ?? null;
+/* a finalized period's status is 'Locked' (payroll_periods.status is Open | Locked) */
+$periodLocked = in_array($periodStatus, ['Locked', 'Finalized'], true);
 if ($latestPeriod) {
     $q = $db->prepare("SELECT COUNT(*), COALESCE(SUM(manager_approved),0) FROM attendance WHERE period_id = ?");
     $q->execute([$latestPeriod]);
@@ -102,7 +113,7 @@ $pipeline = [
     ['label' => 'Attendance uploaded', 'note' => number_format($attRows) . ' row(s)',            'done' => $attRows > 0],
     ['label' => 'Timesheets approved', 'note' => $approvalPct . '% approved by managers',        'done' => $attRows > 0 && $attApproved >= $attRows],
     ['label' => 'Payroll computed',    'note' => number_format($payrollRows) . ' employee(s)',   'done' => $payrollRows > 0],
-    ['label' => 'Period finalized',    'note' => $periodStatus ?: 'No period yet',               'done' => $periodStatus === 'Finalized'],
+    ['label' => 'Period finalized',    'note' => $periodStatus ?: 'No period yet',               'done' => $periodLocked],
 ];
 
 /* Where the money goes — feeds the composition doughnut */
@@ -389,7 +400,7 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
         <!-- Prediction card — spans full width, pulses when a value is available -->
         <div class="card card-sky <?= $n >= 2 ? 'card-predict-active' : '' ?>"
              style="grid-column: 1 / -1;">
-            <div class="card-label">Predicted Next Month Net Payroll</div>
+            <div class="card-label">Predicted Next <?= $nextWord ?> Net Payroll</div>
             <div class="card-value" style="color:#0ea5e9;font-size:2rem;">
                 <?= $n >= 2 ? '&#8369;' . number_format($predicted, 2) : '&mdash;' ?>
             </div>
@@ -440,13 +451,13 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
             </span>
             <span class="<?= $pendingLeaveCount > 0 ? 'todo-num' : 'todo-num-ok' ?>"><?= $pendingLeaveCount > 0 ? $pendingLeaveCount : 'Clear' ?></span>
         </a>
-        <a class="todo <?= $periodStatus !== 'Finalized' && $payrollRows > 0 ? 'todo-open' : '' ?>" href="payroll.php">
+        <a class="todo <?= !$periodLocked && $payrollRows > 0 ? 'todo-open' : '' ?>" href="payroll.php">
             <span>
                 <b>Payroll to finalize</b>
                 <span><?= $latestPeriodLabel ? htmlspecialchars($latestPeriodLabel) : 'No period yet' ?></span>
             </span>
-            <span class="<?= $periodStatus === 'Finalized' ? 'todo-num-ok' : 'todo-num' ?>">
-                <?= $periodStatus === 'Finalized' ? 'Closed' : ($payrollRows ?: '—') ?>
+            <span class="<?= $periodLocked ? 'todo-num-ok' : 'todo-num' ?>">
+                <?= $periodLocked ? 'Closed' : ($payrollRows ?: '—') ?>
             </span>
         </a>
         <a class="todo" href="reports.php">

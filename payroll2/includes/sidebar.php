@@ -21,6 +21,7 @@ $navGroups = [
         'month-attendance'  => ['label' => "This Month's Attendance", 'href' => 'month-attendance.php'],
         'payroll'           => ['label' => 'Payroll Processing', 'href' => 'payroll.php'],
         'adjustments'       => ['label' => 'Bonus & Deductions', 'href' => 'adjustments.php'],
+        'thirteenth-month'  => ['label' => '13th Month Pay',     'href' => 'thirteenth-month.php'],
         'reports'           => ['label' => 'Reports & Payslips', 'href' => 'reports.php'],
         'sign-payslip'      => ['label' => 'Sign Payslip',       'href' => 'sign-payslip.php'],
     ],

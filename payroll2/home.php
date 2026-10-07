@@ -36,6 +36,9 @@ if ($latestPeriod) {
 $hour     = (int)date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 
+/* A finalized pay period's status is 'Locked' (payroll_periods.status is Open | Locked) — comparing with 'Finalized' never matched */
+$periodLocked = in_array($latestPeriod['status'] ?? '', ['Locked', 'Finalized'], true);
+
 /* Where the cycle currently stands, in one line */
 if (!$latestPeriod) {
     $stepText = 'No payroll period yet — create one and upload attendance to begin.';
@@ -43,7 +46,7 @@ if (!$latestPeriod) {
     $stepText = 'Next step: upload the attendance file for ' . $latestPeriod['period_label'] . '.';
 } elseif ((int)$payrollRows === 0) {
     $stepText = 'Attendance is in. Next step: process payroll for ' . $latestPeriod['period_label'] . '.';
-} elseif (($latestPeriod['status'] ?? '') !== 'Finalized') {
+} elseif (!$periodLocked) {
     $stepText = $latestPeriod['period_label'] . ' is computed and waiting to be reviewed and finalized.';
 } else {
     $stepText = $latestPeriod['period_label'] . ' is finalized. Upload the next attendance file when the cycle rolls over.';
@@ -220,8 +223,8 @@ $companyName = getSetting('company_name', 'L&N Pharmacy');
             <div class="lp-stat">
                 <span class="lp-stat-label">Period status</span>
                 <span class="lp-stat-value">
-                    <span class="badge badge-<?= ($latestPeriod['status'] ?? '') === 'Finalized' ? 'green' : 'blue' ?>">
-                        <?= htmlspecialchars($latestPeriod['status'] ?? '—') ?>
+                    <span class="badge badge-<?= $periodLocked ? 'green' : 'blue' ?>">
+                        <?= htmlspecialchars($latestPeriod ? ($periodLocked ? 'Finalized' : 'Open') : '—') ?>
                     </span>
                 </span>
             </div>

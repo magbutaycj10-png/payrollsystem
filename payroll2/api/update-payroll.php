@@ -52,6 +52,35 @@ try {
             jsonResponse(['error' => 'Nothing to finalize — this period has no payroll records.'], 400);
         }
 
+        /* Lines whose SSS / PhilHealth / Pag-IBIG / tax no longer settle the month (an earlier cut-off was
+           corrected after this one was last computed, or Settings changed): refresh them first */
+        if (empty($body['ignore_drift'])) {
+            $drift = settlementDrift($db, $period_id);
+            if ($drift) {
+                jsonResponse([
+                    'error'   => 'stale',
+                    'count'   => count($drift),
+                    'message' => count($drift) . ' line(s) in ' . $per['period_label'] . ' were computed against figures that have since changed '
+                               . '(an earlier cut-off of the month was corrected, or Settings changed), so their contributions or tax are out of date. '
+                               . 'Press "Recompute" first, then finalize.',
+                ], 409);
+            }
+        }
+
+        /* Net pay below zero (the statutory minimums or a deduction exceed what was earned) is not locked in unnoticed */
+        if (empty($body['allow_negative'])) {
+            $neg = negativeNetLines($db, $period_id);
+            if ($neg) {
+                jsonResponse([
+                    'error'   => 'negative_net',
+                    'lines'   => $neg,
+                    'message' => count($neg) . ' employee(s) have a NEGATIVE net pay: ' . implode(', ', array_map(
+                                     fn($l) => $l['emp_name'] . ' (₱' . number_format((float)$l['net_pay'], 2) . ')', array_slice($neg, 0, 5)))
+                               . (count($neg) > 5 ? ' …' : '') . '. Check their days, rate and deductions before finalizing.',
+                ], 409);
+            }
+        }
+
         /* How many rows were corrected during the cycle now closing. */
         $rev = $db->prepare('SELECT COUNT(*) FROM payroll
                               WHERE period_id = ? AND revised_after_finalize = 1');
@@ -84,6 +113,25 @@ try {
             'cycle'     => $cycle,
             'revised'   => $revised,
         ]);
+    }
+
+    /* ---------------------------------------------------------------
+     * Recompute — rebuild an OPEN period (and the open cut-offs after it in the same month) from the days
+     * saved for it, with the current rules and Settings. Used after unlocking a period to correct it, or after
+     * an earlier cut-off changed. A period built from a totals file has no saved days: upload it again instead.
+     * ------------------------------------------------------------- */
+    if ($action === 'recompute') {
+        if ($per['status'] !== 'Open') {
+            jsonResponse(['error' => $per['period_label'] . ' is finalized. Unlock it first, then recompute.'], 409);
+        }
+        $days = $db->prepare('SELECT COUNT(*) FROM biometric_daily WHERE period_id = ?');
+        $days->execute([$period_id]);
+        if ((int)$days->fetchColumn() === 0) {
+            jsonResponse(['error' => $per['period_label'] . ' has no day-by-day records to recompute from (it was built from a totals file). Upload the file again instead.'], 400);
+        }
+        $n = recomputeMonthFrom($db, $period_id, ['role' => 'admin', 'scope' => null]);
+        logPeriodAudit($period_id, 'Revised', (int)$per['finalize_count'], "Recomputed from the saved days — $n employee line(s).");
+        jsonResponse(['success' => true, 'recomputed' => $n]);
     }
 
     /* ---------------------------------------------------------------

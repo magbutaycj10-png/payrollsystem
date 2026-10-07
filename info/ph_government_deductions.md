@@ -59,9 +59,13 @@ and onwards** (TRAIN Law, RA 10963):
      **duty hours** (Settings standard, 8, or the employee's own, e.g. 10) minus its undertime,
      so undertime costs *rate ÷ duty hours* per hour. Approved leave is paid as a full day.
    - *Monthly / kinsenas*: the month's salary × the period's share of a month, minus one
-     day's rate per unexcused absent day (days off and approved leave are never deducted).
-2. **Gross pay** = basic + overtime pay (OT hours × the OT rate in Settings) − late deductions.
-   This is the timesheet's GROSS PAY; it is what `payroll.gross_pay` stores.
+     day's rate per unexcused absent day (days off and approved leave are never deducted) and
+     per working day **before the employee's hire date**.
+2. **Gross pay** = basic + overtime pay − late deductions.
+   This is the timesheet's GROSS PAY; it is what `payroll.gross_pay` stores. Overtime is paid by the
+   method chosen in *Settings → Overtime Method*: **flat** — OT hours × the peso rate in Settings
+   (the pharmacy's own sheets) — or **Labor Code** — OT hours × the employee's own hourly rate ×
+   the multiplier (1.25 on an ordinary day, Art. 87; the hourly rate is a day's pay ÷ duty hours).
 3. **Contributions are monthly**, read on the pay earned *so far this calendar month* and
    minus what earlier cut-offs already deducted — so floors and caps apply once a month and
    each month ends exact. *Settings → Contribution Schedule* picks, per contribution, whether
@@ -69,8 +73,15 @@ and onwards** (TRAIN Law, RA 10963):
    (**second**). Default: SSS split (from the 1st cut-off), PhilHealth and Pag-IBIG on the
    2nd — the way the pharmacy's timesheets take them.
 4. **Withholding tax**: each cut-off on its own Annex E table; the month's last cut-off
-   settles the month on the monthly table, minus what earlier cut-offs withheld.
+   settles the month on the monthly table, minus what earlier cut-offs withheld. If they withheld
+   more than the month owes, the difference comes back as a **negative tax — a refund** — so every
+   month ends exact. Worked in whole centavos (a half centavo rounds up).
 5. **Net pay** = gross + bonus − (tax + SSS + PhilHealth + Pag-IBIG + other deductions).
+6. **13th month pay** is not part of a pay run: it is worked out once a year from the basic pay
+   earned and recorded as a bonus — see [`ph_13th_month_pay.md`](ph_13th_month_pay.md).
+
+**Limits on what is accepted:** a day holds at most 24 hours, overtime at most 16 hours, nothing is
+negative; rates and salaries are bounded; unreadable times (such as `08:60`) are refused, never guessed.
 
 ---
 
@@ -100,8 +111,10 @@ Every monthly total the system produced (19 employee-months) was checked against
 independent implementation of the rules above: all match exactly.
 
 **Labor Code note (not a deduction):** the ₱45/h overtime rate is below the legal minimum
-(Art. 87: the hourly rate plus 25% — e.g. ₱480/day → ₱60/h → ₱75/h OT). The rate is a
-setting; the system pays whatever Settings says.
+(Art. 87: the hourly rate plus 25% — e.g. ₱480/day → ₱60/h → ₱75/h OT). With the *flat* method the
+system pays whatever Settings says (and Settings now warns who is underpaid); choose the
+*Labor Code* method to pay each employee their own rate (₱480/day → ₱75.00/h, ₱620/day → ₱96.88/h).
+Rest-day, holiday and night-shift premiums are higher still and are not computed.
 
 ---
 

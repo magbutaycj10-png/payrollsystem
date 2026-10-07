@@ -134,7 +134,8 @@ function amountInWords(float $amount): string {
 
     $words = strtoupper(_numToWords($pesos));
     $sign  = $amount < 0 ? 'MINUS ' : '';
-    return $sign . $words . ' PESOS AND ' . str_pad((string)$centavos, 2, '0', STR_PAD_LEFT) . '/100';
+    /* "ONE PESO", but "ZERO PESOS" and "TWO PESOS" */
+    return $sign . $words . ($pesos === 1 ? ' PESO' : ' PESOS') . ' AND ' . str_pad((string)$centavos, 2, '0', STR_PAD_LEFT) . '/100';
 }
 
 function _numToWords(int $n): string {
@@ -163,7 +164,7 @@ function _numToWords(int $n): string {
 }
 
 /* Small formatting helpers used by the templates below. */
-function birPeso($n): string { return '&#8369;' . number_format((float)$n, 2); }
+function birPeso($n): string { $n = (float)$n; return ($n < 0 ? '&minus;' : '') . '&#8369;' . number_format(abs($n), 2); }
 function birEsc($s): string  { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
 /* =============================================================
@@ -433,7 +434,7 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     $less  = fn($amt) => (float)$amt > 0 ? ' &mdash; ' . birPeso($amt) . ' less in Basic Pay' : '';
     $parts = [];
     if ((float)($r['absent_days'] ?? 0) > 0)
-        $parts[] = 'Absent: <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
+        $parts[] = 'Unpaid days (absent, or before the hire date): <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
     if ((float)($r['undertime_hours'] ?? 0) > 0)
         $parts[] = 'Undertime: <b>' . $num($r['undertime_hours']) . ' h</b>' . $less($r['undertime_deduction'] ?? 0);
     if ((float)($r['leave_days'] ?? 0) > 0)
@@ -482,7 +483,7 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     <div>
       <div class="amt-head ded">Deductions</div>
       <div class="amt-wrap"><table class="amt"><tbody>
-        <tr><td>Withholding Tax</td><td class="n">' . birPeso($r['withholding_tax']) . '</td></tr>
+        <tr><td>Withholding Tax' . ((float)$r['withholding_tax'] < 0 ? ' (refund of tax withheld earlier this month)' : '') . '</td><td class="n">' . birPeso($r['withholding_tax']) . '</td></tr>
         <tr><td>SSS Contribution</td><td class="n">' . birPeso($r['sss']) . '</td></tr>
         <tr><td>PhilHealth</td><td class="n">' . birPeso($r['philhealth']) . '</td></tr>
         <tr><td>Pag-IBIG (HDMF)</td><td class="n">' . birPeso($r['pagibig']) . '</td></tr>

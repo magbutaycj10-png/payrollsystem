@@ -37,10 +37,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         /* Weekly day(s) off, ISO weekdays: never counted absent, never deducted */
         $restDays = implode(',', restDayList(implode(',', (array)($_POST['rest_days'] ?? []))));
         /* Hours in this employee's duty day; blank = the Settings standard */
-        $dayHours = (float)($_POST['hours_per_day'] ?? 0);
+        $dayHoursRaw = trim((string)($_POST['hours_per_day'] ?? ''));
+        $dayHours = (float)$dayHoursRaw;
         $dayHours = $dayHours >= 1 && $dayHours <= 24 ? round($dayHours * 2) / 2 : null;
 
-        if ($action === 'add') {
+        /* A salary is a real, non-negative number: a negative one used to be accepted and produced a negative payslip,
+           and an absurd one (₱1e12) a payroll nobody could pay. Duty-day hours, when given, are 1 to 24. */
+        $formProblem = pesoProblem('Salary', $_POST['base_salary'] ?? '', $salary_type === 'daily' ? MAX_RATE_PESOS : MAX_SALARY_PESOS);
+        if ($formProblem === null && $dayHoursRaw !== '' && $dayHours === null) $formProblem = 'Duty-day hours must be a number from 1 to 24 (or blank for the standard day)';
+
+        if ($formProblem !== null) {
+            $msg = ['type' => 'error', 'text' => "Not saved — $formProblem."];
+        } elseif ($action === 'add') {
             $emp_id = nextEmpId($db);
             try {
                 $db->prepare("INSERT INTO employees (emp_id,full_name,position,branch,email,base_salary,salary_type,date_hired,deduct_sss,deduct_philhealth,deduct_pagibig,rest_days,hours_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")

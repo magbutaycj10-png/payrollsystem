@@ -29,6 +29,7 @@ $rows = $db->query("
         pp.id,
         pp.period_label                          AS label,
         pp.period_start,
+        pp.period_type,
         pp.status,
         COUNT(DISTINCT p.emp_id)                 AS employee_count,
         COALESCE(SUM(p.gross_pay), 0)            AS total_gross,
@@ -52,12 +53,18 @@ $rows = $db->query("
  * two periods a month, so "the next period" is not "the next month", and the
  * seasonal signal is (month, half) rather than month on its own.
  */
-$periodType      = getSetting('payroll_period', 'Monthly');
+/* …read from the most recent period itself (each period carries its own schedule); Settings only when it has none */
+$lastType        = null;
+foreach ($rows as $r0) { if ((float)$r0['total_net'] > 0) $lastType = $r0['period_type'] ?? null; }
+$periodType      = periodType($lastType);
 $periodsPerMonth = match ($periodType) {
     'Semi-Monthly' => 2,
     'Weekly'       => 4,
     default        => 1,
 };
+
+/* What the company adds on top of the pay it hands out (employer SSS, EC, PhilHealth, Pag-IBIG), per period */
+$employer = employerSharesByPeriod($db);
 
 /* Attach a sequential index and extract month/year from period_start */
 $result = [];
@@ -91,6 +98,9 @@ foreach ($rows as $i => $r) {
         'total_deductions' => (float)$r['total_deductions'],
         'total_tax'        => (float)$r['total_tax'],
         'avg_gross'        => (float)$r['avg_gross'],
+        /* company cost: pay + bonus + the employer's SSS / EC / PhilHealth / Pag-IBIG — what a budget has to cover */
+        'total_employer_share' => $employer[(int)$r['id']]['total'] ?? 0.0,
+        'total_labor_cost'     => round((float)$r['total_gross'] + (float)$r['total_bonus'] + ($employer[(int)$r['id']]['total'] ?? 0.0), 2),
     ];
 }
 

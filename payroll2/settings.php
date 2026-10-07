@@ -104,20 +104,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $keys = [
         'overtime_rate', 'late_rate', 'payroll_period',
+        'overtime_method', 'overtime_multiplier',
         'contribution_timing_sss', 'contribution_timing_philhealth', 'contribution_timing_pagibig',
         // Company details — printed on every payslip, receipt and report
         'bir_registered_name', 'bir_business_style', 'bir_address', 'bir_tin',
         'bir_system_name', 'bir_signatory_name', 'bir_signatory_position',
     ];
+    /* What a value must be to be saved. A negative overtime rate used to be accepted — and then SUBTRACTED from pay. */
+    $settingErrors = [];
+    $check = [
+        'overtime_rate'       => fn($v) => pesoProblem('Overtime rate', $v, MAX_RATE_PESOS),
+        'late_rate'           => fn($v) => pesoProblem('Late deduction rate', $v, MAX_RATE_PESOS),
+        'overtime_multiplier' => function ($v) {
+            $n = numberOrNull($v);
+            return ($n === null || $n < 1.0 || $n > 3.0) ? 'Overtime multiplier must be a number from 1.00 to 3.00 (1.25 is the legal minimum for an ordinary day)' : null;
+        },
+        'overtime_method'     => fn($v) => in_array(trim($v), ['flat', 'labor_code'], true) ? null : 'Overtime method must be "flat" or "labor_code"',
+        'payroll_period'      => fn($v) => in_array(trim($v), ['Monthly', 'Semi-Monthly', 'Weekly'], true) ? null : 'Payroll period must be Monthly, Semi-Monthly or Weekly',
+    ];
+    foreach (['sss', 'philhealth', 'pagibig'] as $c) {
+        $check["contribution_timing_$c"] = fn($v) => in_array(trim($v), ['split', 'second'], true) ? null : 'Contribution timing must be "split" or "second"';
+    }
     // setSetting() inserts the key when it does not exist yet, so the company
     // fields save on first use instead of a bare UPDATE matching no row.
     foreach ($keys as $k) {
-        if (isset($_POST[$k])) setSetting($k, trim($_POST[$k]));
+        if (!isset($_POST[$k])) continue;
+        if (isset($check[$k]) && ($why = $check[$k](trim($_POST[$k]))) !== null) { $settingErrors[] = $why; continue; }
+        setSetting($k, trim($_POST[$k]));
     }
     /* A regular duty day: whole or half hours, 1 to 24 */
     if (isset($_POST['standard_hours'])) {
-        $h = round((float)$_POST['standard_hours'] * 2) / 2;
-        if ($h >= 1 && $h <= 24) setSetting('standard_hours', (string)$h);
+        $sh = numberOrNull(trim($_POST['standard_hours']));
+        if ($sh === null || round($sh * 2) / 2 < 1 || round($sh * 2) / 2 > 24) $settingErrors[] = 'Standard duty day must be from 1 to 24 hours';
+        else setSetting('standard_hours', (string)(round($sh * 2) / 2));
     }
 
     // Admin email update (stored in users table)
@@ -150,6 +169,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
         }
     } else {
         if (!isset($msg)) $msg = ['type' => 'success', 'text' => 'Settings saved.'];
+    }
+    /* A value that was refused must not hide behind "Settings saved." */
+    if ($settingErrors && ($msg['type'] ?? '') === 'success') {
+        $msg = ['type' => 'error', 'text' => 'Not saved: ' . implode('; ', array_unique($settingErrors)) . '. The other settings were saved.'
+                . (!empty($_POST['new_password']) ? ' Your password was changed.' : '')];
     }
 }
 
@@ -351,14 +375,38 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
         <div class="box" style="margin-bottom:20px;">
             <div class="box-header"><h2>Payroll Computation Rates</h2></div>
             <div class="box-body">
+                <?php $otShort = overtimeShortfalls($db); if ($otShort): ?>
+                <div class="alert alert-warn" style="margin-bottom:16px;">
+                    <span>
+                        <strong>Overtime is paid below the legal minimum for <?= count($otShort) ?> employee(s).</strong>
+                        The Labor Code (Art. 87) requires at least the hourly rate plus 25% on an ordinary working day, but the flat rate
+                        pays every employee &#8369;<?= number_format($otShort[0]['paid'], 2) ?> an hour &mdash;
+                        e.g. <?= htmlspecialchars($otShort[0]['full_name']) ?> should get &#8369;<?= number_format($otShort[0]['legal'], 2) ?> an hour.
+                        Choose <em>Labor Code</em> as the overtime method to pay each employee their own rate.
+                        (Rest-day, holiday and night-shift premiums are higher still and are not computed.)
+                    </span>
+                </div>
+                <?php endif; ?>
                 <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));">
                     <div class="form-group">
-                        <label>Overtime Rate (₱/hr)</label>
-                        <input type="number" name="overtime_rate" class="form-control" step="0.01" value="<?= htmlspecialchars($s['overtime_rate'] ?? '150') ?>">
+                        <label>Overtime Method</label>
+                        <select name="overtime_method" class="form-control">
+                            <option value="flat"       <?= ($s['overtime_method'] ?? 'flat') !== 'labor_code' ? 'selected' : '' ?>>Flat ₱ per hour (everybody)</option>
+                            <option value="labor_code" <?= ($s['overtime_method'] ?? 'flat') === 'labor_code' ? 'selected' : '' ?>>Labor Code — own hourly rate × multiplier</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Overtime Rate (₱/hr) — flat method</label>
+                        <input type="number" name="overtime_rate" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" value="<?= htmlspecialchars($s['overtime_rate'] ?? '150') ?>">
+                    </div>
+                    <div class="form-group">
+                        <label>Overtime Multiplier — Labor Code method</label>
+                        <input type="number" name="overtime_multiplier" class="form-control" step="0.01" min="1" max="3" value="<?= htmlspecialchars($s['overtime_multiplier'] ?? '1.25') ?>">
+                        <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">1.25 = hourly rate + 25%, the legal minimum on an ordinary working day (Labor Code Art. 87).</span>
                     </div>
                     <div class="form-group">
                         <label>Late Deduction Rate (₱/hr)</label>
-                        <input type="number" name="late_rate" class="form-control" step="0.01" value="<?= htmlspecialchars($s['late_rate'] ?? '80') ?>">
+                        <input type="number" name="late_rate" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" value="<?= htmlspecialchars($s['late_rate'] ?? '80') ?>">
                     </div>
                     <div class="form-group">
                         <label>Standard Duty Day (hours)</label>

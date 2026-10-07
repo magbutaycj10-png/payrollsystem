@@ -65,6 +65,14 @@ $scope = $who['scope'] === null ? $names : array_intersect_key($names, array_fli
 $resolve    = employeeResolver($db);
 $mismatches = [];
 $matched    = [];
+$invalid    = [];   /* lines whose hours cannot be right (negative, text, more than the period holds) — not saved, reported */
+
+/* How many calendar days the period holds: the most hours a line can honestly carry */
+$pp = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
+$pp->execute([$period_id]);
+$perRow     = $pp->fetch();
+$periodDays = $perRow ? (int)round((strtotime($perRow['period_end']) - strtotime($perRow['period_start'])) / 86400) + 1 : 31;
+
 foreach ($rows as $r) {
     $name = trim((string)($r['emp_name'] ?? ''));
     if ($name === '') continue;
@@ -83,6 +91,13 @@ foreach ($rows as $r) {
     $r['emp_id']   = $sysId;
     $r['emp_name'] = $names[$sysId];   /* stored as registered, not as typed */
 
+    $problem = periodHoursProblem($r['hours_worked'] ?? 0, $r['overtime_hours'] ?? 0, $r['late_hours'] ?? 0, $periodDays)
+            ?? (isset($r['paid_hours']) ? periodHoursProblem($r['paid_hours'], 0, 0, $periodDays) : null);
+    if ($problem !== null) {
+        $invalid[] = ['emp_name' => $names[$sysId], 'why' => $problem];
+        continue;
+    }
+
     /* Two spellings of one person in the file are still one payroll line */
     if (isset($matched[$sysId])) {
         foreach (['hours_worked', 'overtime_hours', 'late_hours', 'paid_hours'] as $f) {
@@ -92,7 +107,23 @@ foreach ($rows as $r) {
     }
     $matched[$sysId] = $r;
 }
+/* …and a person on several lines must still fit into the period once the lines are added up */
+foreach ($matched as $sysId => $m) {
+    $problem = periodHoursProblem($m['hours_worked'] ?? 0, $m['overtime_hours'] ?? 0, $m['late_hours'] ?? 0, $periodDays);
+    if ($problem !== null) {
+        $invalid[] = ['emp_name' => $names[$sysId], 'why' => $problem . ' (all their lines added up)'];
+        unset($matched[$sysId]);
+    }
+}
 $rows = array_values($matched);
+
+/* Every line was impossible: stop before the wipe below, so the period keeps its data */
+if (!$rows && $invalid) {
+    $first = $invalid[0];
+    jsonResponse(['error' => 'Nothing was saved: ' . count($invalid) . ' line(s) have hours that cannot be right (e.g. '
+        . $first['emp_name'] . ': ' . $first['why'] . '). Fix them in the file and upload again.',
+        'invalid' => array_slice($invalid, 0, 50)], 400);
+}
 
 /* Employees (within scope) that the file left out — they get no payroll line */
 $inFile = array_flip(array_column($rows, 'emp_id'));
@@ -166,6 +197,7 @@ try {
         'success'    => true,
         'count'      => $count,
         'mismatches' => $mismatches,
+        'invalid'    => array_slice($invalid, 0, 50),
     ]);
 
 } catch (PDOException $e) {

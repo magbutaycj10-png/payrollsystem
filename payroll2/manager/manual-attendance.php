@@ -28,9 +28,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $date   = trim($_POST['att_date'] ?? '');
     /* "worked" — hours below; "off" — a day off (no duty: not absent, not deducted) */
     $dayOff = ($_POST['day_status'] ?? 'worked') === 'off';
-    $hours  = $dayOff ? 0.0 : max(0, min(24, (float)($_POST['hours_worked']   ?? 0)));
-    $ot     = $dayOff ? 0.0 : max(0, (float)($_POST['overtime_hours'] ?? 0));
-    $late   = $dayOff ? 0.0 : max(0, (float)($_POST['late_hours']     ?? 0));
+    /* Typed hours are checked, not quietly clamped: 30 h used to become 24 h of pay, and 12 OT h on top of it was accepted */
+    $hoursProblem = $dayOff ? null : dayHoursProblem(($_POST['hours_worked'] ?? '') === '' ? 0 : $_POST['hours_worked'],
+                                                    ($_POST['overtime_hours'] ?? '') === '' ? 0 : $_POST['overtime_hours'],
+                                                    ($_POST['late_hours'] ?? '') === '' ? 0 : $_POST['late_hours']);
+    $hours  = $dayOff || $hoursProblem !== null ? 0.0 : (float)($_POST['hours_worked']   ?? 0);
+    $ot     = $dayOff || $hoursProblem !== null ? 0.0 : (float)($_POST['overtime_hours'] ?? 0);
+    $late   = $dayOff || $hoursProblem !== null ? 0.0 : (float)($_POST['late_hours']     ?? 0);
 
     $emp = null;
     foreach ($employees as $e) { if ($e['emp_id'] === $emp_id) $emp = $e; }
@@ -45,6 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $msg = ['type' => 'error', 'text' => 'Employee not found among your assigned employees.'];
     } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $msg = ['type' => 'error', 'text' => 'Choose the date of the attendance.'];
+    } elseif ($hoursProblem !== null) {
+        $msg = ['type' => 'error', 'text' => "Not saved — {$hoursProblem}. Check the hours and try again."];
     } elseif (!$period) {
         $msg = ['type' => 'error', 'text' => 'No open pay period covers ' . date('M d, Y', strtotime($date))
                                            . '. Ask the admin to create or unlock it.'];

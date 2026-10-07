@@ -42,7 +42,10 @@ $isOpen    = $curPeriod && $curPeriod['status'] === 'Open';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emp_ids = $_POST['emp_ids'] ?? [];
     $type    = ($_POST['entry_type'] ?? 'Bonus') === 'Deduction' ? 'Deduction' : 'Bonus';
-    $amount  = round((float)($_POST['amount'] ?? 0), 2);
+    /* A real number only: "1e999" or "abc" are not amounts (they used to become INF / 0 and a database error) */
+    $amountN = numberOrNull(trim((string)($_POST['amount'] ?? '')));
+    $amount  = $amountN === null ? 0.0 : round($amountN, 2);
+    $negative = $overExempt = $overExemptIds = [];   /* who the guards below held back */
 
     $reason_select = $_POST['reason_select'] ?? '';
     $reason = $reason_select === '__custom__'
@@ -61,94 +64,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (empty($emp_ids) || $amount <= 0 || $reason === '') {
         $msg = ['type' => 'error', 'text' => 'Select at least one employee, enter an amount above zero, and choose a reason.'];
 
+    } elseif ($amount > MAX_SALARY_PESOS) {
+        $msg = ['type' => 'error', 'text' => 'That amount is more than ₱' . number_format(MAX_SALARY_PESOS, 2) . ' — check for a typing error.'];
+
     } else {
-        $who = currentActor();
-
-        /*
-         * Which finalize cycle is this? 0 means the period has never been
-         * closed, so the entry belongs to the normal first pass. Above 0 means
-         * the period was finalized, re-opened, and is now being corrected —
-         * that fact is stamped on both the history row (finalize_cycle) and the
-         * payroll row (revised_after_finalize) so the correction stays visible
-         * long after the period is locked again.
-         */
-        $cycle      = (int)($curPeriod['finalize_count'] ?? 0);
-        $isRevision = $cycle > 0;
-
-        $getPR = $db->prepare(
-            "SELECT id, emp_id, emp_name, gross_pay, withholding_tax, ot_late_adj,
-                    sss, philhealth, pagibig, bonus, other_deductions
-               FROM payroll WHERE period_id = ? AND emp_id = ?"
-        );
-        /* status stays Draft: the period is open, so these rows are not final */
-        $updPR = $db->prepare(
-            "UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft' WHERE id = ?"
-        );
-        /* Same update plus the revision stamp, used during a correction pass. */
-        $updPRrev = $db->prepare(
-            "UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft',
-                    revised_after_finalize = 1, revised_at = NOW()
-              WHERE id = ?"
-        );
-        $histIns = $db->prepare(
-            "INSERT INTO bonus_deduction_history
-             (entry_date, emp_id, emp_name, entry_type, amount, reason, processed_by, period_id, finalize_cycle)
-             VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?)"
-        );
-
-        $applied = 0;
-        $skipped = [];
+        $lines = [];
+        foreach ($emp_ids as $eid) {
+            $eid = trim((string)$eid);
+            if ($eid !== '') $lines[$eid] = $amount;       /* one entry per employee, however often the form named them */
+        }
 
         try {
-            /* History row and payroll row are written together or not at all. */
-            $db->beginTransaction();
+            /* History row and payroll row are written together or not at all; the guards are explained in recordAdjustments(). */
+            $res = recordAdjustments($db, $curPeriod, $lines, $type, $reason, !empty($_POST['confirm_over_exempt']));
+            $applied = $res['applied']; $skipped = $res['skipped'];
+            $negative = $res['negative']; $overExempt = $res['over']; $overExemptIds = $res['over_ids'];
+            $cycle = $res['cycle']; $isRevision = $res['is_revision'];
 
-            foreach ($emp_ids as $eid) {
-                $eid = trim((string)$eid);
-                if ($eid === '') continue;
-
-                $getPR->execute([$period_id, $eid]);
-                $row = $getPR->fetch();
-                if (!$row) { $skipped[] = $eid; continue; }
-
-                $bonus = (float)$row['bonus'];
-                $ded   = (float)$row['other_deductions'];
-                if ($type === 'Bonus') $bonus += $amount; else $ded += $amount;
-
-                /* net = gross (overtime already in it) + bonus − (tax + SSS + PhilHealth + Pag-IBIG + deductions) */
-                $net = ((float)$row['gross_pay'] + $bonus)
-                     - ((float)$row['withholding_tax'] + (float)$row['sss']
-                      + (float)$row['philhealth'] + (float)$row['pagibig'] + $ded);
-
-                ($isRevision ? $updPRrev : $updPR)->execute([$bonus, $ded, round($net, 2), $row['id']]);
-                $histIns->execute([$eid, $row['emp_name'], $type, $amount, $reason, $who, $period_id, $cycle]);
-                $applied++;
-            }
-
-            $db->commit();
-
-            /* The audit trail records the correction itself, not just its effect. */
-            if ($applied && $isRevision) {
-                logPeriodAudit($period_id, 'Revised', $cycle,
-                    "$type of PHP " . number_format($amount, 2) . " ($reason) applied to $applied employee(s) "
-                  . "after finalize #$cycle.");
-            }
-
-            $text = "$type of \u{20B1}" . number_format($amount, 2) . " applied to $applied employee(s) for "
-                  . $curPeriod['period_label'] . '. Payroll and history both updated.';
-            if ($isRevision && $applied) {
-                $text .= " This period was already finalized {$cycle}\u{00D7}, so the change is recorded as a revision"
-                       . ' and those employees are now flagged Revised. Finalize the period again when you are done.';
-            }
+            /* What the guards held back is always said, whether or not anything else was applied */
+            $held = '';
             if ($skipped) {
-                $text .= ' Skipped ' . count($skipped) . ' employee(s) with no payroll record in this period: '
+                $held .= ' Skipped ' . count($skipped) . ' employee(s) with no payroll record in this period: '
                        . implode(', ', $skipped) . '.';
             }
-            $msg = ['type' => $applied ? 'success' : 'warn', 'text' => $applied ? $text
-                : 'Nothing applied — none of the selected employees have a payroll record in ' . $curPeriod['period_label'] . '.'];
+            if ($negative) {
+                $held .= ' NOT applied to ' . count($negative) . ' employee(s), because the deduction would make their net pay negative: '
+                       . implode('; ', $negative) . '. Lower the amount, or deduct it over several pay periods.';
+            }
+            if ($overExempt) {
+                $held .= ' NOT applied yet to ' . count($overExempt) . ' employee(s), because the bonus takes their year\'s tax-exempt benefits over the ₱'
+                       . number_format(BIR_EXEMPT_BENEFITS, 0) . ' ceiling: ' . implode('; ', $overExempt)
+                       . '. The part above the ceiling is taxable compensation and this system does not withhold tax on a bonus — '
+                       . 'record it only if the tax on the excess is being handled separately.';
+            }
+
+            if ($applied) {
+                $text = "$type of \u{20B1}" . number_format($amount, 2) . " applied to $applied employee(s) for "
+                      . $curPeriod['period_label'] . '. Payroll and history both updated.';
+                if ($isRevision) {
+                    $text .= " This period was already finalized {$cycle}\u{00D7}, so the change is recorded as a revision"
+                           . ' and those employees are now flagged Revised. Finalize the period again when you are done.';
+                }
+                $msg = ['type' => ($negative || $overExempt) ? 'warn' : 'success', 'text' => $text . $held];
+            } elseif ($negative || $overExempt) {
+                $msg = ['type' => 'error', 'text' => 'Nothing applied.' . $held];
+            } else {
+                $msg = ['type' => 'warn', 'text' => 'Nothing applied — none of the selected employees have a payroll record in '
+                    . $curPeriod['period_label'] . '.' . $held];
+            }
 
         } catch (PDOException $e) {
-            if ($db->inTransaction()) $db->rollBack();
             $msg = ['type' => 'error', 'text' => 'Nothing was saved. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
         }
     }
@@ -248,6 +213,24 @@ if ($period_id) {
 
     <?php if ($msg): ?>
         <div class="alert alert-<?= $msg['type'] ?>"><?= htmlspecialchars($msg['text']) ?></div>
+    <?php endif; ?>
+
+    <?php if (!empty($overExemptIds)): ?>
+        <!-- A bonus that takes someone over the ₱90,000 tax-exempt ceiling waits for a decision. Only THOSE employees are
+             re-sent, so nobody who was already paid gets the bonus twice. -->
+        <form method="POST" class="alert alert-warn" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <input type="hidden" name="period_id" value="<?= (int)$period_id ?>">
+            <input type="hidden" name="entry_type" value="Bonus">
+            <input type="hidden" name="amount" value="<?= htmlspecialchars((string)($_POST['amount'] ?? '')) ?>">
+            <input type="hidden" name="reason_select" value="<?= htmlspecialchars((string)($_POST['reason_select'] ?? '')) ?>">
+            <input type="hidden" name="reason_custom" value="<?= htmlspecialchars((string)($_POST['reason_custom'] ?? '')) ?>">
+            <?php foreach ($overExemptIds as $oid): ?>
+                <input type="hidden" name="emp_ids[]" value="<?= htmlspecialchars($oid) ?>">
+            <?php endforeach; ?>
+            <input type="hidden" name="confirm_over_exempt" value="1">
+            <span>Record the bonus for <?= count($overExemptIds) ?> employee(s) anyway, without withholding tax on the part above the ceiling?</span>
+            <button type="submit" class="btn btn-red">Record anyway</button>
+        </form>
     <?php endif; ?>
 
     <!-- Period picker: reloads the page so the roster below matches the period -->

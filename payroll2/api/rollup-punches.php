@@ -151,10 +151,11 @@ foreach ($byDay as $empId => $days) {
         $outTs = strtotime($last);
         $span  = ($outTs - $inTs) / 3600.0;
 
-        /* Deduct the unpaid break only when the day is long enough to have
-           actually taken one — a 4-hour half day should not lose an hour. */
+        /* Deduct the unpaid break only from a day long enough to have taken one — but never so that a LONGER
+           day pays LESS: a half day (4 h) pays 4 h, and so must one that runs a few minutes past it. Past half
+           the duty day the break comes off, down to no less than that half day. */
         if ($span > ($std / 2)) {
-            $span -= $breakMinutes / 60.0;
+            $span = max($std / 2, $span - $breakMinutes / 60.0);
         }
         if ($span < 0) $span = 0;
 

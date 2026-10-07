@@ -157,7 +157,7 @@ $unsignedCount = count($rows) - $signedCount;
                 <div class="ps-item"><div class="ps-label">SSS</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['sss'], 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">PhilHealth</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['philhealth'], 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Pag-IBIG</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['pagibig'], 2) ?></div></div>
-                <div class="ps-item"><div class="ps-label">Tax</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['withholding_tax'], 2) ?></div></div>
+                <div class="ps-item"><div class="ps-label"><?= (float)$selected['withholding_tax'] < 0 ? 'Tax refund' : 'Tax' ?></div><div class="ps-value" style="color:<?= (float)$selected['withholding_tax'] < 0 ? '#16a34a' : '#dc2626' ?>;"><?= (float)$selected['withholding_tax'] < 0 ? '+' : '-' ?>₱<?= number_format(abs((float)$selected['withholding_tax']), 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Bonus</div><div class="ps-value" style="color:#16a34a;">+₱<?= number_format($selected['bonus'], 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Other Deductions</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['other_deductions'], 2) ?></div></div>
                 <div class="ps-item" style="border-top:2px solid #22c55e;">

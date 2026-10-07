@@ -188,7 +188,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
                         <td>₱<?= number_format($r['sss'], 2) ?></td>
                         <td>₱<?= number_format($r['philhealth'], 2) ?></td>
                         <td>₱<?= number_format($r['pagibig'], 2) ?></td>
-                        <td>₱<?= number_format($r['withholding_tax'], 2) ?></td>
+                        <td<?= (float)$r['withholding_tax'] < 0 ? ' title="Refund of tax withheld earlier this month"' : '' ?>><?= pesoFmt($r['withholding_tax']) ?></td>
                         <td>₱<?= number_format($r['bonus'], 2) ?></td>
                         <td>₱<?= number_format($r['other_deductions'], 2) ?></td>
                         <td><strong>₱<?= number_format($r['net_pay'], 2) ?></strong></td>

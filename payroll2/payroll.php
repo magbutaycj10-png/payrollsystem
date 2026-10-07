@@ -54,8 +54,16 @@ $schedule = '';
 $contribNote = '';
 $nAtt = 0;
 $current = null;
+$stale  = [];     /* lines whose contributions / tax no longer settle the month (see settlementDrift) */
+$hasDays = false; /* the period holds day-by-day records, so it can be recomputed from them */
+$negNet = array_values(array_filter($payrollRows, fn($r) => (float)$r['net_pay'] < 0));
 if ($curPeriod) {
     $ctx = payContext($db, $period_id);
+    $stale = $payrollRows ? settlementDrift($db, $period_id, $ctx) : [];
+    /* An OPEN period always reflects today's rates and Settings, so any difference is worth a Recompute. A FINALIZED one is history:
+       it is only out of date when an earlier cut-off of its month was corrected after it was finalized — a later raise or Settings
+       change must not tell anyone to "recompute" (and so rewrite) last month's pay. */
+    if ($stale && !$isOpen && !earlierRunChangedAfterFinalize($db, $period_id)) $stale = [];
     $schedule = periodTypeLabel($curPeriod);
     /* How SSS / PhilHealth / Pag-IBIG are taken on this pay run (month-to-date) */
     $contribNote = contributionPlanText($ctx);
@@ -65,6 +73,7 @@ if ($curPeriod) {
     $q = function (string $sql) use ($db, $period_id) { $st = $db->prepare($sql); $st->execute([$period_id]); return $st->fetch(); };
     $att   = $q("SELECT COUNT(*) n, SUM(manager_approved = 1) ok, SUM(manager_approved = 2) flagged FROM attendance WHERE period_id = ?");
     $dayRc = $q("SELECT COUNT(*) n, MIN(att_date) a, MAX(att_date) b FROM biometric_daily WHERE period_id = ?");
+    $hasDays = (int)$dayRc['n'] > 0;
     $print = $q("SELECT COUNT(*) n FROM print_log WHERE period_id = ?");
     try { $sig = $q("SELECT COUNT(*) n FROM payslip_signatures WHERE period_id = ?"); } catch (PDOException $e) { $sig = ['n' => 0]; }
 
@@ -201,6 +210,10 @@ if ($period_id) {
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <?php if ($isOpen): ?>
+                <?php if ($hasDays): ?>
+                <button class="btn btn-ghost" onclick="recomputePayroll()"
+                        title="Rebuild this period (and the open cut-offs after it) from the saved days, with the current rules and Settings">Recompute</button>
+                <?php endif; ?>
                 <button class="btn btn-green" onclick="finalizePayroll()">
                     <?= (int)($curPeriod['finalize_count'] ?? 0) > 0 ? 'Re-finalize Period' : 'Finalize Period' ?>
                 </button>
@@ -294,6 +307,29 @@ if ($period_id) {
             </div>
         <?php endif; ?>
 
+        <?php if ($stale): ?>
+        <!-- Contributions / tax saved here were worked out against a month that has since changed -->
+        <div class="alert alert-warn">
+            <span>
+                <strong><?= count($stale) ?> line(s) in this period no longer settle the month correctly.</strong>
+                Their SSS / PhilHealth / Pag-IBIG / tax were worked out against earlier cut-offs of the month (or Settings) that have since changed
+                (<?= htmlspecialchars(implode(', ', array_slice(array_map(fn($id) => $id, array_keys($stale)), 0, 6))) ?><?= count($stale) > 6 ? ', …' : '' ?>).
+                <?= $isOpen ? 'Press <strong>Recompute</strong> to refresh them' : 'Unlock this period, press <strong>Recompute</strong>, then finalize it again' ?>.
+            </span>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($negNet): ?>
+        <!-- A payslip that would show a negative amount to pay -->
+        <div class="alert alert-error">
+            <span>
+                <strong><?= count($negNet) ?> employee(s) have a negative net pay:</strong>
+                <?= htmlspecialchars(implode('; ', array_map(fn($r) => $r['emp_name'] . ' (' . pesoFmt($r['net_pay']) . ')', array_slice($negNet, 0, 6)))) ?><?= count($negNet) > 6 ? '; …' : '' ?>.
+                The statutory minimum contributions (SSS, PhilHealth) or a deduction are larger than what was earned. Check their days, rate and deductions before finalizing.
+            </span>
+        </div>
+        <?php endif; ?>
+
         <?php if ($rev['revised'] || $rev['entries']): ?>
         <!-- The period was corrected after a finalize. Both halves of that —
              the flagged payroll rows and the stamped history entries — are
@@ -356,7 +392,7 @@ if ($period_id) {
             <table class="data-table" id="payrollTable">
                 <thead>
                     <tr>
-                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unexcused absent days (deducted from salaried pay) / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
+                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unpaid days — absent, or a salaried employee's working days before the hire date (deducted from salaried pay) / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
                         <th title="Pay for the days worked, after undertime and absences">Basic Pay</th>
                         <th title="Overtime pay less late deductions">OT − Late</th>
                         <th title="Basic + OT − late — the timesheet's GROSS PAY">Gross Pay</th>
@@ -402,10 +438,10 @@ if ($period_id) {
                         <td>₱<?= number_format($r['sss'], 2) ?></td>
                         <td>₱<?= number_format($r['philhealth'], 2) ?></td>
                         <td>₱<?= number_format($r['pagibig'], 2) ?></td>
-                        <td>₱<?= number_format($r['withholding_tax'], 2) ?></td>
+                        <td<?= (float)$r['withholding_tax'] < 0 ? ' title="Refund: tax withheld earlier this month that the month did not owe" style="color:#15803d;"' : '' ?>><?= pesoFmt($r['withholding_tax']) ?></td>
                         <td>₱<?= number_format($r['bonus'], 2) ?></td>
                         <td>₱<?= number_format($r['other_deductions'], 2) ?></td>
-                        <td><strong>₱<?= number_format($r['net_pay'], 2) ?></strong></td>
+                        <td><strong<?= (float)$r['net_pay'] < 0 ? ' style="color:#b91c1c;"' : '' ?>><?= pesoFmt($r['net_pay']) ?></strong></td>
                         <td style="white-space:nowrap;">
                             <span class="badge badge-<?= $r['status'] === 'Finalized' ? 'green' : 'blue' ?>">
                                 <?= $r['status'] ?>

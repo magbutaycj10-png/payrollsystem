@@ -15,10 +15,14 @@ $activePage = 'forecast';
 
 /* The payroll calendar drives the wording: a kinsenas shop forecasts the
    next PERIOD (the other half of the month), not the next month. */
-$fcPeriodType  = getSetting('payroll_period', 'Monthly');
+/* …read from the most recent period that has payroll (each period carries its own schedule); Settings only when it has none */
+$fcLast        = getDB()->query("SELECT pp.period_type FROM payroll_periods pp
+                                  WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
+                                  ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1")->fetchColumn();
+$fcPeriodType  = periodType($fcLast ?: null);
 $fcIsSplit     = $fcPeriodType !== 'Monthly';
-$fcPeriodWord  = $fcIsSplit ? 'period' : 'month';
-$fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
+$fcPeriodWord  = $fcPeriodType === 'Weekly' ? 'week' : ($fcIsSplit ? 'cut-off' : 'month');
+$fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next Cut-off' : 'Next Month');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -132,8 +136,16 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
         <div>
             <h1>Salary Forecast</h1>
             <p>
-                AI-powered prediction of the next <?= $fcPeriodWord ?>&rsquo;s total net pay using Random Forest and ARIMA
+                AI-powered prediction of the next <?= $fcPeriodWord ?>&rsquo;s payroll cost using Random Forest and ARIMA
                 &nbsp;&middot;&nbsp; <?= htmlspecialchars($fcPeriodType) ?> payroll calendar<?= $fcPeriodType === 'Semi-Monthly' ? ' (kinsenas)' : '' ?>
+            </p>
+            <p style="margin-top:6px;">
+                <label for="fcTarget" style="font-weight:600;font-size:.85rem;">Forecast:</label>
+                <select id="fcTarget" class="form-control" style="display:inline-block;width:auto;min-width:300px;" onchange="runForecast()">
+                    <option value="total_labor_cost" selected>Total labor cost — what the budget must cover</option>
+                    <option value="total_net">Net pay — what employees take home</option>
+                </select>
+                <span id="fcTargetNote" style="font-size:.8rem;color:#6b7280;margin-left:8px;"></span>
             </p>
         </div>
         <!-- Export button — JS populates history before enabling this -->
@@ -156,7 +168,7 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
         <div class="fc-cards">
 
             <div class="card card-accent fc-card" style="grid-column: span 2;">
-                <div class="card-label">Consensus Forecast — <?= $fcPeriodNoun ?> Net Pay</div>
+                <div class="card-label" id="cardConsensusLabel">Consensus Forecast — <?= $fcPeriodNoun ?></div>
                 <div class="card-value" id="cardConsensus">—</div>
                 <div class="card-sub"  id="cardDiff">vs last period</div>
             </div>
@@ -190,7 +202,7 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
         <!-- ── Forecast chart ── -->
         <div class="box" style="margin-bottom:24px;">
             <div class="box-header">
-                <h2>Historical Net Pay + Forecast</h2>
+                <h2 id="chartTitle">Historical Payroll + Forecast</h2>
                 <div style="font-size:.8rem;color:#6b7280;">
                     <span style="color:#3b82f6;">&#9644;</span> Actual &nbsp;
                     <span style="color:#22c55e;">&#9644;</span> Random Forest &nbsp;
@@ -216,7 +228,7 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
                         <tr>
                             <th>Period</th>
                             <th>Type</th>
-                            <th>Net Pay</th>
+                            <th id="thTpValue">Amount</th>
                             <th>Source</th>
                         </tr>
                     </thead>
@@ -241,6 +253,8 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
                             <th>Bonuses</th>
                             <th>Deductions</th>
                             <th>Net Pay</th>
+                            <th title="The company's share of SSS, Employees' Compensation, PhilHealth and Pag-IBIG">Employer Share</th>
+                            <th title="Gross pay + bonus + the employer's share">Labor Cost</th>
                             <th>Action</th>
                         </tr>
                     </thead>
@@ -540,6 +554,7 @@ $fcPeriodNoun  = $fcIsSplit ? 'Next Period' : 'Next Month';
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>const FC_NOUN = <?= json_encode($fcPeriodNoun) ?>;</script>
 <script src="assets/js/forecast.js"></script>
 <script>
 /* ── Shared state ── */

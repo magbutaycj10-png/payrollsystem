@@ -53,6 +53,7 @@ $autoOt = !empty($body['auto_ot']);
    someone else's employees (manager uploads) — neither is saved, both reported */
 $unmatched  = [];
 $outOfScope = [];
+$invalid    = [];   /* day records with impossible hours — not saved, and reported (see dayHoursProblem) */
 $scopeSet   = $who['scope'] === null ? null : array_flip($who['scope']);
 
 try {
@@ -91,6 +92,15 @@ try {
 
         $dayHours = $empData[$emp_id]['day_hours'];
         $off   = !empty($r['day_off']);
+        /* Impossible hours (80 h in a day, a negative figure, text) are not saved — and not quietly turned into
+           something else either: a day with the hours missing is paid as a full duty day. They are reported. */
+        if (!$off) {
+            $problem = dayHoursProblem($r['hours_worked'] ?? null, $r['overtime_hours'] ?? 0, $r['late_hours'] ?? 0, $r['undertime_hours'] ?? null);
+            if ($problem !== null) {
+                $invalid["$emp_id|$att_date"] = ['emp_name' => $empData[$emp_id]['full_name'], 'att_date' => $att_date, 'why' => $problem];
+                continue;
+            }
+        }
         $hours = ($r['hours_worked'] ?? null) === null ? $dayHours : max(0, (float)$r['hours_worked']);
         $ot    = max(0, (float)($r['overtime_hours'] ?? 0));
         $late  = max(0, (float)($r['late_hours']     ?? 0));
@@ -130,6 +140,12 @@ try {
         jsonResponse(['error' => "These days are already saved in another pay period ("
             . implode(', ', array_keys($elsewhere)) . "), so nothing was saved again. "
             . "Upload the file into that period instead."], 409);
+    }
+    if ($inserted === 0 && $invalid) {
+        $first = reset($invalid);
+        jsonResponse(['error' => 'Nothing was saved: ' . count($invalid) . ' day record(s) have hours that cannot be right (e.g. '
+            . $first['emp_name'] . ', ' . $first['att_date'] . ': ' . $first['why'] . '). Fix them in the file and upload again.',
+            'invalid' => array_slice(array_values($invalid), 0, 50)], 400);
     }
     if ($inserted === 0) {
         $why = $unmatched
@@ -201,6 +217,9 @@ try {
     if ($outOfScope) {
         $message .= ' ' . count($outOfScope) . ' employee(s) are not assigned to you — those rows were not saved.';
     }
+    if ($invalid) {
+        $message .= ' ' . count($invalid) . ' day record(s) were NOT saved because their hours cannot be right.';
+    }
 
     jsonResponse([
         'success'      => true,
@@ -208,6 +227,8 @@ try {
         'count'        => $count,
         'unmatched'    => array_values($unmatched),
         'out_of_scope' => array_values($outOfScope),
+        'invalid'      => array_slice(array_values($invalid), 0, 50),
+        'invalid_count' => count($invalid),
         'message'      => $message,
         'outside_period' => $outsidePeriod,
         'elsewhere'      => $elsewhere,

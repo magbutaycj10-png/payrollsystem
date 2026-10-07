@@ -101,6 +101,7 @@ function dayNote(out) {
     const bits = [];
     if (out.off)    bits.push(`${out.off} day(s) off`);
     if (out.marked) bits.push(`${out.marked} day(s) marked without hours (e.g. ABSENT)`);
+    if (out.invalid) bits.push(`⚠ ${out.invalid} day(s) SKIPPED because the hours could not be read (e.g. "08:60") — fix them in the file and upload again`);
     return (bits.length ? ', ' + bits.join(', ') : '') + (out.blank ? ` (${out.blank} blank day(s) skipped)` : '');
 }
 
@@ -110,7 +111,7 @@ function dayNote(out) {
  */
 function dayRowsFromTable(rows, col, fixedName) {
     const out = [];
-    let worked = 0, off = 0, marked = 0, blank = 0;
+    let worked = 0, off = 0, marked = 0, blank = 0, invalid = 0;
     rows.forEach(r => {
         const date = toDate(r[col.date]);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;          /* totals, blanks */
@@ -118,8 +119,12 @@ function dayRowsFromTable(rows, col, fixedName) {
         const total = toHours(r[col.total]);
         const ot    = col.ot   >= 0 ? toHours(r[col.ot])   : 0;
         const late  = col.late >= 0 ? toHours(r[col.late]) : 0;
+        const underRaw = col.under >= 0 && r[col.under] !== '' && r[col.under] !== null ? toHours(r[col.under]) : '';
         const remark = col.remarks >= 0 ? String(r[col.remarks] ?? '').trim() : '';
         if (!name) return;
+        /* An unreadable duration ("08:60", "8h30m") is NaN. It must never travel on as a number: a day posted without
+           hours is paid as a full duty day, and "08:60" used to read as 860 hours. Skip the row and say so. */
+        if ([total, ot, late, underRaw].some(v => typeof v === 'number' && Number.isNaN(v))) { invalid++; return; }
         if (total <= 0 && ot <= 0) {                                /* a day without hours */
             const k = normHeader(remark);
             if (OFF_REMARKS.includes(k)) { out.push([date, name, '', 0, 0, 0, '', 'OFF']); off++; }
@@ -129,18 +134,18 @@ function dayRowsFromTable(rows, col, fixedName) {
         }
         const regular = ot > 0 && total >= ot ? total - ot : total;
         /* the sheet's own undertime (whole hours) when it has the column; '' = not stated */
-        const under = col.under >= 0 && r[col.under] !== '' && r[col.under] !== null ? round2(toHours(r[col.under])) : '';
+        const under = underRaw === '' ? '' : round2(underRaw);
         out.push([date, name, '', round2(regular), round2(ot), round2(late), under, remark]);
         worked++;
     });
-    return { rows: out, worked, off, marked, blank };
+    return { rows: out, worked, off, marked, blank, invalid };
 }
 
 /* ── 3. Timesheet workbook — one sheet per employee ─────────── */
 function readTimesheetWorkbook(grids) {
     const all   = [];
     const names = [];
-    const tally = { worked: 0, off: 0, marked: 0, blank: 0 };
+    const tally = { worked: 0, off: 0, marked: 0, blank: 0, invalid: 0 };
 
     grids.forEach(g => {
         let name = '';
@@ -206,7 +211,9 @@ function readDeviceReport(grids) {
             let worked = pair(mi, mo) + pair(ai, ao);
             if (worked === 0 && regular.length >= 2) {            /* e.g. one IN, one OUT */
                 let span = (Math.max(...regular) - Math.min(...regular)) / 60;
-                if (span > std / 2) span -= UPLOAD_SHIFT.breakMin / 60;
+                /* the break comes off a day longer than half the duty day — but never so that a longer day pays less
+                   (4:00 → 4.00 h, 4:06 → 4.00 h, not 3.10 h); same rule as api/rollup-punches.php */
+                if (span > std / 2) span = Math.max(std / 2, span - UPLOAD_SHIFT.breakMin / 60);
                 worked = Math.max(0, span);
             }
             /* overtime punches only; hours past the duty day are split off on the

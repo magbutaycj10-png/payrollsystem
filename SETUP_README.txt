@@ -1,5 +1,6 @@
 # 🖥 L&N Pharmacy Payroll System — Desktop App Setup
 No XAMPP needed. One double-click to open.
+(What the system does, how it is tested and how to deploy it online: see README.md.)
 
 ---
 
@@ -16,14 +17,17 @@ C:\PayrollApp\
 │
 ├── php\                ← Portable PHP (you download this once)
 │   ├── php.exe
-│   ├── php.ini         ← Copy the php.ini from this zip here
+│   ├── php.ini         ← Copy the php.ini from this folder here
 │   └── ext\
 │       └── (dll files)
 │
-└── payroll2\           ← All the app PHP files
-    ├── index.php
-    ├── dashboard.php
-    └── ...
+├── payroll2\           ← All the app PHP files
+│   ├── index.php
+│   ├── dashboard.php
+│   ├── sql\database.sql  ← the base tables (Step 7)
+│   └── ...
+│
+└── tests\              ← optional: the automatic checks (run-tests.bat)
 ```
 
 ---
@@ -36,7 +40,7 @@ Create a folder:  `C:\PayrollApp\`
 ---
 
 ### Step 2 — Copy your app files
-Extract the `payroll2\` folder from the zip into `C:\PayrollApp\payroll2\`
+Copy this whole project (`payroll2\`, `launch.*`, `stop.bat`, `php.ini`, `secrets.bat.example`, …) into `C:\PayrollApp\`
 
 ---
 
@@ -46,7 +50,7 @@ Extract the `payroll2\` folder from the zip into `C:\PayrollApp\payroll2\`
 2. Download **PHP 8.2 (or 8.3) — VS16 x64 Thread Safe** → `.zip` file
 3. Extract it → rename the folder to `php`
 4. Move it to `C:\PayrollApp\php\`
-5. Copy the `php.ini` file (from this zip) into `C:\PayrollApp\php\php.ini`
+5. Copy the `php.ini` file (from this project) into `C:\PayrollApp\php\php.ini`
 
 > If there's already a `php.ini-production` inside, you can use that instead —
 > just make sure these lines are uncommented (remove the `;`):
@@ -63,7 +67,7 @@ Extract the `payroll2\` folder from the zip into `C:\PayrollApp\payroll2\`
 1. Go to **https://aiven.io** → your payroll service
 2. Click **Connection information** → scroll to the bottom
 3. Click **Download CA Certificate** → save as `ca.pem`
-4. Place it at: `C:\PayrollApp\ca.pem`
+4. Place it at: `C:\PayrollApp\ca.pem`  (or `C:\PayrollApp\payroll2\ca.pem`)
 
 `ca.pem` is listed in `.gitignore`, so it never goes to GitHub.
 
@@ -87,20 +91,26 @@ set DB_PASS=your-password
 
 ---
 
-### Step 6 — Copy launcher files
+### Step 6 — Launcher files
 
-Copy these files from this zip into `C:\PayrollApp\`:
-- `launch.vbs`
-- `launch.bat`
-- `stop.bat`
+`launch.vbs`, `launch.bat` and `stop.bat` must sit directly in `C:\PayrollApp\`
+(they were copied with the project in Step 2).
 
 ---
 
-### Step 7 — Import the database
+### Step 7 — Create the tables (a NEW, empty database only)
 
-Use **TablePlus** (free) or **DBeaver** (free) to connect to Aiven with the same
+Use **DBeaver** (free) or **TablePlus** (free) to connect to the database with the same
 details you put in `secrets.bat` (SSL CA: point to your `ca.pem`), then:
-File → Import → select `payroll2\database.sql` → Run
+
+1. File → Open File → `payroll2\sql\database.sql`
+2. Make sure the right connection and database are selected
+3. **Alt + X** (Execute script)
+
+That creates the seven base tables. It is safe to run again (every statement is `CREATE TABLE IF NOT EXISTS`).
+Everything else — the sign-in table, leave, daily attendance, the audit trail, signatures — the
+application creates by itself the first time a page loads. **Skip this step if you already have a
+payroll database**: the update changes no tables.
 
 ---
 
@@ -128,7 +138,9 @@ File → Import → select `payroll2\database.sql` → Run
    DB_HOST   DB_PORT   DB_NAME   DB_USER   DB_PASS
    ```
    and the certificate, either as a **Secret File** named `ca.pem`, or as an
-   environment variable `DB_SSL_CA_PEM` holding the certificate's text.
+   environment variable `DB_SSL_CA_PEM` holding the certificate's text
+   (Render's Secret Files are not readable by Apache's user — the environment
+   variable is the one that works).
    The Dockerfile already sets `APP_ENV=production`, hides PHP errors and
    versions, and blocks the code-only folders (`includes`, `sql`, `tools`).
 4. **In Aiven**, under the service's *Allowed IP addresses*, limit access to
@@ -146,6 +158,8 @@ File → Import → select `payroll2\database.sql` → Run
 | **System opens in browser** | Automatically at `http://localhost:8765` |
 | **Stop the system** | Double-click `stop.bat` (or just close the browser — PHP stops automatically when idle) |
 | **Already running?** | Double-clicking again just reopens the browser tab |
+| **13th month pay** | Payroll Process → 13th Month Pay (see README.md) |
+| **Check the numbers** | Open `tests\dbeaver_checks.sql` in DBeaver on your database and press Alt+X — read-only queries that flag anything that does not add up |
 
 ---
 

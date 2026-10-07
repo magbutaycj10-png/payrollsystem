@@ -1,0 +1,32 @@
+# portable PHP runtime - Windows binaries, 85 MB
+php/
+
+# real credentials - never commit (secrets.bat.example is the template)
+secrets.bat
+.env
+*.env
+
+# the database's CA certificate - kept on this PC and in Render's secrets
+ca.pem
+*.pem
+
+# data snapshots taken before database changes - real employee and payroll data
+backups/
+
+# attendance files with real names and pay
+samples/
+
+# logs
+*.log
+
+# python bytecode
+__pycache__/
+*.pyc
+
+# per-device agent config, holds an API key once filled in
+# (agent/config.example.ini is the template)
+agent/config.ini
+
+# OS noise
+Thumbs.db
+desktop.ini

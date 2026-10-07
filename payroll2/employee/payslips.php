@@ -213,8 +213,8 @@ if ($rows) {
                             if ((float)($r['absent_deduction'] ?? 0) > 0): ?> <small style="color:#dc2626;">(−₱<?= number_format($r['absent_deduction'], 2) ?>)</small><?php endif; ?></div>
                     </div>
                     <div class="payslip-item">
-                        <div class="payslip-item-label">Tax Withheld</div>
-                        <div class="payslip-item-value" style="color:#dc2626;">₱<?= number_format($r['withholding_tax'], 2) ?></div>
+                        <div class="payslip-item-label"><?= (float)$r['withholding_tax'] < 0 ? 'Tax Refunded' : 'Tax Withheld' ?></div>
+                        <div class="payslip-item-value" style="color:<?= (float)$r['withholding_tax'] < 0 ? '#16a34a' : '#dc2626' ?>;"><?= pesoFmt(abs((float)$r['withholding_tax'])) ?></div>
                     </div>
                     <div class="payslip-item">
                         <div class="payslip-item-label">SSS</div>

@@ -11,3 +11,6 @@ agent/
 *.env
 php.ini
 SETUP_README.txt
+tests/
+README.md
+CHANGELOG.md
