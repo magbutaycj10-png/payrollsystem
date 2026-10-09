@@ -1,6 +1,6 @@
 <?php
 /* =============================================================
- * print-doc.php — the single print endpoint for the admin portal.
+ * print-doc.php - the single print endpoint for the admin portal.
  *
  * Every "Print" button in the admin side opens this page, so the
  * individual payslip, the batch "Print All", the signed receipt and
@@ -45,7 +45,7 @@ function logPrintDoc(PDO $db, string $name, string $type = 'Physical Print', ?in
 }
 
 /* -------------------------------------------------------------
- * doc=payslip — payslip & acknowledgement receipt
+ * doc=payslip - payslip & acknowledgement receipt
  * ----------------------------------------------------------- */
 if ($doc === 'payslip') {
     $payrollId = (int)($_GET['payroll_id'] ?? 0);
@@ -86,8 +86,8 @@ if ($doc === 'payslip') {
     $ctx['title']        = 'Payslip & Acknowledgement Receipt';
 
     $logName = $payrollId
-        ? 'Payslip / Acknowledgement Receipt — ' . ($rows[0]['emp_name'] ?? '#' . $payrollId)
-        : 'Payslip / Acknowledgement Receipts (All) — ' . $ctx['period_label'];
+        ? 'Payslip / Acknowledgement Receipt - ' . ($rows[0]['emp_name'] ?? '#' . $payrollId)
+        : 'Payslip / Acknowledgement Receipts (All) - ' . $ctx['period_label'];
     logPrintDoc($db, $logName, 'Physical Print', (int)($rows[0]['period_id'] ?? $periodId));
 
     echo birRenderPayslipDoc($rows, $ctx);
@@ -95,7 +95,7 @@ if ($doc === 'payslip') {
 }
 
 /* -------------------------------------------------------------
- * doc=summary — payroll register with totals
+ * doc=summary - payroll register with totals
  * ----------------------------------------------------------- */
 if ($doc === 'summary') {
     $periodId = (int)($_GET['period'] ?? 0);
@@ -108,17 +108,17 @@ if ($doc === 'summary') {
     $st->execute([$periodId]);
     $rows = $st->fetchAll();
 
-    $ctx['period_label'] = $per['period_label'] ?? '—';
+    $ctx['period_label'] = $per['period_label'] ?? '-';
     $ctx['title']        = 'Payroll Register & Summary';
 
-    logPrintDoc($db, 'Payroll Register & Summary — ' . $ctx['period_label'], 'Physical Print', $periodId);
+    logPrintDoc($db, 'Payroll Register & Summary - ' . $ctx['period_label'], 'Physical Print', $periodId);
 
     echo birRenderSummaryDoc($rows, $ctx);
     exit;
 }
 
 /* -------------------------------------------------------------
- * doc=adjustment — one bonus / deduction acknowledgement receipt
+ * doc=adjustment - one bonus / deduction acknowledgement receipt
  * ----------------------------------------------------------- */
 if ($doc === "adjustment") {
     $id     = (int)($_GET["id"] ?? 0);
@@ -139,7 +139,7 @@ if ($doc === "adjustment") {
     $ctx["title"]        = ($rows[0]["entry_type"] ?? "Adjustment") . " Advice & Receipt";
 
     if ($rows) {
-        logPrintDoc($db, $rows[0]["entry_type"] . " Receipt — " . $rows[0]["emp_name"],
+        logPrintDoc($db, $rows[0]["entry_type"] . " Receipt - " . $rows[0]["emp_name"],
                     "Physical Print", (int)($rows[0]["period_id"] ?? 0));
     }
 
@@ -148,7 +148,7 @@ if ($doc === "adjustment") {
 }
 
 /* -------------------------------------------------------------
- * doc=adjustments — bonus & deduction register (honours the same
+ * doc=adjustments - bonus & deduction register (honours the same
  * emp_id / period_id / type filters as history.php)
  * ----------------------------------------------------------- */
 if ($doc === "adjustments") {
@@ -196,15 +196,15 @@ if ($doc === "adjustments") {
         </tr>";
     }
     if ($body === "") $body = "<tr><td colspan=\"10\" style=\"text-align:center;padding:8mm;\">No adjustment records for this selection.</td></tr>";
-    else $body .= "<tr><td colspan=\"9\" style=\"border-top:1.4px solid #111827;font-weight:800;\">TOTAL &mdash; bonus "
+    else $body .= "<tr><td colspan=\"9\" style=\"border-top:1.4px solid #111827;font-weight:800;\">TOTAL - bonus "
                 . birPeso($tBonus) . " / deduction " . birPeso($tDed) . "</td>"
                 . "<td class=\"n\" style=\"border-top:1.4px solid #111827;font-weight:800;\">" . birPeso($tBonus - $tDed) . "</td></tr>";
 
     logPrintDoc($db, "Bonus & Deduction Register", "Physical Print", $fPeriod ?: null);
 
     $sub = count($rows) . " entry(ies)"
-         . ($fType !== "" ? " — " . $fType . " only" : "")
-         . ($fRev ? " — corrections made after finalize only" : "");
+         . ($fType !== "" ? " - " . $fType . " only" : "")
+         . ($fRev ? " - corrections made after finalize only" : "");
 
     echo birRenderReportDoc(
         "Bonus & Deduction Register",
@@ -218,7 +218,7 @@ if ($doc === "adjustments") {
     exit;
 }
 /* -------------------------------------------------------------
- * doc=printlog — print / export audit trail
+ * doc=printlog - print / export audit trail
  * ----------------------------------------------------------- */
 if ($doc === 'printlog') {
     $logs = $db->query("
@@ -244,7 +244,7 @@ if ($doc === 'printlog') {
 
     echo birRenderReportDoc(
         'Document Print & Export Register',
-        'Audit trail of issued documents — ' . count($logs) . ' most recent entries',
+        'Audit trail of issued documents - ' . count($logs) . ' most recent entries',
         ['#' => '', 'Date & Time' => '', 'Document Issued' => '', 'Type' => '', 'Pay Period' => '', 'Issued By' => ''],
         $body,
         $ctx
@@ -253,7 +253,7 @@ if ($doc === 'printlog') {
 }
 
 /* -------------------------------------------------------------
- * doc=leaves — leave request register
+ * doc=leaves - leave request register
  * ----------------------------------------------------------- */
 if ($doc === 'leaves') {
     $rows = $db->query("SELECT * FROM leave_requests ORDER BY created_at DESC LIMIT 300")->fetchAll();

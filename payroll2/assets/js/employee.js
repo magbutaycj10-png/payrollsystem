@@ -4,7 +4,7 @@ function updateSalaryLabel() {
     const type = document.getElementById('f_salary_type').value;
     /* Kinsenas employees quote their rate per half-month, not per month */
     const hint = type === 'daily'    ? '(₱/day)'
-               : type === 'kinsenas' ? '(₱/kinsena — half month)'
+               : type === 'kinsenas' ? '(₱/kinsena - half month)'
                :                       '(₱/month)';
     document.getElementById('salaryLabel').innerHTML =
         'Base Salary <span style="font-weight:400;color:#9ca3af;">' + hint + '</span>';

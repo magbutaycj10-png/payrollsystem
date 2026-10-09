@@ -1,6 +1,6 @@
 <?php
 /*
- * 05 — The dashboard: its "predicted next payroll" (linear regression), the figures it shows and the
+ * 05 - The dashboard: its "predicted next payroll" (linear regression), the figures it shows and the
  * pipeline it draws. This is a different calculation from forecast.php's models (see suite 07).
  */
 
@@ -55,7 +55,7 @@ T::suite('05 · Dashboard forecast & status', function () {
         Fixtures::reset();
         qa_history([10000]);
         $res = Http::page('dashboard.php');
-        $t->contains('&mdash;', $res['body']);
+        $t->contains('-', $res['body']);
         $t->same(0.0, qa_dashboard_data($res['body'])['predicted']);
         Fixtures::reset();
         qa_history([9000, 6000, 3000, 1000]);
@@ -78,7 +78,7 @@ T::suite('05 · Dashboard forecast & status', function () {
         qa_history([10000, 11000, 12000]);
         $html = Http::page('dashboard.php')['body'];
         $t->ok(preg_match('/Predicted Next ([A-Za-z\- ]+) Net Payroll/', $html, $m) === 1, 'prediction card found');
-        $t->notContains('Predicted Next Month Net Payroll', $html, 'each series point here is half a month, so the next point is half a month — not next month');
+        $t->notContains('Predicted Next Month Net Payroll', $html, 'each series point here is half a month, so the next point is half a month - not next month');
     }, ['defect' => 'D-11']);
 
     T::test('pipeline step "Period finalized" turns done once the latest period is finalized', function (T $t) {

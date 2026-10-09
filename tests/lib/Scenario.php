@@ -1,6 +1,6 @@
 <?php
 /*
- * Scenario — play one employee through one or more pay runs on BOTH sides:
+ * Scenario - play one employee through one or more pay runs on BOTH sides:
  *
  *   the application   rows go into biometric_daily, recomputePeriodFromDaily() (the code every upload,
  *                     manual entry and leave decision calls) builds the payroll lines, read back from `payroll`

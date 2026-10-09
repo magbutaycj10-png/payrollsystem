@@ -78,7 +78,7 @@ $ytd = array_map('floatval', $ytd->fetch(PDO::FETCH_ASSOC) ?: []);
 $ytdDeductions = ($ytd['sss'] ?? 0) + ($ytd['philhealth'] ?? 0) + ($ytd['pagibig'] ?? 0)
                + ($ytd['tax'] ?? 0) + ($ytd['other'] ?? 0);
 
-/* Derived rates — the numbers a payslip never states outright */
+/* Derived rates - the numbers a payslip never states outright */
 $ytdPeriods = (int)($ytd['periods'] ?? 0);
 $avgNet     = $ytdPeriods ? ($ytd['net'] ?? 0) / $ytdPeriods : 0;
 $takeHome   = ($ytd['gross'] ?? 0) > 0 ? round(($ytd['net'] ?? 0) / $ytd['gross'] * 100, 1) : 0;
@@ -112,7 +112,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard — Employee Portal</title>
+    <title>Dashboard - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <style>
@@ -223,7 +223,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
             <div class="kpi-label">Vs. Last Period</div>
             <div class="kpi-value">
                 <?php if ($netDiff === null): ?>
-                    &mdash;
+                    -
                 <?php else: ?>
                     <?= $netDiff >= 0 ? '+' : '−' ?>₱<?= number_format(abs($netDiff), 0) ?>
                 <?php endif; ?>
@@ -279,7 +279,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
 
         <div class="p-box">
             <div class="p-box-header">
-                <h2>Year to Date — <?= date('Y') ?></h2>
+                <h2>Year to Date - <?= date('Y') ?></h2>
                 <span class="badge badge-blue"><?= $ytdPeriods ?> period(s)</span>
             </div>
             <div class="p-box-body">
@@ -310,7 +310,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
     <div class="dash-row">
         <div class="p-box">
             <div class="p-box-header">
-                <h2>Deductions — <?= htmlspecialchars($latest['period_label'] ?? 'Latest') ?></h2>
+                <h2>Deductions - <?= htmlspecialchars($latest['period_label'] ?? 'Latest') ?></h2>
                 <span class="badge badge-red">₱<?= number_format($dedTotal, 2) ?></span>
             </div>
             <div class="p-box-body">
@@ -363,7 +363,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
     <!-- The latest payslip, line by line -->
     <div class="p-box">
         <div class="p-box-header">
-            <h2>Latest Payslip — <?= htmlspecialchars($latest['period_label']) ?></h2>
+            <h2>Latest Payslip - <?= htmlspecialchars($latest['period_label']) ?></h2>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <span class="badge badge-<?= $latest['status']==='Finalized' ? 'green' : 'blue' ?>"><?= $latest['status'] ?></span>
                 <?php if (!empty($latest['revised_after_finalize'])): ?>

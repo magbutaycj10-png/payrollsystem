@@ -5,16 +5,16 @@
  * The forecast page uses this to feed the Random Forest and ARIMA models.
  *
  * Each record contains:
- *   period_index   — sequential integer (1, 2, 3…) used as the trend feature
- *   month          — calendar month number 1-12, used for seasonality
- *   year           — 4-digit year
- *   label          — human-readable period label
- *   employee_count — distinct employees in that period
- *   total_gross    — sum of gross_pay for the period
- *   total_net      — sum of net_pay  (this is the TARGET we predict)
- *   total_bonus    — sum of bonus adjustments
- *   total_deductions — sum of other_deductions
- *   avg_gross      — average gross pay per employee
+ *   period_index   - sequential integer (1, 2, 3…) used as the trend feature
+ *   month          - calendar month number 1-12, used for seasonality
+ *   year           - 4-digit year
+ *   label          - human-readable period label
+ *   employee_count - distinct employees in that period
+ *   total_gross    - sum of gross_pay for the period
+ *   total_net      - sum of net_pay  (this is the TARGET we predict)
+ *   total_bonus    - sum of bonus adjustments
+ *   total_deductions - sum of other_deductions
+ *   avg_gross      - average gross pay per employee
  */
 
 require '../includes/helpers.php';
@@ -83,7 +83,7 @@ foreach ($rows as $i => $r) {
     $half     = ($periodsPerMonth >= 2 && $startDay > 15) ? 2 : 1;
 
     $result[] = [
-        'id'               => (int)$r['id'],    /* actual DB primary key — needed by period-detail API */
+        'id'               => (int)$r['id'],    /* actual DB primary key - needed by period-detail API */
         'period_index'     => $i + 1,
         'month'            => $month,
         'year'             => $year,
@@ -98,7 +98,7 @@ foreach ($rows as $i => $r) {
         'total_deductions' => (float)$r['total_deductions'],
         'total_tax'        => (float)$r['total_tax'],
         'avg_gross'        => (float)$r['avg_gross'],
-        /* company cost: pay + bonus + the employer's SSS / EC / PhilHealth / Pag-IBIG — what a budget has to cover */
+        /* company cost: pay + bonus + the employer's SSS / EC / PhilHealth / Pag-IBIG - what a budget has to cover */
         'total_employer_share' => $employer[(int)$r['id']]['total'] ?? 0.0,
         'total_labor_cost'     => round((float)$r['total_gross'] + (float)$r['total_bonus'] + ($employer[(int)$r['id']]['total'] ?? 0.0), 2),
     ];

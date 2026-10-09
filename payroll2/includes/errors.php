@@ -74,7 +74,7 @@ function friendlyError(Throwable $e): string {
             return "This can't be deleted because other records still use it (for example payroll, attendance, "
                  . "leave or payslip history). Those records have to be kept.";
         case 1452:
-            return 'This refers to something that no longer exists — it may have been deleted. Refresh the page and try again.';
+            return 'This refers to something that no longer exists - it may have been deleted. Refresh the page and try again.';
         case 1048:
             return 'A required field was left empty. Fill it in and try again.';
         case 1406:
@@ -93,7 +93,7 @@ function friendlyError(Throwable $e): string {
             || stripos($e->getMessage(), 'gone away') !== false) {
             return "Can't reach the database right now. Check the internet connection, then try again.";
         }
-        return "The database couldn't complete this action. Please try again — if it keeps happening, "
+        return "The database couldn't complete this action. Please try again - if it keeps happening, "
              . 'give your developer the reference code.';
     }
     return 'Something went wrong on this page. Please go back and try again.';
@@ -119,7 +119,7 @@ function showAppError(string $message, string $ref = '', int $status = 500): voi
     $refH = $ref ? '<p class="ref">Reference: ' . htmlspecialchars($ref) . '</p>' : '';
     echo <<<HTML
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Something went wrong — Payroll System</title>
+<title>Something went wrong - Payroll System</title>
 <style>
   *{box-sizing:border-box} body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
   font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f1f5f9;color:#0f172a;padding:20px}

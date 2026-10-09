@@ -1,6 +1,6 @@
 <?php
 /* =============================================================
- * employee/print-doc.php — the print endpoint for the employee portal.
+ * employee/print-doc.php - the print endpoint for the employee portal.
  *
  * Serves the very same payslip & acknowledgement receipt as the
  * admin side, but the WHERE clause is pinned to the signed-in employee's
@@ -35,7 +35,7 @@ $withSig   = ($_GET['sig'] ?? '1') !== '0';
 
 $ctx = [
     'cfg'        => birConfig(),
-    /* absolute from the document root — this file sits one level deeper
+    /* absolute from the document root - this file sits one level deeper
        than the admin portal's print-doc.php */
     'logo'       => '/assets/images/logo.png',
     'printed_on' => date('M j, Y g:i A'),
@@ -82,8 +82,8 @@ try {
                   VALUES (?,?,?,?)')
        ->execute([
            $payrollId
-               ? 'Payslip / Acknowledgement Receipt — ' . ($rows[0]['emp_name'] ?? $e['name'])
-               : 'Payslips (All) — ' . ($e['name'] ?: $e['id']),
+               ? 'Payslip / Acknowledgement Receipt - ' . ($rows[0]['emp_name'] ?? $e['name'])
+               : 'Payslips (All) - ' . ($e['name'] ?: $e['id']),
            'Employee Self-Service',
            $payrollId ? (int)($rows[0]['period_id'] ?? 0) ?: null : null,
            $e['name'] ?: $e['id'],

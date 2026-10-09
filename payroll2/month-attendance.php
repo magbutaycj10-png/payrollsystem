@@ -1,6 +1,6 @@
 <?php
 /*
- * month-attendance.php — the admin's view of the month filling up.
+ * month-attendance.php - the admin's view of the month filling up.
  * Every daily upload adds its days; this page shows the month so far for
  * every employee. Body: includes/month-attendance-view.php
  */
@@ -20,7 +20,7 @@ $maSelf = 'month-attendance.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>This Month's Attendance — Payroll System</title>
+    <title>This Month's Attendance - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
@@ -31,7 +31,7 @@ $maSelf = 'month-attendance.php';
     <div class="page-header">
         <div>
             <h1>This Month's Attendance</h1>
-            <p>Every day saved so far — each upload adds its days to the month</p>
+            <p>Every day saved so far - each upload adds its days to the month</p>
         </div>
         <a href="attendance-upload.php" class="btn btn-primary">Upload Today's File</a>
     </div>

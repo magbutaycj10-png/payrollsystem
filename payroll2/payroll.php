@@ -45,7 +45,7 @@ $drift    = abs($payBonus - $adjBonus) > 0.01 || abs($payDed - $adjDed) > 0.01;
 $rev = periodRevisionInfo($period_id);
 
 /*
- * Where this pay period stands, step by step — what the tracker at the top
+ * Where this pay period stands, step by step - what the tracker at the top
  * shows. Each step reads the database, so it is true for every user.
  */
 $steps = null;
@@ -61,7 +61,7 @@ if ($curPeriod) {
     $ctx = payContext($db, $period_id);
     $stale = $payrollRows ? settlementDrift($db, $period_id, $ctx) : [];
     /* An OPEN period always reflects today's rates and Settings, so any difference is worth a Recompute. A FINALIZED one is history:
-       it is only out of date when an earlier cut-off of its month was corrected after it was finalized — a later raise or Settings
+       it is only out of date when an earlier cut-off of its month was corrected after it was finalized - a later raise or Settings
        change must not tell anyone to "recompute" (and so rewrite) last month's pay. */
     if ($stale && !$isOpen && !earlierRunChangedAfterFinalize($db, $period_id)) $stale = [];
     $schedule = periodTypeLabel($curPeriod);
@@ -89,9 +89,9 @@ if ($curPeriod) {
                : 'Nothing uploaded yet',
          ['attendance-upload.php?period=' . $period_id, $nAtt ? 'Upload more' : 'Upload attendance']],
         ['Manager approval', $nAtt > 0 && (int)$att['ok'] === $nAtt,
-         $nAtt ? ((int)$att['ok'] . " of {$nAtt} approved" . ((int)$att['flagged'] ? ' · ' . (int)$att['flagged'] . ' flagged' : '')) : '—',
+         $nAtt ? ((int)$att['ok'] . " of {$nAtt} approved" . ((int)$att['flagged'] ? ' · ' . (int)$att['flagged'] . ' flagged' : '')) : '-',
          null],
-        ['Bonus & deductions', $adjCount > 0, $adjCount ? "{$adjCount} entr" . ($adjCount === 1 ? 'y' : 'ies') : 'Optional — none yet',
+        ['Bonus & deductions', $adjCount > 0, $adjCount ? "{$adjCount} entr" . ($adjCount === 1 ? 'y' : 'ies') : 'Optional - none yet',
          $isOpen ? ['adjustments.php?period=' . $period_id, 'Add'] : null],
         ['Finalize', !$isOpen,
          $isOpen ? 'Not finalized yet' : 'Finalized' . (!empty($curPeriod['finalized_at']) ? ' ' . date('M j', strtotime($curPeriod['finalized_at'])) : ''),
@@ -156,7 +156,7 @@ if ($period_id) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payroll Processing — Payroll System</title>
+    <title>Payroll Processing - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* Marks pay that was changed after the period had been finalized */
@@ -167,6 +167,7 @@ if ($period_id) {
             letter-spacing: .04em; vertical-align: middle; white-space: nowrap;
         }
         tr.is-revised td { background: #fffbeb; }
+        .table-wrap.table-sticky .data-table tr.is-revised td:nth-child(2) { background: #fffbeb; }
 
         /* Step tracker: where this pay period stands */
         .pp-track { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
@@ -287,7 +288,7 @@ if ($period_id) {
                     Finalize when the numbers are right.
                     <?php if ($rev['reopened']): ?>
                         This period was already finalized <?= (int)$rev['cycle'] ?>&times; and re-opened
-                        <?= (int)$rev['reopen_count'] ?>&times;<?= $rev['reopened_at'] ? ' (last on ' . date('M j, Y g:i A', strtotime($rev['reopened_at'])) . ')' : '' ?> &mdash;
+                        <?= (int)$rev['reopen_count'] ?>&times;<?= $rev['reopened_at'] ? ' (last on ' . date('M j, Y g:i A', strtotime($rev['reopened_at'])) . ')' : '' ?> -
                         anything recorded now is stored as a revision. Finalize it again when you are done correcting it.
                     <?php endif; ?>
                 </span>
@@ -331,8 +332,8 @@ if ($period_id) {
         <?php endif; ?>
 
         <?php if ($rev['revised'] || $rev['entries']): ?>
-        <!-- The period was corrected after a finalize. Both halves of that —
-             the flagged payroll rows and the stamped history entries — are
+        <!-- The period was corrected after a finalize. Both halves of that -
+             the flagged payroll rows and the stamped history entries - are
              stored in the database, not derived from the screen. -->
         <div class="alert alert-warn">
             <span>
@@ -386,16 +387,21 @@ if ($period_id) {
     <div class="box">
         <div class="box-header">
             <h2>Payroll Records</h2>
-            <span style="font-size:.85rem;color:#6b7280;"><?= count($payrollRows) ?> employee(s)</span>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <?php if (count($payrollRows) > 6): ?>
+                <input type="search" id="payrollFilter" class="search-input table-filter" placeholder="Find an employee…" aria-label="Find an employee">
+                <?php endif; ?>
+                <span id="payrollCount" style="font-size:.85rem;color:#6b7280;"><?= count($payrollRows) ?> employee(s)</span>
+            </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap table-sticky">
             <table class="data-table" id="payrollTable">
                 <thead>
                     <tr>
-                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unpaid days — absent, or a salaried employee's working days before the hire date (deducted from salaried pay) / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
+                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unpaid days - absent, or a salaried employee's working days before the hire date (deducted from salaried pay) / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
                         <th title="Pay for the days worked, after undertime and absences">Basic Pay</th>
                         <th title="Overtime pay less late deductions">OT − Late</th>
-                        <th title="Basic + OT − late — the timesheet's GROSS PAY">Gross Pay</th>
+                        <th title="Basic + OT − late - the timesheet's GROSS PAY">Gross Pay</th>
                         <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th><th>Tax</th>
                         <th>Bonus</th><th>Deductions</th><th>Net Pay</th><th>Status</th>
                     </tr>
@@ -405,7 +411,7 @@ if ($period_id) {
                     <tr>
                         <td colspan="19" style="text-align:center;color:#9ca3af;padding:30px;">
                             No attendance in this pay period yet.
-                            <a href="attendance-upload.php?period=<?= $period_id ?>">Upload the attendance file</a> — payroll is computed as soon as it is saved.
+                            <a href="attendance-upload.php?period=<?= $period_id ?>">Upload the attendance file</a> - payroll is computed as soon as it is saved.
                         </td>
                     </tr>
                 <?php else: ?>
@@ -414,7 +420,7 @@ if ($period_id) {
                     <tr class="<?= $isRev ? 'is-revised' : '' ?>">
                         <td><?= htmlspecialchars($r['emp_id']) ?></td>
                         <td><?= htmlspecialchars($r['emp_name']) ?></td>
-                        <td><?= $daysWorked[$r['emp_id']] ?? '—' ?></td>
+                        <td><?= $daysWorked[$r['emp_id']] ?? '-' ?></td>
                         <td style="white-space:nowrap;">
                             <?php $ab = (float)($r['absent_days'] ?? 0); $lv = (float)($r['leave_days'] ?? 0); $of = (float)($r['days_off'] ?? 0);
                                   $n1 = fn($x) => rtrim(rtrim(number_format($x, 1), '0'), '.'); ?>
@@ -448,7 +454,7 @@ if ($period_id) {
                             </span>
                             <?php if ($isRev): ?>
                                 <span class="rev-tag"
-                                      title="Changed after this period was finalized<?= !empty($r['revised_at']) ? ' — ' . date('M j, Y g:i A', strtotime($r['revised_at'])) : '' ?>">Revised</span>
+                                      title="Changed after this period was finalized<?= !empty($r['revised_at']) ? ' - ' . date('M j, Y g:i A', strtotime($r['revised_at'])) : '' ?>">Revised</span>
                             <?php endif; ?>
                         </td>
                     </tr>
@@ -476,7 +482,7 @@ if ($period_id) {
                 <div class="co-card">
                     <div class="k">Company contributions</div>
                     <div class="v"><?= $peso($company['er_total']) ?></div>
-                    <div class="s">SSS, EC, PhilHealth, Pag-IBIG — company share</div>
+                    <div class="s">SSS, EC, PhilHealth, Pag-IBIG - company share</div>
                 </div>
                 <div class="co-card total">
                     <div class="k">Total cost to the company</div>
@@ -501,7 +507,7 @@ if ($period_id) {
             <?php if ($company['stale']): ?>
             <div class="alert alert-warn" style="margin-bottom:14px;">
                 <span>Settings or an employee's contribution switches changed after this pay run was computed.
-                The company shares below follow the current settings — upload the attendance again to refresh the employee shares too.</span>
+                The company shares below follow the current settings - upload the attendance again to refresh the employee shares too.</span>
             </div>
             <?php endif; ?>
 
@@ -514,10 +520,10 @@ if ($period_id) {
                         <?php
                         $rem = [
                             ['SSS', 'Regular SSS: employee 5%, company 10% of the salary credit', $company['ee']['sss'], $company['er']['sss']],
-                            ['SSS — EC', "Employees' Compensation: company only, ₱10 or ₱30 a month", 0, $company['er']['ec']],
+                            ['SSS - EC', "Employees' Compensation: company only, ₱10 or ₱30 a month", 0, $company['er']['ec']],
                             ['PhilHealth', '5% of monthly basic pay, split equally', $company['ee']['philhealth'], $company['er']['philhealth']],
                             ['Pag-IBIG', 'Employee 2%, company 2% of pay up to ₱10,000', $company['ee']['pagibig'], $company['er']['pagibig']],
-                            ['BIR', 'Withholding tax on compensation — employee only', $company['ee']['tax'], 0],
+                            ['BIR', 'Withholding tax on compensation - employee only', $company['ee']['tax'], 0],
                         ];
                         $tEE = $tER = 0;
                         foreach ($rem as [$who, $why, $ee, $er]): $tEE += $ee; $tER += $er; ?>
@@ -536,10 +542,10 @@ if ($period_id) {
             </div>
 
             <details class="co-more">
-                <summary>Per employee — how each contribution was figured</summary>
+                <summary>Per employee - how each contribution was figured</summary>
                 <p class="co-sub" style="margin:4px 0 10px;">
-                    Contributions are monthly: each is read on the pay earned <b>so far this month</b> — SSS on all pay
-                    (overtime included), PhilHealth and Pag-IBIG on basic pay — minus what earlier cut-offs already took.
+                    Contributions are monthly: each is read on the pay earned <b>so far this month</b> - SSS on all pay
+                    (overtime included), PhilHealth and Pag-IBIG on basic pay - minus what earlier cut-offs already took.
                     This pay run: <?= htmlspecialchars($contribNote) ?>. So minimums such as PhilHealth's ₱250 are charged
                     once a month, never twice, and each month ends exact.
                 </p>

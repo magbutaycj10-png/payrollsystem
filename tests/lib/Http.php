@@ -1,6 +1,6 @@
 <?php
 /*
- * Http — call the app's real pages and api/ endpoints against the test database.
+ * Http - call the app's real pages and api/ endpoints against the test database.
  *
  *   $r = Http::api('save-daily-attendance.php', ['period_id' => 3, 'rows' => [...]]);
  *   $r['status'], $r['json'], $r['body'], $r['headers'], $r['redirect'], $r['warnings']
@@ -169,7 +169,7 @@ set_error_handler(function ($no, $str, $file, $line) {
     return true;
 });
 
-/* record the response when the script ends — by return, exit or fatal error */
+/* record the response when the script ends - by return, exit or fatal error */
 ob_start();
 register_shutdown_function(function () use ($spec) {
     $fatal = error_get_last();

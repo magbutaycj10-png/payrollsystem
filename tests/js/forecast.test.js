@@ -82,7 +82,7 @@ t('kinsenas calendar: 1st half → 2nd half of the same month; 2nd half → next
 t('pct(): percentage change, and a dash instead of dividing by zero', () => {
   same(pct(110, 100), '10.0%');
   same(pct(90, 100), '-10.0%');
-  same(pct(5, 0), '—');
+  same(pct(5, 0), '-');
 });
 
 t('fmt(): every forecast amount is shown to the centavo (two decimals)', () => {
@@ -128,7 +128,7 @@ function trendForecast(history, field) {
 
 t('Random Forest can follow a rising payroll: a straight line up (₱100k … ₱150k) forecasts about ₱160k', () => {
   const p = trendForecast(HIST);
-  near(p, 160000, 8000, 'forecast ' + p.toFixed(0) + ' — trees can only repeat values they have seen');
+  near(p, 160000, 8000, 'forecast ' + p.toFixed(0) + ' - trees can only repeat values they have seen');
 }, 'D-08');
 
 /* ------------------------------------------------------------------ only the audit-fixed forecast.js has these */

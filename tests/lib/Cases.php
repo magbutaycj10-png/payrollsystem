@@ -1,5 +1,5 @@
 <?php
-/* Cases — generated employee-months shared by several suites (seeded, so case #n is always the same case). */
+/* Cases - generated employee-months shared by several suites (seeded, so case #n is always the same case). */
 
 /** one generated employee-month: employee, runs, day records, leave, settings */
 function qa_fuzz_case(int $seed): array
@@ -73,7 +73,7 @@ function qa_fuzz_case(int $seed): array
             'cfg' => ['ot_rate' => $pick(['45', '150', '62.50', '93.75', '100.40']),
                       'timing' => ['sss' => $pick(['split', 'second']), 'philhealth' => $pick(['split', 'second']), 'pagibig' => $pick(['split', 'second'])]]
                      // every third case of the audit-fixed app pays overtime by the Labor Code method, with the multiplier cycling 1.25 / 1.30 / 2.00
-                     // (decided from the case number, so the random stream — and every case of the original — is unchanged)
+                     // (decided from the case number, so the random stream - and every case of the original - is unchanged)
                      + (AppCopy::hasFixes() && $seed % 3 === 0 ? ['ot_method' => 'labor_code', 'ot_mult' => ['1.25', '1.30', '2.00'][intdiv($seed, 3) % 3]] : [])
                      ,
             'shape' => $shape];
@@ -84,7 +84,7 @@ function qa_fuzz_case(int $seed): array
 /** skip a test that only the audit-fixed application can pass */
 function qa_need_fixes(): void
 {
-    if (!AppCopy::hasFixes()) T::skip('behaviour added by the 2026-10-07 audit fixes — the copy under test is older and lacks it');
+    if (!AppCopy::hasFixes()) T::skip('behaviour added by the 2026-10-07 audit fixes - the copy under test is older and lacks it');
 }
 
 /** record a bonus or deduction through the Adjustments page, the way the admin does */
@@ -126,9 +126,9 @@ function qa_sql_run(array $check): array
     return getDB()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
-/* ---- nine months of correctly computed payroll (suite 12 — the DBeaver queries — and the forecast page test in suite 07) ---- */
+/* ---- nine months of correctly computed payroll (suite 12 - the DBeaver queries - and the forecast page test in suite 07) ---- */
 
-/** nine months of correctly computed payroll, every salary type and run shape — the data the "expect: none" queries must be silent on */
+/** nine months of correctly computed payroll, every salary type and run shape - the data the "expect: none" queries must be silent on */
 function qa_sql_dataset(): array
 {
     Fixtures::reset();
@@ -136,48 +136,48 @@ function qa_sql_dataset(): array
                                        ['start' => "$y-$m-16", 'end' => date('Y-m-t', strtotime("$y-$m-01")), 'type' => 'Semi-Monthly']];
     $set = [];
 
-    // Jan — kinsenas ₱15,000: an absence, an undertime day, overtime
+    // Jan - kinsenas ₱15,000: an absence, an undertime day, overtime
     $days = Scenario::fullDays('2026-01-01', '2026-01-31');
     unset($days['2026-01-08']);                                                   // absent
     $days['2026-01-09'] = ['h' => '7.00', 'under' => '1'];                        // an hour short
     $days['2026-01-12'] = ['h' => '8.00', 'ot' => '2', 'under' => '0'];
     $set['jan'] = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00'], 'runs' => $SM('2026', '01'), 'days' => $days]);
 
-    // Feb — daily ₱480: a day off, approved leave, overtime, lateness
+    // Feb - daily ₱480: a day off, approved leave, overtime, lateness
     $days = Scenario::fullDays('2026-02-01', '2026-02-28');
     $days['2026-02-10'] = ['off' => true];
     unset($days['2026-02-17']);
     $days['2026-02-04'] = ['h' => '8.00', 'ot' => '3', 'late' => '0.50', 'under' => '0'];
     $set['feb'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '480.00'], 'runs' => $SM('2026', '02'), 'days' => $days, 'leave' => ['2026-02-17']]);
 
-    // Mar — monthly ₱75,000, one monthly run
+    // Mar - monthly ₱75,000, one monthly run
     $set['mar'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '75000.00'],
         'runs' => [['start' => '2026-03-01', 'end' => '2026-03-31', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-03-01', '2026-03-31')]);
 
-    // Apr — a ₱20,000 monthly employee on a WEEKLY calendar (four runs; the month ends on the fourth)
+    // Apr - a ₱20,000 monthly employee on a WEEKLY calendar (four runs; the month ends on the fourth)
     $set['apr'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '20000.00'],
         'runs' => [['start' => '2026-04-01', 'end' => '2026-04-07', 'type' => 'Weekly'], ['start' => '2026-04-08', 'end' => '2026-04-14', 'type' => 'Weekly'],
                    ['start' => '2026-04-15', 'end' => '2026-04-21', 'type' => 'Weekly'], ['start' => '2026-04-22', 'end' => '2026-04-28', 'type' => 'Weekly']],
         'days' => Scenario::fullDays('2026-04-01', '2026-04-28')]);
 
-    // May — ₱1,000 a day: 13 days in the first half, one in the second (the audit's tax-refund case)
+    // May - ₱1,000 a day: 13 days in the first half, one in the second (the audit's tax-refund case)
     $set['may'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1000.00'], 'runs' => $SM('2026', '05'),
         'days' => Scenario::fullDays('2026-05-01', '2026-05-15') + ['2026-05-16' => ['h' => '8.00', 'under' => '0']]]);
 
-    // Jun — a monthly ₱26,000 salary, hired 9 June (the audit's hire-date case)
+    // Jun - a monthly ₱26,000 salary, hired 9 June (the audit's hire-date case)
     $set['jun'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-06-09'],
         'runs' => [['start' => '2026-06-01', 'end' => '2026-06-30', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-06-09', '2026-06-30')]);
 
-    // Jul — monthly ₱250,000 (every cap, the 30% bracket)
+    // Jul - monthly ₱250,000 (every cap, the 30% bracket)
     $set['jul'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00'],
         'runs' => [['start' => '2026-07-01', 'end' => '2026-07-31', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-07-01', '2026-07-31')]);
 
-    // Aug — daily ₱1,500 with a ₱3,000 bonus and a ₱500 deduction recorded through Adjustments
+    // Aug - daily ₱1,500 with a ₱3,000 bonus and a ₱500 deduction recorded through Adjustments
     $set['aug'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00'], 'runs' => $SM('2026', '08'), 'days' => Scenario::fullDays('2026-08-01', '2026-08-31')]);
     Http::page('adjustments.php', ['period_id' => $set['aug']['periods'][1], 'emp_ids' => [$set['aug']['emp']], 'entry_type' => 'Bonus', 'amount' => '3000', 'reason_select' => 'Performance bonus']);
     Http::page('adjustments.php', ['period_id' => $set['aug']['periods'][1], 'emp_ids' => [$set['aug']['emp']], 'entry_type' => 'Deduction', 'amount' => '500', 'reason_select' => 'Cash advance']);
 
-    // Sep — a 10-hour duty day, Saturday and Sunday off, a ₱620 daily rate, overtime
+    // Sep - a 10-hour duty day, Saturday and Sunday off, a ₱620 daily rate, overtime
     $days = Scenario::fullDays('2026-09-01', '2026-09-30', [6, 7], '10.00');
     $days['2026-09-03'] = ['h' => '10.00', 'ot' => '2', 'under' => '0'];
     $set['sep'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '620.00', 'hours_per_day' => '10.00', 'rest_days' => '6,7'], 'runs' => $SM('2026', '09'), 'days' => $days]);
@@ -255,7 +255,7 @@ function qa_dashboard_data(string $html): array
               : ['n' => -1, 'labels' => [], 'net' => [], 'gross' => [], 'predicted' => NAN];
 }
 
-/** least-squares line through (0..n-1, y), evaluated at x = n — written independently of the app */
+/** least-squares line through (0..n-1, y), evaluated at x = n - written independently of the app */
 function qa_next_by_regression(array $y): float
 {
     $n = count($y);

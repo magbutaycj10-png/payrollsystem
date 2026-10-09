@@ -1,10 +1,10 @@
 <?php
 /*
- * 07 — JavaScript, run in headless Edge: the forecast models (assets/js/forecast.js) and the timesheet
+ * 07 - JavaScript, run in headless Edge: the forecast models (assets/js/forecast.js) and the timesheet
  * parsing (assets/js/attendance-formats.js + the value parsers in attendance-upload.js).
  *
  * The page loads the ORIGINAL scripts from the app (not copies), runs the checks, and the results come back
- * as JSON. The parsing half also feeds identical inputs to BrowserSim — the PHP port the end-to-end suites use —
+ * as JSON. The parsing half also feeds identical inputs to BrowserSim - the PHP port the end-to-end suites use -
  * and fails if the port and the original ever disagree.
  */
 
@@ -27,7 +27,7 @@ function qa_same_value($a, $b, string $path, array &$diffs): void
 
 T::suite('07 · JavaScript (headless Edge): forecast models & timesheet parsing', function () {
     if (!Edge::find()) {
-        T::test('JavaScript tests', fn() => T::skip('no Microsoft Edge / Chrome found — set PAYROLL_TEST_EDGE to a browser path'));
+        T::test('JavaScript tests', fn() => T::skip('no Microsoft Edge / Chrome found - set PAYROLL_TEST_EDGE to a browser path'));
         return;
     }
     $root = AppCopy::root();
@@ -142,6 +142,6 @@ T::suite('07 · JavaScript (headless Edge): forecast models & timesheet parsing'
         });
     }
     if (!$real) {
-        T::test('parity · the pharmacy\'s real timesheets', fn() => T::skip("no TIMESHEET *.csv in $samples (set PAYROLL_SAMPLES) — the synthetic sheets above were compared instead"));
+        T::test('parity · the pharmacy\'s real timesheets', fn() => T::skip("no TIMESHEET *.csv in $samples (set PAYROLL_SAMPLES) - the synthetic sheets above were compared instead"));
     }
 });

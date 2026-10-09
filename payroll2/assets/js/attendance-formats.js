@@ -8,7 +8,7 @@
  *
  * Recognised layouts:
  *   1. Plain table        the CSV templates; the header may sit below a title
- *   2. Timesheet export   one row per person per day — EMPLOYEE_NAME, DATE,
+ *   2. Timesheet export   one row per person per day - EMPLOYEE_NAME, DATE,
  *                         TOTAL_HOURS_WORKED, LATE_HOURS, OVERTIME_HOURS ...
  *   3. Timesheet workbook one sheet per employee: an "EMPLOYEE NAME :" cell,
  *                         then a day table (DATE, TIME IN, ... TOTAL NO OF
@@ -16,14 +16,14 @@
  *   4. Device report      "Attendance Summary" / "Individual Report" from the
  *                         biometric terminal: one employee per file, IN/OUT
  *                         punches per day in two side-by-side blocks, and only
- *                         a device ID ("ID:00001") — the name is blank
+ *                         a device ID ("ID:00001") - the name is blank
  *
  * Layouts 2-4 come out as day rows under DAY_HEADERS. Their "total hours"
- * include overtime, so overtime is taken back out of Hours Worked — otherwise
+ * include overtime, so overtime is taken back out of Hours Worked - otherwise
  * it would be paid twice, once as a day's work and again as OT pay.
  *
  * A timesheet day without hours is kept when its REMARKS say what it was:
- * OFF (a rotating day off — never absent, never deducted) or anything else
+ * OFF (a rotating day off - never absent, never deducted) or anything else
  * such as ABSENT (an absence, so that date counts as covered by the file).
  * A blank day with no remark says nothing and is skipped.
  *
@@ -101,7 +101,7 @@ function dayNote(out) {
     const bits = [];
     if (out.off)    bits.push(`${out.off} day(s) off`);
     if (out.marked) bits.push(`${out.marked} day(s) marked without hours (e.g. ABSENT)`);
-    if (out.invalid) bits.push(`⚠ ${out.invalid} day(s) SKIPPED because the hours could not be read (e.g. "08:60") — fix them in the file and upload again`);
+    if (out.invalid) bits.push(`⚠ ${out.invalid} day(s) SKIPPED because the hours could not be read (e.g. "08:60") - fix them in the file and upload again`);
     return (bits.length ? ', ' + bits.join(', ') : '') + (out.blank ? ` (${out.blank} blank day(s) skipped)` : '');
 }
 
@@ -141,7 +141,7 @@ function dayRowsFromTable(rows, col, fixedName) {
     return { rows: out, worked, off, marked, blank, invalid };
 }
 
-/* ── 3. Timesheet workbook — one sheet per employee ─────────── */
+/* ── 3. Timesheet workbook - one sheet per employee ─────────── */
 function readTimesheetWorkbook(grids) {
     const all   = [];
     const names = [];
@@ -154,7 +154,7 @@ function readTimesheetWorkbook(grids) {
             if (h >= 0) return;
             const n = r.map(normHeader);
             if (n.includes('date') && n.some(c => c.includes('hours worked'))) { h = i; return; }
-            /* A label cell "EMPLOYEE NAME :" with the name beside it — not the
+            /* A label cell "EMPLOYEE NAME :" with the name beside it - not the
                EMPLOYEE_NAME column heading of a flat export */
             const k = r.findIndex(c => normHeader(c) === 'employee name' && String(c).includes(':'));
             if (k >= 0 && !name) name = String(r.slice(k + 1).find(c => String(c).trim() !== '') ?? '').trim();
@@ -211,7 +211,7 @@ function readDeviceReport(grids) {
             let worked = pair(mi, mo) + pair(ai, ao);
             if (worked === 0 && regular.length >= 2) {            /* e.g. one IN, one OUT */
                 let span = (Math.max(...regular) - Math.min(...regular)) / 60;
-                /* the break comes off a day longer than half the duty day — but never so that a longer day pays less
+                /* the break comes off a day longer than half the duty day - but never so that a longer day pays less
                    (4:00 → 4.00 h, 4:06 → 4.00 h, not 3.10 h); same rule as api/rollup-punches.php */
                 if (span > std / 2) span = Math.max(std / 2, span - UPLOAD_SHIFT.breakMin / 60);
                 worked = Math.max(0, span);

@@ -1,6 +1,6 @@
 <?php
 /*
- * Runner — boots the private database, loads the app from a clean copy, runs suites/*.php
+ * Runner - boots the private database, loads the app from a clean copy, runs suites/*.php
  * and prints the report. Started by tests/run-tests.bat (see lib/Main.php).
  */
 final class Runner
@@ -23,7 +23,7 @@ final class Runner
         T::$filter  = $opts['filter'];
         T::$verbose = $opts['verbose'];
 
-        echo "\033[1mL&N Payroll — integration tests\033[0m\n";
+        echo "\033[1mL&N Payroll - integration tests\033[0m\n";
         echo '  PHP ' . PHP_VERSION . ' · ' . PHP_OS_FAMILY . ' · ' . date('Y-m-d H:i') . "\n";
 
         try {
@@ -34,7 +34,7 @@ final class Runner
         }
         echo "  database: $dbInfo\n";
 
-        // the app reads its database from the environment — point it at the private server, nothing else
+        // the app reads its database from the environment - point it at the private server, nothing else
         foreach (TestDb::env() as $k => $v) { putenv("$k=$v"); $_ENV[$k] = $v; }
         $appRoot = AppCopy::prepare();
         putenv('QA_APP_ROOT=' . $appRoot);
@@ -57,7 +57,7 @@ final class Runner
 
         applySchemaPatches();               // the app creates the rest of its tables itself
         Fixtures::reset();
-        echo '  app: ' . AppCopy::original() . '  — ' . (AppCopy::hasFixes() ? "\033[32mwith the 2026-10-07 audit fixes\033[0m" : "\033[33moriginal code (no audit fixes)\033[0m")
+        echo '  app: ' . AppCopy::original() . '  - ' . (AppCopy::hasFixes() ? "\033[32mwith the 2026-10-07 audit fixes\033[0m" : "\033[33moriginal code (no audit fixes)\033[0m")
             . "  (tested from a fresh copy, without *.pem)\n";
 
         Defects::register();

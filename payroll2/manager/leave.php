@@ -45,8 +45,8 @@ foreach ($requests as $lr) {
     $detailMap[$lr['id']] = [
         'emp'       => $lr['emp_name'],
         'emp_id'    => $lr['emp_id'],
-        'branch'    => $lr['branch']   ?: '—',
-        'position'  => $lr['position'] ?: '—',
+        'branch'    => $lr['branch']   ?: '-',
+        'position'  => $lr['position'] ?: '-',
         'type'      => $lr['leave_type'],
         'from'      => date('M d, Y', strtotime($lr['date_from'])),
         'to'        => date('M d, Y', strtotime($lr['date_to'])),
@@ -54,10 +54,10 @@ foreach ($requests as $lr) {
         'days_label' => leaveDaysLabel($lr['date_from'], $lr['date_to'], $lr['rest_days'] ?? null),
         'reason'    => trim((string)$lr['reason']) !== '' ? $lr['reason'] : 'No reason given.',
         'status'    => $lr['status'],
-        'reviewer'  => $lr['reviewed_by'] ?: '—',
-        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '—',
+        'reviewer'  => $lr['reviewed_by'] ?: '-',
+        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '-',
         'submitted' => date('M d, Y g:i A', strtotime($lr['created_at'])),
-        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '—',
+        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '-',
     ];
 }
 ?>
@@ -66,7 +66,7 @@ foreach ($requests as $lr) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leave Requests — Manager Portal</title>
+    <title>Leave Requests - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         /* ── Details dialog ── */
@@ -218,7 +218,7 @@ function openLeave(id) {
     if (!d) return;
 
     document.getElementById('lmTitle').textContent    = d.emp;
-    document.getElementById('lmSub').textContent      = d.type + ' — submitted ' + d.submitted;
+    document.getElementById('lmSub').textContent      = d.type + ' - submitted ' + d.submitted;
     document.getElementById('lmEmpId').textContent    = d.emp_id;
     document.getElementById('lmBranch').textContent   = d.branch;
     document.getElementById('lmPosition').textContent = d.position;

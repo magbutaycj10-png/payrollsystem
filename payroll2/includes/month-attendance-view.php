@@ -3,7 +3,7 @@
 if (get_included_files()[0] === __FILE__) { http_response_code(404); exit; }
 /*
  * includes/month-attendance-view.php
- * The body of "This Month's Attendance" — shared by the admin, manager and
+ * The body of "This Month's Attendance" - shared by the admin, manager and
  * employee portals. The calling page sets:
  *   $MA      monthAttendance() result
  *   $maMode  'admin' | 'manager' | 'employee'
@@ -28,15 +28,15 @@ foreach ($emps as $e) foreach ($tot as $k => $_) $tot[$k] += $e[$k];
 /* Class for one day's cell */
 $cellClass = function (?array $d, float $std) {
     if (!$d) return '';
-    /* a full duty day is one without undertime — the same rule the pay uses */
+    /* a full duty day is one without undertime - the same rule the pay uses */
     $c = $d['hours'] <= 0 ? 'ma-zero' : ($d['under'] <= 0 ? 'ma-full' : 'ma-short');
     if ($d['ot'] > 0)  $c .= ' ma-ot';
     if ($d['manual'])  $c .= ' ma-manual';
     return $c;
 };
 $cellTitle = function (string $date, ?array $d) use ($hrs) {
-    if (!$d) return date('D, M j', strtotime($date)) . ' — no record';
-    return date('D, M j', strtotime($date)) . ' — ' . $hrs($d['hours']) . ' h'
+    if (!$d) return date('D, M j', strtotime($date)) . ' - no record';
+    return date('D, M j', strtotime($date)) . ' - ' . $hrs($d['hours']) . ' h'
         . ($d['ot'] ? ', OT ' . $hrs($d['ot']) . ' h' : '')
         . ($d['late'] ? ', late ' . $hrs($d['late']) . ' h' : '')
         . (!empty($d['under']) ? ', undertime ' . $hrs($d['under']) . ' h' : '')
@@ -45,12 +45,12 @@ $cellTitle = function (string $date, ?array $d) use ($hrs) {
 };
 /* A day without hours: day off, leave or absent (marks from monthAttendance()) */
 $marks = [
-    'off'             => ['ma-off',     'OFF', 'Day off — not absent, no deduction'],
-    'leave'           => ['ma-leave',   'L',   'Approved leave — not absent, no deduction'],
+    'off'             => ['ma-off',     'OFF', 'Day off - not absent, no deduction'],
+    'leave'           => ['ma-leave',   'L',   'Approved leave - not absent, no deduction'],
     'pending'         => ['ma-pending', 'L?',  'Leave request waiting for a decision'],
-    'absent'          => ['ma-absent',  'A',   'Absent — no attendance and no approved leave'],
-    'absent-pending'  => ['ma-absent',  'A',   'Absent — leave request still pending (approve it to excuse the day)'],
-    'absent-rejected' => ['ma-absent',  'A',   'Absent — leave request was rejected, no pay for this day'],
+    'absent'          => ['ma-absent',  'A',   'Absent - no attendance and no approved leave'],
+    'absent-pending'  => ['ma-absent',  'A',   'Absent - leave request still pending (approve it to excuse the day)'],
+    'absent-rejected' => ['ma-absent',  'A',   'Absent - leave request was rejected, no pay for this day'],
 ];
 ?>
 <style>
@@ -171,7 +171,7 @@ $marks = [
         <div class="ma-card"><div class="l">Absent</div><div class="v" style="color:<?= $me['absent'] ? '#b91c1c' : 'inherit' ?>;"><?= $me['absent'] ?></div><div class="s">days, unexcused</div></div>
         <div class="ma-card"><div class="l">Leave</div><div class="v"><?= $me['leave'] ?></div><div class="s">approved days</div></div>
         <div class="ma-card"><div class="l">Days off</div><div class="v"><?= $me['off'] ?></div><div class="s">so far</div></div>
-        <div class="ma-card"><div class="l">Last recorded</div><div class="v" style="font-size:1.1rem;"><?= $me['last'] ? date('M j', strtotime($me['last'])) : '—' ?></div></div>
+        <div class="ma-card"><div class="l">Last recorded</div><div class="v" style="font-size:1.1rem;"><?= $me['last'] ? date('M j', strtotime($me['last'])) : '-' ?></div></div>
     </div>
 
     <div class="ma-box">
@@ -184,7 +184,7 @@ $marks = [
                 $d    = $me['days'][$n] ?? null;
                 $mk   = !$d || $d['hours'] <= 0 ? ($marks[$me['marks'][$n] ?? ''] ?? null) : null; ?>
                 <div class="day <?= $mk ? $mk[0] : ($d ? $cellClass($d, $me['std']) : ($date > $today ? 'ma-future' : '')) ?> <?= $date === $today ? 'is-today' : '' ?>"
-                     title="<?= $h(date('D, M j', strtotime($date)) . ' — ' . ($mk ? $mk[2] : $cellTitle($date, $d))) ?>">
+                     title="<?= $h(date('D, M j', strtotime($date)) . ' - ' . ($mk ? $mk[2] : $cellTitle($date, $d))) ?>">
                     <div class="dn"><?= $n ?></div>
                     <?php if ($mk): ?>
                         <div class="hv"><?= $mk[1] === 'OFF' ? 'Day off' : ($mk[1] === 'L' ? 'Leave' : ($mk[1] === 'L?' ? 'Leave?' : 'Absent')) ?></div>
@@ -248,7 +248,7 @@ $marks = [
                             $date = $MA['ym'] . '-' . str_pad($n, 2, '0', STR_PAD_LEFT);
                             $d  = $e['days'][$n] ?? null;
                             $mk = !$d || $d['hours'] <= 0 ? ($marks[$e['marks'][$n] ?? ''] ?? null) : null; ?>
-                            <td title="<?= $h($e['name'] . ' · ' . ($mk ? date('D, M j', strtotime($date)) . ' — ' . $mk[2] : $cellTitle($date, $d))) ?>">
+                            <td title="<?= $h($e['name'] . ' · ' . ($mk ? date('D, M j', strtotime($date)) . ' - ' . $mk[2] : $cellTitle($date, $d))) ?>">
                                 <span class="ma-cell <?= $mk ? $mk[0] : ($d ? $cellClass($d, $e['std']) : ($date > $today ? 'ma-future' : '')) ?>"><?= $mk ? $mk[1] : ($d ? $hrs($d['hours']) : '') ?></span>
                             </td>
                         <?php endfor; ?>
@@ -295,8 +295,8 @@ $marks = [
                         <td class="n"><?= $e['manual'] ?: '' ?></td>
                         <td><?= $e['last'] ? date('M j', strtotime($e['last'])) : 'No record' ?></td>
                         <?php if ($MA['withPay']): ?>
-                            <td class="n"><?= $e['gross'] !== null ? $peso($e['gross']) : '—' ?></td>
-                            <td class="n"><?= $e['net']   !== null ? $peso($e['net'])   : '—' ?></td>
+                            <td class="n"><?= $e['gross'] !== null ? $peso($e['gross']) : '-' ?></td>
+                            <td class="n"><?= $e['net']   !== null ? $peso($e['net'])   : '-' ?></td>
                         <?php endif; ?>
                     </tr>
                 <?php endforeach; ?>
@@ -304,7 +304,7 @@ $marks = [
             </table>
         </div>
         <?php if ($MA['withPay']): ?>
-        <div class="ma-legend">Pay is the payroll computed so far for this month's pay period(s) — a draft until the period is finalized.</div>
+        <div class="ma-legend">Pay is the payroll computed so far for this month's pay period(s) - a draft until the period is finalized.</div>
         <?php endif; ?>
     </div>
 

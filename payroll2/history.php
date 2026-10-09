@@ -35,7 +35,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Adjustment History — Payroll System</title>
+    <title>Adjustment History - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* Marks an entry recorded after the period had been finalized */
@@ -72,7 +72,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                 <option value="">All Employees</option>
                 <?php foreach ($employees as $e): ?>
                 <option value="<?= htmlspecialchars($e['emp_id']) ?>" <?= $fEmp === $e['emp_id'] ? 'selected' : '' ?>>
-                    <?= htmlspecialchars($e['emp_id']) ?> — <?= htmlspecialchars($e['full_name']) ?>
+                    <?= htmlspecialchars($e['emp_id']) ?> - <?= htmlspecialchars($e['full_name']) ?>
                 </option>
                 <?php endforeach; ?>
             </select>
@@ -114,7 +114,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
             <span>
                 <?= $revCount ?> of the <?= count($history) ?> entr<?= count($history) === 1 ? 'y' : 'ies' ?>
                 below <?= $revCount === 1 ? 'was' : 'were' ?> recorded <strong>after</strong> the period had already
-                been finalized &mdash; those are corrections, and the employees they touched are flagged
+                been finalized - those are corrections, and the employees they touched are flagged
                 <strong>Revised</strong> on Payroll Processing and Reports.
             </span>
         </div>
@@ -159,7 +159,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                             </span>
                             <?php if ($hCycle > 0): ?>
                                 <span class="rev-tag"
-                                      title="Recorded after the period had been finalized <?= $hCycle ?>&times; — this entry is a correction">Revision</span>
+                                      title="Recorded after the period had been finalized <?= $hCycle ?>&times; - this entry is a correction">Revision</span>
                             <?php endif; ?>
                         </td>
                         <td><strong>₱<?= number_format($h['amount'], 2) ?></strong></td>
@@ -168,7 +168,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                             <?php if ($h['period_id'] && isset($periodMap[$h['period_id']])): ?>
                                 <span class="badge badge-blue"><?= htmlspecialchars($periodMap[$h['period_id']]) ?></span>
                             <?php else: ?>
-                                <span style="color:#9ca3af;">—</span>
+                                <span style="color:#9ca3af;">-</span>
                             <?php endif; ?>
                         </td>
                         <td><?= htmlspecialchars($h['processed_by']) ?></td>

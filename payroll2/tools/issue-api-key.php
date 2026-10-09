@@ -3,7 +3,7 @@
  * tools/issue-api-key.php
  *
  * Generates an API key for one client PC and stores only its SHA-256 hash.
- * The plaintext key is printed ONCE — copy it straight into that PC's
+ * The plaintext key is printed ONCE - copy it straight into that PC's
  * config.ini, because it cannot be recovered afterwards.
  *
  * CLI only (refuses to run over HTTP, so it can sit in the repo safely).

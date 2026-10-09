@@ -8,7 +8,7 @@ $msg = null;
 
 /*
  * Rewrite a manager's explicit employee assignments.
- * Branch-scoped managers keep no rows — their set is resolved from the branch
+ * Branch-scoped managers keep no rows - their set is resolved from the branch
  * at query time, so employees added to that branch later are covered too.
  */
 function saveManagerScope(PDO $db, int $managerId, string $scope, array $empIds): void {
@@ -84,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Select everything except password_hash — never expose hashes to the browser
+// Select everything except password_hash - never expose hashes to the browser
 $managers = $db->query("SELECT id, full_name, email, branch, scope_type, status, created_at
                         FROM users WHERE role='manager' ORDER BY full_name ASC")->fetchAll();
 
@@ -117,7 +117,7 @@ foreach ($db->query("SELECT manager_id, emp_id FROM manager_employees")->fetchAl
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Managers — Payroll System</title>
+    <title>Managers - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
 </head>

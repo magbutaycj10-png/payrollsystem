@@ -18,7 +18,7 @@ $periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' OR
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Attendance — Manager Portal</title>
+    <title>Upload Attendance - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <?php uploadPanelStyles(); ?>

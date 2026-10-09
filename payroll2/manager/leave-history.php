@@ -4,7 +4,7 @@ requireManager();
 
 /*
  * Searchable record of every leave request from this manager's team.
- * Decisions stay on leave.php — this page is for looking things up.
+ * Decisions stay on leave.php - this page is for looking things up.
  */
 
 $activePage = 'leave-history';
@@ -67,8 +67,8 @@ foreach ($rows as $lr) {
     $detailMap[$lr['id']] = [
         'emp'       => $lr['emp_name'],
         'emp_id'    => $lr['emp_id'],
-        'branch'    => $lr['branch']   ?: '—',
-        'position'  => $lr['position'] ?: '—',
+        'branch'    => $lr['branch']   ?: '-',
+        'position'  => $lr['position'] ?: '-',
         'type'      => $lr['leave_type'],
         'from'      => date('M d, Y', strtotime($lr['date_from'])),
         'to'        => date('M d, Y', strtotime($lr['date_to'])),
@@ -76,10 +76,10 @@ foreach ($rows as $lr) {
         'days_label' => leaveDaysLabel($lr['date_from'], $lr['date_to'], $lr['rest_days'] ?? null),
         'reason'    => trim((string)$lr['reason']) !== '' ? $lr['reason'] : 'No reason given.',
         'status'    => $lr['status'],
-        'reviewer'  => $lr['reviewed_by'] ?: '—',
-        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '—',
+        'reviewer'  => $lr['reviewed_by'] ?: '-',
+        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '-',
         'submitted' => date('M d, Y g:i A', strtotime($lr['created_at'])),
-        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '—',
+        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '-',
     ];
 }
 $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'All' || $type !== 'All';
@@ -89,7 +89,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leave History — Manager Portal</title>
+    <title>Leave History - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         /* ── Filter bar ── */
@@ -210,7 +210,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
             <div class="p-card-value"><?= $byStatus['Rejected'] ?></div>
         </div>
         <div class="p-card p-card-purple">
-            <div class="p-card-label" title="Calendar days less each employee's days off — what payroll counts">Leave duty days</div>
+            <div class="p-card-label" title="Calendar days less each employee's days off - what payroll counts">Leave duty days</div>
             <div class="p-card-value"><?= $sumDays ?></div>
             <div class="p-card-sub">Across these requests</div>
         </div>
@@ -220,7 +220,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
         <div class="p-box-header">
             <h2>Results</h2>
             <?php if (count($rows) >= 500): ?>
-                <span class="badge badge-yellow">Showing the first 500 — narrow the search</span>
+                <span class="badge badge-yellow">Showing the first 500 - narrow the search</span>
             <?php endif; ?>
         </div>
         <div class="p-table-wrap">
@@ -294,7 +294,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
         </div>
 
         <p id="lmPendingHint" style="display:none;font-size:.8rem;color:#92400e;background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;margin-top:16px;">
-            Still pending — approve or reject it from
+            Still pending - approve or reject it from
             <a href="/manager/leave.php?filter=Pending" style="color:inherit;font-weight:700;">Leave Requests</a>.
         </p>
     </div>
@@ -309,7 +309,7 @@ function openLeave(id) {
     if (!d) return;
 
     document.getElementById('lmTitle').textContent    = d.emp;
-    document.getElementById('lmSub').textContent      = d.type + ' — submitted ' + d.submitted;
+    document.getElementById('lmSub').textContent      = d.type + ' - submitted ' + d.submitted;
     document.getElementById('lmEmpId').textContent    = d.emp_id;
     document.getElementById('lmBranch').textContent   = d.branch;
     document.getElementById('lmPosition').textContent = d.position;

@@ -3,12 +3,12 @@
  * api/update-payroll.php
  * The two period-state actions triggered by assets/js/payroll.js:
  *
- *   'finalize' — lock the period so no further money can be recorded
- *   'unlock'   — re-open a locked period so it can be corrected
+ *   'finalize' - lock the period so no further money can be recorded
+ *   'unlock'   - re-open a locked period so it can be corrected
  *
  * Money itself is never written here. Bonuses and deductions go through
  * adjustments.php, which writes the payroll row and the history row in one
- * transaction — a second, untransacted write path is exactly how the payroll
+ * transaction - a second, untransacted write path is exactly how the payroll
  * columns and the adjustment history drift apart.
  *
  * Both actions append to period_audit, so "finalized, re-opened, corrected,
@@ -36,7 +36,7 @@ if (!$per) jsonResponse(['error' => 'Period not found'], 404);
 
 try {
     /* ---------------------------------------------------------------
-     * Finalize — lock the period and stamp every payroll row Finalized.
+     * Finalize - lock the period and stamp every payroll row Finalized.
      * finalize_count tells a first finalize from a re-finalize after a
      * correction, which is what drives the "Revised" indicators.
      * ------------------------------------------------------------- */
@@ -49,7 +49,7 @@ try {
         $cnt->execute([$period_id]);
         $n = (int)$cnt->fetchColumn();
         if ($n === 0) {
-            jsonResponse(['error' => 'Nothing to finalize — this period has no payroll records.'], 400);
+            jsonResponse(['error' => 'Nothing to finalize - this period has no payroll records.'], 400);
         }
 
         /* Lines whose SSS / PhilHealth / Pag-IBIG / tax no longer settle the month (an earlier cut-off was
@@ -103,7 +103,7 @@ try {
             'Finalized',
             $cycle,
             $cycle > 1
-                ? "Re-finalized after correction — $revised employee row(s) revised, $n row(s) locked."
+                ? "Re-finalized after correction - $revised employee row(s) revised, $n row(s) locked."
                 : "$n employee row(s) locked."
         );
 
@@ -116,7 +116,7 @@ try {
     }
 
     /* ---------------------------------------------------------------
-     * Recompute — rebuild an OPEN period (and the open cut-offs after it in the same month) from the days
+     * Recompute - rebuild an OPEN period (and the open cut-offs after it in the same month) from the days
      * saved for it, with the current rules and Settings. Used after unlocking a period to correct it, or after
      * an earlier cut-off changed. A period built from a totals file has no saved days: upload it again instead.
      * ------------------------------------------------------------- */
@@ -130,12 +130,12 @@ try {
             jsonResponse(['error' => $per['period_label'] . ' has no day-by-day records to recompute from (it was built from a totals file). Upload the file again instead.'], 400);
         }
         $n = recomputeMonthFrom($db, $period_id, ['role' => 'admin', 'scope' => null]);
-        logPeriodAudit($period_id, 'Revised', (int)$per['finalize_count'], "Recomputed from the saved days — $n employee line(s).");
+        logPeriodAudit($period_id, 'Revised', (int)$per['finalize_count'], "Recomputed from the saved days - $n employee line(s).");
         jsonResponse(['success' => true, 'recomputed' => $n]);
     }
 
     /* ---------------------------------------------------------------
-     * Unlock — re-open a locked period. Payroll rows go back to Draft
+     * Unlock - re-open a locked period. Payroll rows go back to Draft
      * but every bonus / deduction already recorded stays exactly as it
      * is: re-opening corrects a period, it does not wipe it.
      * ------------------------------------------------------------- */

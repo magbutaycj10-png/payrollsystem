@@ -5,7 +5,7 @@ requireAuth();
 /*
  * Landing page shown right after an admin signs in.
  * Gives a short read on where the payroll cycle stands and puts the action
- * that starts every cycle — uploading the attendance file — within reach,
+ * that starts every cycle - uploading the attendance file - within reach,
  * without turning into a second dashboard.
  */
 
@@ -18,7 +18,7 @@ $latestPeriod = currentPeriod($db);   /* the period holding today, else the late
 
 $pendingLeave = (int)$db->query("SELECT COUNT(*) FROM leave_requests WHERE status='Pending'")->fetchColumn();
 
-/* Attendance activity — tells the admin whether this cycle has been started */
+/* Attendance activity - tells the admin whether this cycle has been started */
 $lastUpload  = $db->query("SELECT MAX(upload_date) FROM attendance")->fetchColumn();
 $periodRows  = 0;
 $periodNet   = 0.0;
@@ -36,12 +36,12 @@ if ($latestPeriod) {
 $hour     = (int)date('G');
 $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good evening');
 
-/* A finalized pay period's status is 'Locked' (payroll_periods.status is Open | Locked) — comparing with 'Finalized' never matched */
+/* A finalized pay period's status is 'Locked' (payroll_periods.status is Open | Locked) - comparing with 'Finalized' never matched */
 $periodLocked = in_array($latestPeriod['status'] ?? '', ['Locked', 'Finalized'], true);
 
 /* Where the cycle currently stands, in one line */
 if (!$latestPeriod) {
-    $stepText = 'No payroll period yet — create one and upload attendance to begin.';
+    $stepText = 'No payroll period yet - create one and upload attendance to begin.';
 } elseif ($periodRows === 0) {
     $stepText = 'Next step: upload the attendance file for ' . $latestPeriod['period_label'] . '.';
 } elseif ((int)$payrollRows === 0) {
@@ -59,7 +59,7 @@ $companyName = getSetting('company_name', 'L&N Pharmacy');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home — Payroll System</title>
+    <title>Home - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* Welcome band */
@@ -224,7 +224,7 @@ $companyName = getSetting('company_name', 'L&N Pharmacy');
                 <span class="lp-stat-label">Period status</span>
                 <span class="lp-stat-value">
                     <span class="badge badge-<?= $periodLocked ? 'green' : 'blue' ?>">
-                        <?= htmlspecialchars($latestPeriod ? ($periodLocked ? 'Finalized' : 'Open') : '—') ?>
+                        <?= htmlspecialchars($latestPeriod ? ($periodLocked ? 'Finalized' : 'Open') : '-') ?>
                     </span>
                 </span>
             </div>
@@ -280,7 +280,7 @@ $companyName = getSetting('company_name', 'L&N Pharmacy');
 
 <script>
 /*
- * The landing page only *accepts* the file — parsing, column mapping and
+ * The landing page only *accepts* the file - parsing, column mapping and
  * saving all stay on attendance-upload.php. The picked file is handed over
  * through sessionStorage as a data URL and rebuilt there.
  */
@@ -322,7 +322,7 @@ $companyName = getSetting('company_name', 'L&N Pharmacy');
             try {
                 sessionStorage.setItem('pendingAttendanceFile',
                     JSON.stringify({ name: file.name, data: ev.target.result }));
-            } catch (err) { /* quota exceeded — fall through to a plain redirect */ }
+            } catch (err) { /* quota exceeded - fall through to a plain redirect */ }
             window.location.href = 'attendance-upload.php';
         };
         reader.onerror = function () { window.location.href = 'attendance-upload.php'; };

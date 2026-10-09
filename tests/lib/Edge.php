@@ -1,7 +1,7 @@
 <?php
 /*
- * Edge — run JavaScript tests in headless Microsoft Edge (there is no Node on this machine, and the
- * application's JavaScript — forecast models, timesheet parsing — only exists as browser scripts).
+ * Edge - run JavaScript tests in headless Microsoft Edge (there is no Node on this machine, and the
+ * application's JavaScript - forecast models, timesheet parsing - only exists as browser scripts).
  *
  * A test page writes its results as JSON into <pre id="qa-result">; the DOM is dumped and decoded here.
  */

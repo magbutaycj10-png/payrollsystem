@@ -1,6 +1,6 @@
 <?php
 /*
- * 10 — Raw biometric punches → hours (api/rollup-punches.php), the step before pay.
+ * 10 - Raw biometric punches → hours (api/rollup-punches.php), the step before pay.
  *
  * Rules (Settings): shift starts 08:00, 15 minutes' grace, a 60-minute unpaid break (taken off a day longer than half
  * the duty day), duty day 8 h (or the employee's own, e.g. 10). Hours beyond the duty day are overtime; a lone punch is an

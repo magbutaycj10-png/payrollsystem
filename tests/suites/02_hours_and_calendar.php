@@ -1,6 +1,6 @@
 <?php
 /*
- * 02 — Hours and calendar: the building blocks the pay engine stands on.
+ * 02 - Hours and calendar: the building blocks the pay engine stands on.
  * undertime rounding, duty-day hours, working days, leave days, absence classification,
  * and "is this the month's last pay run?".
  */
@@ -94,7 +94,7 @@ T::suite('02 · Hours & calendar primitives', function () {
         $t->same(1.0, dayUndertime($d(9.45), 10.0));
     });
 
-    T::test('dayUndertime: exactly half an hour short rounds the shortfall UP (7:30 of 8 → 1 h) — matches the pharmacy\'s second sheet format', function (T $t) {
+    T::test('dayUndertime: exactly half an hour short rounds the shortfall UP (7:30 of 8 → 1 h) - matches the pharmacy\'s second sheet format', function (T $t) {
         // The pharmacy's workbook has two formulas. The ROLLY/JASH sheets round the SHORTFALL (30 min → 1 h);
         // the BERNA sheets round the hours WORKED (7:30 → 8 → 0 h). The app follows the first. Recorded so a change is noticed.
         $t->same(1.0, dayUndertime(['hours_worked' => 7.5, 'undertime_hours' => null], 8.0));

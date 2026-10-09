@@ -1,4 +1,4 @@
-# 🖥 L&N Pharmacy Payroll System — Desktop App Setup
+# 🖥 L&N Pharmacy Payroll System - Desktop App Setup
 No XAMPP needed. One double-click to open.
 (What the system does, how it is tested and how to deploy it online: see README.md.)
 
@@ -34,25 +34,25 @@ C:\PayrollApp\
 
 ## ✅ Step-by-Step Setup
 
-### Step 1 — Create the app folder
+### Step 1 - Create the app folder
 Create a folder:  `C:\PayrollApp\`
 
 ---
 
-### Step 2 — Copy your app files
+### Step 2 - Copy your app files
 Copy this whole project (`payroll2\`, `launch.*`, `stop.bat`, `php.ini`, `secrets.bat.example`, …) into `C:\PayrollApp\`
 
 ---
 
-### Step 3 — Download Portable PHP
+### Step 3 - Download Portable PHP
 
 1. Go to: **https://windows.php.net/download/**
-2. Download **PHP 8.2 (or 8.3) — VS16 x64 Thread Safe** → `.zip` file
+2. Download **PHP 8.2 (or 8.3) - VS16 x64 Thread Safe** → `.zip` file
 3. Extract it → rename the folder to `php`
 4. Move it to `C:\PayrollApp\php\`
 5. Copy the `php.ini` file (from this project) into `C:\PayrollApp\php\php.ini`
 
-> If there's already a `php.ini-production` inside, you can use that instead —
+> If there's already a `php.ini-production` inside, you can use that instead -
 > just make sure these lines are uncommented (remove the `;`):
 > ```
 > extension=pdo_mysql
@@ -62,7 +62,7 @@ Copy this whole project (`payroll2\`, `launch.*`, `stop.bat`, `php.ini`, `secret
 
 ---
 
-### Step 4 — Add your Aiven SSL Certificate
+### Step 4 - Add your Aiven SSL Certificate
 
 1. Go to **https://aiven.io** → your payroll service
 2. Click **Connection information** → scroll to the bottom
@@ -73,9 +73,9 @@ Copy this whole project (`payroll2\`, `launch.*`, `stop.bat`, `php.ini`, `secret
 
 ---
 
-### Step 5 — Set your database connection
+### Step 5 - Set your database connection
 
-Nothing about the database is written in the code — host, user and password
+Nothing about the database is written in the code - host, user and password
 all come from `secrets.bat`, which `.gitignore` keeps out of GitHub.
 
 Copy `secrets.bat.example` to `secrets.bat` in the same folder and fill in the
@@ -91,14 +91,14 @@ set DB_PASS=your-password
 
 ---
 
-### Step 6 — Launcher files
+### Step 6 - Launcher files
 
 `launch.vbs`, `launch.bat` and `stop.bat` must sit directly in `C:\PayrollApp\`
 (they were copied with the project in Step 2).
 
 ---
 
-### Step 7 — Create the tables (a NEW, empty database only)
+### Step 7 - Create the tables (a NEW, empty database only)
 
 Use **DBeaver** (free) or **TablePlus** (free) to connect to the database with the same
 details you put in `secrets.bat` (SSL CA: point to your `ca.pem`), then:
@@ -108,13 +108,13 @@ details you put in `secrets.bat` (SSL CA: point to your `ca.pem`), then:
 3. **Alt + X** (Execute script)
 
 That creates the seven base tables. It is safe to run again (every statement is `CREATE TABLE IF NOT EXISTS`).
-Everything else — the sign-in table, leave, daily attendance, the audit trail, signatures — the
+Everything else - the sign-in table, leave, daily attendance, the audit trail, signatures - the
 application creates by itself the first time a page loads. **Skip this step if you already have a
 payroll database**: the update changes no tables.
 
 ---
 
-### Step 8 — Create a Desktop Shortcut
+### Step 8 - Create a Desktop Shortcut
 
 1. Right-click `C:\PayrollApp\launch.vbs`
 2. Click **Send to → Desktop (create shortcut)**
@@ -131,7 +131,7 @@ payroll database**: the update changes no tables.
 2. **Push to GitHub.** `.gitignore` already keeps out everything private:
    `secrets.bat`, `ca.pem`, `backups/` (data snapshots), logs, the agent's
    `config.ini` and the portable PHP folder. Check with `git status` before
-   the first commit — none of those should be listed.
+   the first commit - none of those should be listed.
 3. **On Render**, create a Web Service from the repo (Docker). Under
    **Environment**, add:
    ```
@@ -139,7 +139,7 @@ payroll database**: the update changes no tables.
    ```
    and the certificate, either as a **Secret File** named `ca.pem`, or as an
    environment variable `DB_SSL_CA_PEM` holding the certificate's text
-   (Render's Secret Files are not readable by Apache's user — the environment
+   (Render's Secret Files are not readable by Apache's user - the environment
    variable is the one that works).
    The Dockerfile already sets `APP_ENV=production`, hides PHP errors and
    versions, and blocks the code-only folders (`includes`, `sql`, `tools`).
@@ -156,10 +156,10 @@ payroll database**: the update changes no tables.
 |---|---|
 | **Open the system** | Double-click the shortcut on your desktop |
 | **System opens in browser** | Automatically at `http://localhost:8765` |
-| **Stop the system** | Double-click `stop.bat` (or just close the browser — PHP stops automatically when idle) |
+| **Stop the system** | Double-click `stop.bat` (or just close the browser - PHP stops automatically when idle) |
 | **Already running?** | Double-clicking again just reopens the browser tab |
 | **13th month pay** | Payroll Process → 13th Month Pay (see README.md) |
-| **Check the numbers** | Open `tests\dbeaver_checks.sql` in DBeaver on your database and press Alt+X — read-only queries that flag anything that does not add up |
+| **Check the numbers** | Open `tests\dbeaver_checks.sql` in DBeaver on your database and press Alt+X - read-only queries that flag anything that does not add up |
 
 ---
 
@@ -173,7 +173,7 @@ payroll database**: the update changes no tables.
 | Can't connect to database | Check the details in `secrets.bat` and that `ca.pem` is present |
 | Port already in use | Run `stop.bat` first, then launch again |
 | SSL error | Make sure `extension=openssl` is uncommented in `php\php.ini` |
-| "Too many failed sign-ins" | Wait 15 minutes — wrong passwords are slowed down on purpose |
+| "Too many failed sign-ins" | Wait 15 minutes - wrong passwords are slowed down on purpose |
 
 ---
 

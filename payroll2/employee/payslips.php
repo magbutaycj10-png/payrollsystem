@@ -19,8 +19,8 @@ $rows->execute([$e['id']]);
 $rows = $rows->fetchAll();
 
 /* Signatures in one query (the database is a round trip away). A signature
-   given for a different net pay than the current one — the payslip was
-   corrected after signing — no longer counts. */
+   given for a different net pay than the current one - the payslip was
+   corrected after signing - no longer counts. */
 $signatures = [];
 if ($rows) {
     $ids = array_column($rows, 'id');
@@ -57,7 +57,7 @@ if ($rows) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Payslips — Employee Portal</title>
+    <title>My Payslips - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         .payslip-card {
@@ -138,11 +138,11 @@ if ($rows) {
                 </div>
                 <?php $allDed = (float)$r['withholding_tax'] + (float)$r['sss'] + (float)$r['philhealth']
                               + (float)$r['pagibig'] + (float)$r['other_deductions']; ?>
-                <div class="payslip-item" title="Tax, SSS, PhilHealth, Pag-IBIG and other deductions — see Details">
+                <div class="payslip-item" title="Tax, SSS, PhilHealth, Pag-IBIG and other deductions - see Details">
                     <div class="payslip-item-label">Deductions</div>
                     <div class="payslip-item-value" style="color:#dc2626;">₱<?= number_format($allDed, 2) ?></div>
                 </div>
-                <div class="payslip-item" style="border-top:2px solid #22c55e;">
+                <div class="payslip-item">
                     <div class="payslip-item-label">Net Pay</div>
                     <div class="payslip-item-value" style="color:#166534;font-size:1.2rem;">₱<?= number_format($r['net_pay'], 2) ?></div>
                 </div>
@@ -175,7 +175,7 @@ if ($rows) {
                                 <strong style="color:<?= $a['entry_type'] === 'Bonus' ? '#16a34a' : '#dc2626' ?>;">
                                     <?= $a['entry_type'] ?>
                                 </strong>
-                                &nbsp;&mdash;&nbsp;<?= htmlspecialchars($a['reason']) ?>
+                                &nbsp;-&nbsp;<?= htmlspecialchars($a['reason']) ?>
                                 <?php if ((int)$a['finalize_cycle'] > 0): ?>
                                     <span class="rev-tag">Revision</span>
                                 <?php endif; ?>

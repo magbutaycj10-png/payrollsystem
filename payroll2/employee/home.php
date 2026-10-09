@@ -4,8 +4,8 @@ requireEmployee();
 
 /*
  * Landing page shown right after an employee signs in.
- * Answers the two questions people actually log in for — what was my last
- * pay, and where is my leave request — then links out to the full pages.
+ * Answers the two questions people actually log in for - what was my last
+ * pay, and where is my leave request - then links out to the full pages.
  */
 
 $activePage = 'home';
@@ -49,7 +49,7 @@ $greeting = $hour < 12 ? 'Good morning' : ($hour < 18 ? 'Good afternoon' : 'Good
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home — Employee Portal</title>
+    <title>Home - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         .lp-hero {

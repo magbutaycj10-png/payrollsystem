@@ -1,5 +1,5 @@
 # Deploys the payroll app to any Docker host (Render, Railway, Fly.io, Koyeb).
-# The MySQL database is NOT in here — it stays on Aiven, and nothing about it
+# The MySQL database is NOT in here - it stays on Aiven, and nothing about it
 # is in the image either: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS and the
 # CA certificate (Secret File "ca.pem" or DB_SSL_CA_PEM) are set on the host.
 FROM php:8.2-apache

@@ -1,6 +1,6 @@
 <?php
 /*
- * Defects — the register behind the [D-nn] tags in the suites. A test tagged with one of these ids fails on the ORIGINAL
+ * Defects - the register behind the [D-nn] tags in the suites. A test tagged with one of these ids fails on the ORIGINAL
  * application (that is what proves the defect) and passes on the audit-fixed one (fixes\payroll2), where the same test
  * is a regression guard: if it fails there, a fix has come undone and the run fails.
  * (Evidence for each defect and the fix that was applied are in tests/AUDIT_FINDINGS.md.)

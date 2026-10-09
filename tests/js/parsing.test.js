@@ -34,7 +34,7 @@ if (STRICT) t('toHours (strict): an unreadable duration is NaN; decimals, thousa
   near(toHours('08:29'), 8.4833, 1e-4); near(toHours('12:30:30'), 12.5083, 1e-4);
 });
 
-if (STRICT) t('a timesheet row with an unreadable duration is skipped and counted — never posted as hours', () => {
+if (STRICT) t('a timesheet row with an unreadable duration is skipped and counted - never posted as hours', () => {
   const grid = [['Employee Name', 'Date', 'Total Hours Worked', 'Late Hours', 'Under Time Hours', 'Overtime Hours', 'Remarks'],
     ['X', '2026-04-09', '08:60', '', '0', '0', 'DUTY'],        // typo: minutes 60
     ['X', '2026-04-10', '09:00', '', '0', '1', 'DUTY'],        // fine
@@ -89,7 +89,7 @@ function stubFetch(response) {
 const PERIOD = { id: 7, start: '2026-04-01', end: '2026-04-15', label: 'Apr 1-15, 2026' };
 const NO_LINKS = { map: {}, missing: [] };
 
-ta('saveDaily(): a good file is posted whole — every figure a number, the OFF day flagged', async () => {
+ta('saveDaily(): a good file is posted whole - every figure a number, the OFF day flagged', async () => {
   headers = ['Date', 'Name', 'Device ID', 'Hours Worked', 'Overtime', 'Late Hours', 'Undertime', 'Remarks'];
   parsedData = [['2026-04-01', 'A B', '', 8, 0, 0, '', 'DUTY'], ['2026-04-02', 'A B', '', '7.5', '1', '0.25', '1', 'DUTY'], ['2026-04-03', 'A B', '', 0, 0, 0, '', 'OFF'],
                 ['2026-04-20', 'A B', '', 8, 0, 0, '', 'DUTY']];                       // outside the pay period
@@ -106,7 +106,7 @@ ta('saveDaily(): a good file is posted whole — every figure a number, the OFF 
   truthy(result && result.notes.some(n => /outside the pay period/.test(n)), 'the page mentions the skipped day: ' + JSON.stringify(result));
 });
 
-if (STRICT) ta('saveDaily(): a day with an unreadable figure is held back — never posted as NaN / null hours — and the page names it', async () => {
+if (STRICT) ta('saveDaily(): a day with an unreadable figure is held back - never posted as NaN / null hours - and the page names it', async () => {
   headers = ['Date', 'Name', 'Device ID', 'Hours Worked', 'Overtime', 'Late Hours', 'Undertime', 'Remarks'];
   parsedData = [['2026-04-01', 'A B', '', '8', '0', '0', '', 'DUTY'], ['2026-04-02', 'A B', '', '08:60', '0', '0', '', 'DUTY'],
                 ['2026-04-03', 'A B', '', '8', 'abc9', '0', '', 'DUTY'], ['2026-04-06', 'A B', '', '7.5', '1', '0.25', '1', 'DUTY']];

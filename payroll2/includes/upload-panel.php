@@ -56,10 +56,10 @@ function uploadPanelStyles(): void { ?>
     .up-kind b { display: block; font-size: .9rem; margin-bottom: 2px; }
     .up-warn { padding: 10px 14px; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: .84rem; margin-bottom: 14px; }
 
-    .status-msg { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 8px; font-size: .875rem; border-left: 4px solid transparent; }
-    .status-msg.show-success { display: block; background: #f0fdf4; color: #166534; border-left-color: #22c55e; }
-    .status-msg.show-error   { display: block; background: #fff1f2; color: #9f1239; border-left-color: #f43f5e; }
-    .status-msg.show-info    { display: block; background: #eff6ff; color: #1e40af; border-left-color: #3b82f6; }
+    .status-msg { display: none; margin-top: 14px; padding: 12px 16px; border-radius: 8px; font-size: .875rem; border: 1px solid transparent; }
+    .status-msg.show-success { display: block; background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+    .status-msg.show-error   { display: block; background: #fff1f2; color: #9f1239; border-color: #fecdd3; }
+    .status-msg.show-info    { display: block; background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
 
     .panel-section-title { font-size: .73rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #94a3b8; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; margin: 18px 0 12px; }
     .map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
@@ -159,8 +159,8 @@ function uploadPanel(array $o): void {
                     <div class="up-field">
                         <label for="newPeriodType">Schedule</label>
                         <select id="newPeriodType" onchange="fillPeriodDates()">
-                            <option value="Semi-Monthly|1" <?= $o['defaultType'] === 'Semi-Monthly' ? 'selected' : '' ?>>Semi-Monthly — 1st half (1–15)</option>
-                            <option value="Semi-Monthly|2">Semi-Monthly — 2nd half (16–end)</option>
+                            <option value="Semi-Monthly|1" <?= $o['defaultType'] === 'Semi-Monthly' ? 'selected' : '' ?>>Semi-Monthly - 1st half (1–15)</option>
+                            <option value="Semi-Monthly|2">Semi-Monthly - 2nd half (16–end)</option>
                             <option value="Monthly|0" <?= $o['defaultType'] === 'Monthly' ? 'selected' : '' ?>>Monthly (whole month)</option>
                             <option value="Weekly|0" <?= $o['defaultType'] === 'Weekly' ? 'selected' : '' ?>>Weekly (set the dates)</option>
                         </select>
@@ -196,7 +196,7 @@ function uploadPanel(array $o): void {
             <span class="up-num">2</span>
             <div>
                 <h2>Upload the attendance file</h2>
-                <p>Timesheet, biometric report, or a template — the system recognises the layout.</p>
+                <p>Timesheet, biometric report, or a template - the system recognises the layout.</p>
             </div>
         </div>
         <div class="up-card-body">
@@ -213,14 +213,14 @@ function uploadPanel(array $o): void {
                 <summary>Which files work? &nbsp;·&nbsp; templates</summary>
                 <div class="up-row">
                     <div class="up-hint">
-                        <b>Day-by-day files</b> — one row per employee per day. The days are <b>added</b>
+                        <b>Day-by-day files</b> - one row per employee per day. The days are <b>added</b>
                         to the pay period, so you can upload every day, every week, or once per cut-off;
                         uploading the same day again replaces it. Days outside the pay period's dates are skipped.<br>
                         Works with: the timesheet workbook (one sheet per employee), the timesheet CSV,
                         the biometric <i>Attendance Summary / Individual Report</i>, and the day-by-day template.
                     </div>
                     <div class="up-hint">
-                        <b>Totals files</b> — one line per employee with the hours for the whole period.
+                        <b>Totals files</b> - one line per employee with the hours for the whole period.
                         Uploading one <b>replaces</b> the pay period's attendance.<br><br>
                         No <code>ID</code> column is needed: each row is matched to an employee by
                         <b>name</b>. Hours may be decimals (<code>8.5</code>) or <code>HH:MM</code>.
@@ -256,7 +256,7 @@ function uploadPanel(array $o): void {
             </div>
 
             <details class="up-more" id="mappingSection">
-                <summary>Column matching — detected automatically; change only if a column looks wrong</summary>
+                <summary>Column matching - detected automatically; change only if a column looks wrong</summary>
                 <div class="map-grid">
                     <div class="map-item"><label>Employee name <span class="map-req">required</span></label><select id="map_name"></select></div>
                     <div class="map-item" data-daily-only><label>Date <span class="map-req">required</span></label><select id="map_date"></select></div>

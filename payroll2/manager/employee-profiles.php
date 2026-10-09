@@ -53,7 +53,7 @@ $employees = $employees->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Employee Profiles — Manager Portal</title>
+    <title>Employee Profiles - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>
@@ -64,7 +64,7 @@ $employees = $employees->fetchAll();
     <div class="p-header">
         <div>
             <h1>Employee Profiles</h1>
-            <p>Address, phone &amp; emergency contacts<?= ' — ' . htmlspecialchars(mgrScopeLabel()) ?></p>
+            <p>Address, phone &amp; emergency contacts<?= ' - ' . htmlspecialchars(mgrScopeLabel()) ?></p>
         </div>
     </div>
 
@@ -94,9 +94,9 @@ $employees = $employees->fetchAll();
                                 <br><small style="color:#9ca3af;"><?= htmlspecialchars($e['position']) ?></small>
                             <?php endif; ?>
                         </td>
-                        <td><?= htmlspecialchars($e['phone'] ?: '—') ?></td>
+                        <td><?= htmlspecialchars($e['phone'] ?: '-') ?></td>
                         <td style="max-width:180px;white-space:normal;font-size:.82rem;">
-                            <?= htmlspecialchars($e['address'] ?: '—') ?>
+                            <?= htmlspecialchars($e['address'] ?: '-') ?>
                         </td>
                         <td style="font-size:.82rem;">
                             <?php if ($e['emergency_name']): ?>
@@ -106,7 +106,7 @@ $employees = $employees->fetchAll();
                                 <?php endif; ?>
                                 <br><?= htmlspecialchars($e['emergency_phone'] ?: '') ?>
                             <?php else: ?>
-                                <span style="color:#9ca3af;">—</span>
+                                <span style="color:#9ca3af;">-</span>
                             <?php endif; ?>
                         </td>
                         <td style="color:#6b7280;font-size:.78rem;">

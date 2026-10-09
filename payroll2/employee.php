@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $branch            = trim($_POST['branch']       ?? '');
         $email           = trim($_POST['email']            ?? '');
         $salary          = floatval($_POST['base_salary']  ?? 0);
-        /* Whitelist against the enum — anything unexpected falls back to monthly */
+        /* Whitelist against the enum - anything unexpected falls back to monthly */
         $salary_type     = in_array($_POST['salary_type'] ?? '', ['monthly', 'kinsenas', 'daily'], true)
                            ? $_POST['salary_type'] : 'monthly';
         $hired           = $_POST['date_hired']            ?: null;
@@ -47,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($formProblem === null && $dayHoursRaw !== '' && $dayHours === null) $formProblem = 'Duty-day hours must be a number from 1 to 24 (or blank for the standard day)';
 
         if ($formProblem !== null) {
-            $msg = ['type' => 'error', 'text' => "Not saved — $formProblem."];
+            $msg = ['type' => 'error', 'text' => "Not saved - $formProblem."];
         } elseif ($action === 'add') {
             $emp_id = nextEmpId($db);
             try {
@@ -66,8 +66,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->prepare("UPDATE employees SET emp_id=?,full_name=?,position=?,branch=?,email=?,base_salary=?,salary_type=?,date_hired=?,deduct_sss=?,deduct_philhealth=?,deduct_pagibig=?,rest_days=?,hours_per_day=? WHERE id=?")
                    ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired, $dSss, $dPh, $dPag, $restDays, $dayHours, $id]);
                 $msg = ['type' => 'success', 'text' => "Employee $name updated."];
-                /* Anything the pay computation reads — rate, salary type, day off,
-                   duty hours, hire date, contribution switches — changes this
+                /* Anything the pay computation reads - rate, salary type, day off,
+                   duty hours, hire date, contribution switches - changes this
                    employee's open payroll: bring it in line now */
                 $changed = (float)($prev['base_salary'] ?? 0) !== (float)$salary
                         || ($prev['salary_type'] ?? '') !== $salary_type
@@ -106,10 +106,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Set portal credentials (hashed) if password was provided
         if (($msg['type'] ?? '') === 'success' && $portal_password !== '') {
             if (!$email) {
-                $msg['text'] .= ' (Portal access skipped — email is required for login.)';
+                $msg['text'] .= ' (Portal access skipped - email is required for login.)';
             } else {
                 /* Every login email must be unique across admin, managers and
-                   employees. If another account already uses it, say who —
+                   employees. If another account already uses it, say who -
                    the employee record itself is already saved. */
                 $taken = $db->prepare("SELECT full_name, role FROM users
                                         WHERE email = ? AND NOT (role = 'earner' AND emp_id <=> ?) LIMIT 1");
@@ -133,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                       VALUES (?, ?, ?, 'earner', ?, 'Active')")
                            ->execute([$name, $email, $hash, $emp_id]);
                     }
-                    $msg['text'] .= ' Portal access set — employee can log in with their email and this password.';
+                    $msg['text'] .= ' Portal access set - employee can log in with their email and this password.';
                 }
             }
         }
@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if ($eid !== '' && $used) {
                 $msg = ['type' => 'error', 'text' => 'This employee has ' . implode(', ', $used) . ' records, '
-                      . 'so they cannot be deleted — those records must be kept. Revoke their portal access instead.'];
+                      . 'so they cannot be deleted - those records must be kept. Revoke their portal access instead.'];
             } else {
                 $db->prepare("DELETE FROM employees WHERE id=?")->execute([$id]);
                 $msg = ['type' => 'success', 'text' => 'Employee deleted.'];
@@ -168,7 +168,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                employee. The database refuses so that history is never orphaned. */
             if (($e->errorInfo[1] ?? 0) == 1451) {
                 $msg = ['type' => 'error', 'text' => 'This employee has payroll, attendance, leave or payslip records, '
-                      . 'so they cannot be deleted — those records must be kept. Revoke their portal access instead.'];
+                      . 'so they cannot be deleted - those records must be kept. Revoke their portal access instead.'];
             } else {
                 $msg = ['type' => 'error', 'text' => 'The employee was not deleted. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
             }
@@ -196,7 +196,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $next_emp_id = nextEmpId($db);
 
 /* The branch list maintained in Settings, plus any name already sitting on an
-   employee row that predates it — an existing assignment must stay selectable
+   employee row that predates it - an existing assignment must stay selectable
    or editing that employee would silently clear their branch. */
 $branchOptions = $db->query("
     SELECT name FROM (
@@ -225,12 +225,12 @@ $total     = count($employees);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Employees — Payroll System</title>
+    <title>Employees - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
     <style>
         /* Fit the table to remaining viewport so the horizontal scrollbar
-           always sits at the visible bottom — no page scroll needed to reach it. */
+           always sits at the visible bottom - no page scroll needed to reach it. */
         #empTableWrap {
             overflow: auto;          /* both axes */
         }
@@ -286,9 +286,9 @@ $total     = count($employees);
                     <tr>
                         <td><strong><?= htmlspecialchars($e['emp_id']) ?></strong></td>
                         <td><?= htmlspecialchars($e['full_name']) ?></td>
-                        <td><?= htmlspecialchars($e['position'] ?? '—') ?></td>
-                        <td><?= htmlspecialchars($e['branch'] ?? '—') ?></td>
-                        <td><?= htmlspecialchars($e['email'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($e['position'] ?? '-') ?></td>
+                        <td><?= htmlspecialchars($e['branch'] ?? '-') ?></td>
+                        <td><?= htmlspecialchars($e['email'] ?? '-') ?></td>
                         <td>₱<?= number_format($e['base_salary'], 2) ?></td>
                         <td>
                             <?php $st = $e['salary_type'] ?? 'monthly'; ?>
@@ -300,7 +300,7 @@ $total     = count($employees);
                                 <br><small style="color:#6b7280;white-space:nowrap;" title="Hours per duty day"><?= rtrim(rtrim(number_format($e['hours_per_day'], 1), '0'), '.') ?>-hour day</small>
                             <?php endif; ?>
                         </td>
-                        <td><?= $e['date_hired'] ? date('M d, Y', strtotime($e['date_hired'])) : '—' ?></td>
+                        <td><?= $e['date_hired'] ? date('M d, Y', strtotime($e['date_hired'])) : '-' ?></td>
                         <td>
                             <span class="badge badge-<?= $e['status'] === 'Active' ? 'green' : 'red' ?>">
                                 <?= $e['status'] ?>
@@ -372,7 +372,7 @@ $total     = count($employees);
                 <div class="form-group">
                     <label>Branch</label>
                     <select name="branch" id="f_branch" class="form-control">
-                        <option value="">&mdash; None &mdash;</option>
+                        <option value="">- None -</option>
                         <?php foreach ($branchOptions as $b): ?>
                         <option value="<?= htmlspecialchars($b) ?>"><?= htmlspecialchars($b) ?></option>
                         <?php endforeach; ?>
@@ -405,7 +405,7 @@ $total     = count($employees);
                     <label>Hours per Duty Day <span style="font-weight:400;color:#9ca3af;">(blank = <?= htmlspecialchars(getSetting('standard_hours', '8')) ?>)</span></label>
                     <input type="number" name="hours_per_day" id="f_day_hours" class="form-control" step="0.5" min="1" max="24"
                            placeholder="<?= htmlspecialchars(getSetting('standard_hours', '8')) ?>">
-                    <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">For a longer shift, e.g. 10 — a daily rate then covers 10 hours and undertime costs rate ÷ 10 an hour.</span>
+                    <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">For a longer shift, e.g. 10 - a daily rate then covers 10 hours and undertime costs rate ÷ 10 an hour.</span>
                 </div>
             </div>
 
@@ -430,7 +430,7 @@ $total     = count($employees);
                 <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px;">Government Contributions</p>
                 <p style="font-size:.78rem;color:#9ca3af;margin-bottom:10px;">
                     Deducted from this employee's pay, with the company's share added on top. Required by law for
-                    regular employees &mdash; untick only if it is paid some other way (for example the employee is
+                    regular employees - untick only if it is paid some other way (for example the employee is
                     not yet registered, or it is remitted outside this system).
                 </p>
                 <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:.88rem;">

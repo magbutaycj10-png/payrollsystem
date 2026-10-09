@@ -64,7 +64,7 @@ $unsignedCount = count($rows) - $signedCount;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Payslip — Manager Portal</title>
+    <title>Sign Payslip - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         /* Marks pay that was corrected after the period had been finalized */
@@ -91,7 +91,7 @@ $unsignedCount = count($rows) - $signedCount;
     <div class="p-header">
         <div>
             <h1>Sign Payslip</h1>
-            <p>Employee signs to confirm receipt of salary<?= ' — ' . htmlspecialchars(mgrScopeLabel()) ?></p>
+            <p>Employee signs to confirm receipt of salary<?= ' - ' . htmlspecialchars(mgrScopeLabel()) ?></p>
         </div>
     </div>
 
@@ -111,7 +111,7 @@ $unsignedCount = count($rows) - $signedCount;
                 <?php if (!empty($rows)): ?>
                 <label style="font-weight:600;font-size:.875rem;">Employee:</label>
                 <select name="payroll_id" class="p-form-control" style="max-width:240px;" onchange="this.form.submit()">
-                    <option value="">— Select Employee —</option>
+                    <option value="">- Select Employee -</option>
                     <?php foreach ($rows as $r): ?>
                     <option value="<?= $r['id'] ?>" <?= $r['id'] == $payroll_id ? 'selected' : '' ?>>
                         <?= htmlspecialchars($r['emp_name']) ?> (<?= $r['emp_id'] ?>)
@@ -129,7 +129,7 @@ $unsignedCount = count($rows) - $signedCount;
     <!-- Payslip summary + signature pad -->
     <div class="p-box" style="margin-bottom:16px;">
         <div class="p-box-header">
-            <h2>Payslip — <?= htmlspecialchars($selected['emp_name']) ?></h2>
+            <h2>Payslip - <?= htmlspecialchars($selected['emp_name']) ?></h2>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                 <span class="badge badge-<?= $selected['status']==='Finalized' ? 'green' : 'blue' ?>"><?= $selected['status'] ?></span>
                 <?php if (!empty($selected['revised_after_finalize'])): ?>
@@ -160,7 +160,7 @@ $unsignedCount = count($rows) - $signedCount;
                 <div class="ps-item"><div class="ps-label"><?= (float)$selected['withholding_tax'] < 0 ? 'Tax refund' : 'Tax' ?></div><div class="ps-value" style="color:<?= (float)$selected['withholding_tax'] < 0 ? '#16a34a' : '#dc2626' ?>;"><?= (float)$selected['withholding_tax'] < 0 ? '+' : '-' ?>₱<?= number_format(abs((float)$selected['withholding_tax']), 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Bonus</div><div class="ps-value" style="color:#16a34a;">+₱<?= number_format($selected['bonus'], 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Other Deductions</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['other_deductions'], 2) ?></div></div>
-                <div class="ps-item" style="border-top:2px solid #22c55e;">
+                <div class="ps-item">
                     <div class="ps-label">Net Pay</div>
                     <div class="ps-value" style="color:#166534;font-size:1.2rem;">₱<?= number_format($selected['net_pay'], 2) ?></div>
                 </div>
@@ -176,7 +176,7 @@ $unsignedCount = count($rows) - $signedCount;
             <?php $canSign = ($curPeriod['status'] ?? '') !== 'Open'; ?>
             <?php if (!$canSign): ?>
             <div class="p-alert p-alert-warn" style="margin-bottom:16px;">
-                <?= htmlspecialchars($curPeriod['period_label']) ?> is still open — its figures can still change.
+                <?= htmlspecialchars($curPeriod['period_label']) ?> is still open - its figures can still change.
                 Ask the admin to finalize it before collecting signatures.
             </div>
             <?php endif; ?>

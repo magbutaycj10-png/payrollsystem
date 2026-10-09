@@ -1,12 +1,12 @@
 <?php
 /*
- * BrowserSim — what assets/js/attendance-formats.js + attendance-upload.js do in the browser,
+ * BrowserSim - what assets/js/attendance-formats.js + attendance-upload.js do in the browser,
  * so a timesheet file can be pushed through the REAL api endpoints without a browser.
  *
  * This is a port, so it can drift from the JavaScript; suites/07_js_parity.php runs the
  * original JavaScript in headless Edge and fails if the two ever disagree.
  *
- * Only the day-by-day CSV path is ported (a flat export with one row per person per day —
+ * Only the day-by-day CSV path is ported (a flat export with one row per person per day -
  * the layout of the pharmacy's TIMESHEET *.csv files and of the app's own template).
  */
 final class BrowserSim
@@ -97,7 +97,7 @@ final class BrowserSim
             $late  = $col['late'] >= 0 ? self::toHours($r[$col['late']] ?? '') : 0.0;
             $remark = $col['remarks'] >= 0 ? trim((string)($r[$col['remarks']] ?? '')) : '';
             if ($name === '') continue;
-            // audit-fixed: an unreadable duration is never carried on as a number — the day is skipped and counted
+            // audit-fixed: an unreadable duration is never carried on as a number - the day is skipped and counted
             if (AppCopy::hasFixes()) {
                 $underRaw = $col['under'] >= 0 && ($r[$col['under']] ?? '') !== '' && $r[$col['under']] !== null ? self::toHours($r[$col['under']]) : 0.0;
                 if (is_nan($total) || is_nan($ot) || is_nan($late) || is_nan($underRaw)) { $stats['invalid']++; continue; }

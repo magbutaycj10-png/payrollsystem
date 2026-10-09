@@ -1,6 +1,6 @@
 <?php
 /*
- * 01 — Statutory tables: BIR Annex E withholding tax, SSS, PhilHealth, Pag-IBIG, amount in words.
+ * 01 - Statutory tables: BIR Annex E withholding tax, SSS, PhilHealth, Pag-IBIG, amount in words.
  *
  * Playing: the BIR examiner (are the tables the published ones, applied the published way?),
  * the accountant (is every centavo right?) and QA (boundaries, sweeps, rounding).
@@ -153,7 +153,7 @@ T::suite('01 · Statutory tables', function () {
         foreach ($cases as [$comp, $msc]) $t->money((string)$msc, sssCredit((float)$comp), "compensation ₱$comp");
     });
 
-    T::test('SSS: employee 5%, employer 10% — together 15% of the credit', function (T $t) {
+    T::test('SSS: employee 5%, employer 10% - together 15% of the credit', function (T $t) {
         foreach ([5000, 6000, 12000, 17500, 20000, 27500, 35000] as $msc) {
             $c = $msc * 100;
             $t->money(Ledger::sssEe($c), sssMonthly((float)$msc), "employee share on ₱$msc");

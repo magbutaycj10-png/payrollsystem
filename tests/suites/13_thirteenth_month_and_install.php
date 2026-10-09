@@ -1,6 +1,6 @@
 <?php
 /*
- * 13 — 13th Month Pay (PD 851), and the pieces added with it.
+ * 13 - 13th Month Pay (PD 851), and the pieces added with it.
  *
  *   13th-month pay = total BASIC pay earned in the calendar year ÷ 12   (thirteenthMonthData(), thirteenth-month.php)
  *
@@ -51,7 +51,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
 
     /* ================================================================== A · the arithmetic, by hand */
 
-    T::test('a full year at ₱15,000 a kinsena: ₱360,000 of basic pay ÷ 12 = ₱30,000.00 — ₱30,000 a month, ₱2,500 set aside each month', function (T $t) {
+    T::test('a full year at ₱15,000 a kinsena: ₱360,000 of basic pay ÷ 12 = ₱30,000.00 - ₱30,000 a month, ₱2,500 set aside each month', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         Fixtures::employee(['emp_id' => 'E-FULL', 'full_name' => 'Full Year', 'base_salary' => '15000.00', 'salary_type' => 'kinsenas']);
@@ -86,7 +86,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         }
         $d = thirteenthMonthData(getDB(), 2026);
         $t->money('150000.00', $d['rows']['E-NEW']['basic'], 'August–December = 5 × ₱30,000');
-        $t->money('12500.00', $d['rows']['E-NEW']['due'], '150,000 ÷ 12 — five twelfths of a full 13th month');
+        $t->money('12500.00', $d['rows']['E-NEW']['due'], '150,000 ÷ 12 - five twelfths of a full 13th month');
         $t->same(5, $d['rows']['E-NEW']['months_paid']);
         $t->money('2500.00', $d['rows']['E-GONE']['due'], 'January only: 30,000 ÷ 12');
         $t->same('Inactive', $d['rows']['E-GONE']['status'], 'still listed: it is due on separation');
@@ -196,10 +196,10 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $d = thirteenthMonthData(getDB(), 2026);
         foreach ($emps as $name => $id) {
             $row = $d['rows'][$id];
-            foreach ([1, 2, 3] as $m) $t->money($expect[$name][$m], $row['months'][$m], "$name — basic pay of month $m, the ledger's: ₱" . Ledger::fmt($expect[$name][$m]));
+            foreach ([1, 2, 3] as $m) $t->money($expect[$name][$m], $row['months'][$m], "$name - basic pay of month $m, the ledger's: ₱" . Ledger::fmt($expect[$name][$m]));
             $sum = array_sum($expect[$name]);
-            $t->money($sum, $row['basic'], "$name — three months");
-            $t->money((int)floor($sum / 12 + 0.5), $row['due'], "$name — 13th month = ⌊Σ ÷ 12 + ½⌉");
+            $t->money($sum, $row['basic'], "$name - three months");
+            $t->money((int)floor($sum / 12 + 0.5), $row['due'], "$name - 13th month = ⌊Σ ÷ 12 + ½⌉");
             $t->ok($row['due'] > 0 && $row['basic'] > 0, "$name has a 13th month");
         }
         // overtime is in gross pay but not in basic pay: the kinsenas employee earned overtime, yet her basic pay is below ₱30,000 a month
@@ -222,7 +222,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
     $pay = fn(int $target, array $emps, array $amounts, array $extra = [], int $year = 2026) =>
         Http::page('thirteenth-month.php', ['action' => 'pay', 'year' => $year, 'period_id' => $target, 'emp_ids' => $emps, 'amount' => $amounts] + $extra);
 
-    T::test('recording the payment: Bonus on the chosen open period, history row "13th Month Pay 2026", net pay up by the amount — and a second click pays nothing', function (T $t) use ($payScene, $pay) {
+    T::test('recording the payment: Bonus on the chosen open period, history row "13th Month Pay 2026", net pay up by the amount - and a second click pays nothing', function (T $t) use ($payScene, $pay) {
         qa_need_fixes();
         [$target] = $payScene();
         $db = getDB();
@@ -265,7 +265,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         Http::page('adjustments.php', ['period_id' => $june, 'emp_ids' => ['E-B'], 'entry_type' => 'Bonus', 'amount' => '77', 'reason_select' => 'Performance Reward']);
         $db->prepare("INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), 'E-B', 'Ben Pay', 'Deduction', 5000, '13th Month Pay', ?)")->execute([$june]);
         $b = thirteenthMonthData($db, 2026)['rows']['E-B'];
-        $t->money('10000.00', $b['paid'], 'only the Bonus entries whose reason starts "13th Month Pay" count — not a Performance Reward, not a Deduction');
+        $t->money('10000.00', $b['paid'], 'only the Bonus entries whose reason starts "13th Month Pay" count - not a Performance Reward, not a Deduction');
         $t->money('10000.00', $b['balance']);
         $t->money('77.00', $b['other_bonus'], 'the Performance Reward is another bonus');
 
@@ -281,7 +281,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $t->money('30000.00', thirteenthMonthData($db, 2026)['rows']['E-A']['paid'], '2025\'s 13th month is not 2026\'s');
     });
 
-    T::test('amounts the page refuses: zero, negative, text, 1e999, more than the balance, an employee with no pay that year — nothing is recorded', function (T $t) use ($payScene, $pay) {
+    T::test('amounts the page refuses: zero, negative, text, 1e999, more than the balance, an employee with no pay that year - nothing is recorded', function (T $t) use ($payScene, $pay) {
         qa_need_fixes();
         [$target] = $payScene();
         $db = getDB();
@@ -455,7 +455,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
 
     /* ================================================================== F · a fresh install */
 
-    T::test('a fresh install: sql/database.sql on an empty database, then the application\'s own first-load setup — sign in, add an employee, a period, a day, and it computes pay', function (T $t) {
+    T::test('a fresh install: sql/database.sql on an empty database, then the application\'s own first-load setup - sign in, add an employee, a period, a day, and it computes pay', function (T $t) {
         qa_need_fixes();
         $sqlFile = AppCopy::root() . '/sql/database.sql';
         $t->ok(is_file($sqlFile), 'sql/database.sql ships with the app');

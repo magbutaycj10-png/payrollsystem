@@ -1,4 +1,4 @@
-/* portal.css — shared stylesheet for Manager & Employee portals
+/* portal.css - shared stylesheet for Manager & Employee portals
    Mobile-first: bottom nav on phones/tablets, sidebar on desktop */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -55,7 +55,7 @@ html, body { height: 100%; font-family: var(--font); background: var(--bg); colo
 .p-logout:hover { background: rgba(239,68,68,.12) !important; }
 
 /*
- * Watermark — same treatment as the admin side (style.css).
+ * Watermark - same treatment as the admin side (style.css).
  * Fixed pseudo-element behind the page content. left: var(--sidebar-w)
  * starts it after the sidebar so the logo sits centered in the content
  * area, not the whole window. It never scrolls, never takes clicks, and
@@ -135,7 +135,7 @@ body::before {
 .p-card-value { font-size: 1.5rem; font-weight: 700; }
 .p-card-sub   { font-size: .74rem; color: var(--text-muted); margin-top: 4px; }
 
-/* Colour variants intentionally neutral — every card renders plain. */
+/* Colour variants intentionally neutral - every card renders plain. */
 .p-card-blue,
 .p-card-green,
 .p-card-red,
@@ -238,7 +238,7 @@ textarea.p-form-control { resize: vertical; min-height: 80px; }
 .modal-close { position: absolute; top: 12px; right: 14px; background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: .78rem; cursor: pointer; color: var(--text-muted); }
 .modal-title { font-size: 1.05rem; font-weight: 700; margin-bottom: 18px; }
 
-/* ── Hamburger toggle (portal — shown on mobile/tablet) ──── */
+/* ── Hamburger toggle (portal - shown on mobile/tablet) ──── */
 .p-sidebar-toggle {
     display: none;
     position: fixed;
@@ -271,7 +271,7 @@ textarea.p-form-control { resize: vertical; min-height: 80px; }
     .p-content { margin-left: 0 !important; padding: 16px !important; }
 }
 
-/* ── Responsive — tablet/mobile (hamburger drawer) ────────── */
+/* ── Responsive - tablet/mobile (hamburger drawer) ────────── */
 @media (max-width: 900px) {
     .p-sidebar-toggle { display: flex; }
 
@@ -284,7 +284,7 @@ textarea.p-form-control { resize: vertical; min-height: 80px; }
 
     .p-bottom-nav { display: block; }
 
-    /* Sidebar is off-canvas on small screens — center the watermark on the whole page */
+    /* Sidebar is off-canvas on small screens - center the watermark on the whole page */
     body::before { left: 0; }
 
     .p-content {

@@ -56,7 +56,7 @@ $companyName = getSetting('company_name', 'My Company');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Payslip — Payroll System</title>
+    <title>Sign Payslip - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* Marks pay that was corrected after the period had been finalized */
@@ -119,7 +119,7 @@ $companyName = getSetting('company_name', 'My Company');
                 <?php if (!empty($rows)): ?>
                 <label style="font-weight:600;font-size:.875rem;">Employee:</label>
                 <select name="payroll_id" class="form-control" style="min-width:200px;" onchange="this.form.submit()">
-                    <option value="">— Select Employee —</option>
+                    <option value="">- Select Employee -</option>
                     <?php foreach ($rows as $r): ?>
                     <option value="<?= $r['id'] ?>" <?= $r['id'] == $payroll_id ? 'selected' : '' ?>>
                         <?= htmlspecialchars($r['emp_name']) ?> (<?= $r['emp_id'] ?>)
@@ -170,7 +170,7 @@ $companyName = getSetting('company_name', 'My Company');
                 <div class="ps-item"><div class="ps-label"><?= (float)$selected['withholding_tax'] < 0 ? 'Tax refund' : 'Tax' ?></div><div class="ps-value" style="color:<?= (float)$selected['withholding_tax'] < 0 ? '#16a34a' : '#dc2626' ?>;"><?= (float)$selected['withholding_tax'] < 0 ? '+' : '-' ?>₱<?= number_format(abs((float)$selected['withholding_tax']), 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Bonus</div><div class="ps-value" style="color:#16a34a;">+₱<?= number_format($selected['bonus'], 2) ?></div></div>
                 <div class="ps-item"><div class="ps-label">Other Deductions</div><div class="ps-value" style="color:#dc2626;">-₱<?= number_format($selected['other_deductions'], 2) ?></div></div>
-                <div class="ps-item" style="border-top:2px solid #22c55e;"><div class="ps-label">Net Pay</div><div class="ps-value" style="color:#166534;font-size:1.2rem;">₱<?= number_format($selected['net_pay'], 2) ?></div></div>
+                <div class="ps-item"><div class="ps-label">Net Pay</div><div class="ps-value" style="color:#166534;font-size:1.2rem;">₱<?= number_format($selected['net_pay'], 2) ?></div></div>
             </div>
 
             <?php if ($selected['sig_id']): ?>
@@ -183,7 +183,7 @@ $companyName = getSetting('company_name', 'My Company');
             <?php $canSign = ($curPeriod['status'] ?? '') !== 'Open'; ?>
             <?php if (!$canSign): ?>
             <div class="alert alert-warn" style="margin-bottom:16px;">
-                <span><?= htmlspecialchars($curPeriod['period_label']) ?> is still open — its figures can still change.
+                <span><?= htmlspecialchars($curPeriod['period_label']) ?> is still open - its figures can still change.
                 Finalize it in Payroll Processing before collecting signatures.</span>
                 <a href="payroll.php?period=<?= $period_id ?>">Payroll Processing</a>
             </div>
@@ -203,7 +203,7 @@ $companyName = getSetting('company_name', 'My Company');
                     <button class="btn btn-ghost"   onclick="clearCanvas()">Clear</button>
                     <button class="btn btn-print"
                             onclick="openReceipt({doc:'payslip',payroll_id:<?= (int)$payroll_id ?>,copies:'both'})">
-                        Print Receipt &mdash; Employee + Company Copy
+                        Print Receipt - Employee + Company Copy
                     </button>
                 </div>
                 <div id="sigMsg" style="margin-top:10px;font-size:.875rem;display:none;"></div>

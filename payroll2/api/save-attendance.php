@@ -5,7 +5,7 @@
  * computes payroll figures (SSS, PhilHealth, Pag-IBIG, OT/late adjustments),
  * saves them to the attendance and payroll tables, then returns a JSON response.
  *
- * Rows carry a name only — the system assigns its own employee IDs, so each
+ * Rows carry a name only - the system assigns its own employee IDs, so each
  * name is matched against Employee Management. Names that match nobody are
  * not saved; they come back as mismatches for the front-end to show.
  *
@@ -32,7 +32,7 @@ uploadPeriodGuard($db, $period_id, $who);
 /*
  * A totals file REPLACES the period's attendance. If day-by-day records are
  * already saved for it (daily uploads, manual entries), that would throw
- * away days recorded earlier — so the uploader is asked first, and only on
+ * away days recorded earlier - so the uploader is asked first, and only on
  * a confirmed replace are those days cleared along with the old totals.
  */
 $dayScope = '';
@@ -65,7 +65,7 @@ $scope = $who['scope'] === null ? $names : array_intersect_key($names, array_fli
 $resolve    = employeeResolver($db);
 $mismatches = [];
 $matched    = [];
-$invalid    = [];   /* lines whose hours cannot be right (negative, text, more than the period holds) — not saved, reported */
+$invalid    = [];   /* lines whose hours cannot be right (negative, text, more than the period holds) - not saved, reported */
 
 /* How many calendar days the period holds: the most hours a line can honestly carry */
 $pp = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
@@ -125,7 +125,7 @@ if (!$rows && $invalid) {
         'invalid' => array_slice($invalid, 0, 50)], 400);
 }
 
-/* Employees (within scope) that the file left out — they get no payroll line */
+/* Employees (within scope) that the file left out - they get no payroll line */
 $inFile = array_flip(array_column($rows, 'emp_id'));
 foreach ($scope as $id => $fullName) {
     if (!isset($inFile[$id])) {
@@ -134,12 +134,12 @@ foreach ($scope as $id => $fullName) {
     }
 }
 
-/* Nothing matched — stop before the wipe below, so the period keeps its data */
+/* Nothing matched - stop before the wipe below, so the period keeps its data */
 if (!$rows) {
     jsonResponse(['success' => true, 'count' => 0, 'mismatches' => $mismatches]);
 }
 
-/* Rates, period share of a month, working days — see computePayLine() in helpers.php */
+/* Rates, period share of a month, working days - see computePayLine() in helpers.php */
 $ctx = payContext($db, $period_id);
 
 /* Each employee as the pay computation reads them (rate, type, duty hours, switches) */
@@ -178,7 +178,7 @@ try {
         $count++;
     }
 
-    /* Replace the period's rows — the whole period for the admin, only their
+    /* Replace the period's rows - the whole period for the admin, only their
        own employees for a manager. Safe to repeat: see rewritePeriodRows() */
     rewritePeriodRows($db, $period_id, $who, $attRows, $payRows);
 

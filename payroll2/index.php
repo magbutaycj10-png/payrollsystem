@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    /* Check if the credentials belong to a manager — log them in directly */
+    /* Check if the credentials belong to a manager - log them in directly */
     $st2 = $db->prepare("SELECT id, full_name, branch, password_hash FROM users WHERE email = ? AND role = 'manager' AND status = 'Active' LIMIT 1");
     $st2->execute([$email]);
     $mgr = $st2->fetch();
@@ -88,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    /* Check if the credentials belong to an employee — log them in directly */
+    /* Check if the credentials belong to an employee - log them in directly */
     $st3 = $db->prepare("SELECT id, emp_id, full_name, password_hash FROM users WHERE email = ? AND role = 'earner' AND status = 'Active' LIMIT 1");
     $st3->execute([$email]);
     $earner = $st3->fetch();
@@ -113,7 +113,7 @@ show_form:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login — Payroll System</title>
+    <title>Login - Payroll System</title>
     <link rel="stylesheet" href="assets/css/login.css">
 </head>
 <body>

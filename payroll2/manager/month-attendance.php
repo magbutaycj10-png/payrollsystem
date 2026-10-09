@@ -1,6 +1,6 @@
 <?php
 /*
- * manager/month-attendance.php — the month so far for the manager's own
+ * manager/month-attendance.php - the month so far for the manager's own
  * employees. Body: includes/month-attendance-view.php
  */
 require_once __DIR__ . '/includes/auth.php';
@@ -19,7 +19,7 @@ $maSelf = '/manager/month-attendance.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>This Month's Attendance — Manager Portal</title>
+    <title>This Month's Attendance - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>
@@ -30,7 +30,7 @@ $maSelf = '/manager/month-attendance.php';
     <div class="p-header">
         <div>
             <h1>This Month's Attendance</h1>
-            <p><?= htmlspecialchars(mgrScopeLabel()) ?> — every day saved so far</p>
+            <p><?= htmlspecialchars(mgrScopeLabel()) ?> - every day saved so far</p>
         </div>
         <a href="/manager/attendance-upload.php" class="btn btn-primary">Upload Today's File</a>
     </div>

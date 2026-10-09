@@ -85,7 +85,7 @@ $requests = $requests->fetchAll();
 
 $hasFilters = $dateFrom !== '' || $dateTo !== '' || $status !== 'All' || $type !== 'All';
 
-/* This employee's weekly day(s) off — leave on those days is not counted */
+/* This employee's weekly day(s) off - leave on those days is not counted */
 $myRestDays = $db->prepare("SELECT rest_days FROM employees WHERE emp_id = ?");
 $myRestDays->execute([$e['id']]);
 $myRestDays = $myRestDays->fetchColumn() ?: null;
@@ -104,10 +104,10 @@ foreach ($requests as $lr) {
         'days_label' => leaveDaysLabel($lr['date_from'], $lr['date_to'], $myRestDays),
         'reason'    => trim((string)$lr['reason']) !== '' ? $lr['reason'] : 'No reason given.',
         'status'    => $lr['status'],
-        'reviewer'  => $lr['reviewed_by'] ?: '—',
-        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '—',
+        'reviewer'  => $lr['reviewed_by'] ?: '-',
+        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '-',
         'submitted' => date('M d, Y g:i A', strtotime($lr['created_at'])),
-        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '—',
+        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '-',
     ];
 }
 ?>
@@ -116,7 +116,7 @@ foreach ($requests as $lr) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leave Requests — Employee Portal</title>
+    <title>Leave Requests - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         /* ── Filter bar ── */
@@ -191,7 +191,7 @@ foreach ($requests as $lr) {
                     <div class="p-form-group">
                         <label>Leave Type *</label>
                         <select name="leave_type" class="p-form-control" required>
-                            <option value="">— Select Type —</option>
+                            <option value="">- Select Type -</option>
                             <?php foreach (['Vacation','Sick Leave','Emergency','Other'] as $t): ?>
                             <option value="<?= $t ?>"><?= $t ?></option>
                             <?php endforeach; ?>
@@ -333,7 +333,7 @@ function openLeave(id) {
     if (!d) return;
 
     document.getElementById('lmTitle').textContent     = d.type + ' leave';
-    document.getElementById('lmSub').textContent       = d.from + ' — ' + d.to;
+    document.getElementById('lmSub').textContent       = d.from + ' - ' + d.to;
     document.getElementById('lmType').textContent      = d.type;
     document.getElementById('lmFrom').textContent      = d.from;
     document.getElementById('lmTo').textContent        = d.to;

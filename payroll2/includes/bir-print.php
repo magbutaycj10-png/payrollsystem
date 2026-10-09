@@ -89,7 +89,7 @@ function birSerialFor(string $series, int $refId): int {
         return $no;
 
     } catch (PDOException $e) {
-        /* Someone issued this exact document first — adopt their number. */
+        /* Someone issued this exact document first - adopt their number. */
         $find->execute([$series, $refId]);
         $existing = $find->fetchColumn();
         if ($existing !== false) return (int)$existing;
@@ -97,7 +97,7 @@ function birSerialFor(string $series, int $refId): int {
     }
 }
 
-/* Where an automatic series currently stands. Read-only — shown in
+/* Where an automatic series currently stands. Read-only - shown in
  * Settings so the numbering is visible without being editable. */
 function birSeriesStatus(string $series): array {
     $db = getDB();
@@ -291,11 +291,9 @@ table.rep th:nth-child(-n+3),table.rep td:nth-child(-n+3){ white-space:nowrap; }
 table.rep tbody tr:nth-child(even){ background:#f7f8fb; }
 table.rep tfoot td{ border-top:1.4px solid var(--ink); font-weight:800; background:#fff; }
 .totbar{ display:grid; grid-template-columns:repeat(3,1fr); gap:2mm; margin-top:3mm; }
-.tot{ border:1px solid var(--line); border-left:3px solid var(--navy); border-radius:2px; padding:2mm 2.6mm; }
+.tot{ border:1px solid var(--line); border-radius:2px; padding:2mm 2.6mm; }
 .tot .k{ font-size:6.8pt; text-transform:uppercase; letter-spacing:.09em; color:var(--muted); font-weight:700; }
 .tot .v{ font-size:11pt; font-weight:800; font-variant-numeric:tabular-nums; }
-.tot.green{ border-left-color:var(--green); }
-.tot.red{ border-left-color:var(--red); }
 
 /* -- on-screen toolbar (never printed) --------------------- */
 .bar{
@@ -412,7 +410,7 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
         ? birEsc($cfg['bir_signatory_name'])
         : '&nbsp;';
 
-    $periodRange = '&mdash;';
+    $periodRange = '-';
     if (!empty($r['period_start']) && !empty($r['period_end'])) {
         $periodRange = date('M j', strtotime($r['period_start'])) . ' &ndash; ' . date('M j, Y', strtotime($r['period_end']));
     }
@@ -422,16 +420,16 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     $revBox = !empty($r['revised_after_finalize'])
         ? '<div style="margin:2mm 0;padding:1.6mm 2.4mm;border:1.1px solid #92400e;border-radius:1mm;'
         . 'background:#fffbeb;color:#92400e;font-size:7pt;font-weight:700;">'
-        . 'REVISED PAYSLIP &mdash; these figures were corrected after '
+        . 'REVISED PAYSLIP - these figures were corrected after '
         . birEsc($ctx['period_label'] ?? 'this pay period') . ' was finalized'
         . (!empty($r['revised_at']) ? ' on ' . date('M j, Y g:i A', strtotime($r['revised_at'])) : '')
         . '. This copy supersedes any payslip issued earlier for the same period.</div>'
         : '';
 
     /* Attendance behind Basic Pay: absences and undertime (already taken off
-       it), paid leave and days off — whichever there were */
+       it), paid leave and days off - whichever there were */
     $num   = fn($n) => rtrim(rtrim(number_format($n, 1), '0'), '.');
-    $less  = fn($amt) => (float)$amt > 0 ? ' &mdash; ' . birPeso($amt) . ' less in Basic Pay' : '';
+    $less  = fn($amt) => (float)$amt > 0 ? ' - ' . birPeso($amt) . ' less in Basic Pay' : '';
     $parts = [];
     if ((float)($r['absent_days'] ?? 0) > 0)
         $parts[] = 'Unpaid days (absent, or before the hire date): <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
@@ -460,8 +458,8 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     <div class="cell span2"><div class="k">Employee Name</div><div class="v">' . birEsc($r['emp_name']) . '</div></div>
     <div class="cell"><div class="k">Pay Period</div><div class="v" style="font-size:7.8pt;">' . birEsc($ctx['period_label']) . '</div></div>
 
-    <div class="cell"><div class="k">Position</div><div class="v" style="font-size:8pt;">' . (birEsc($r['position'] ?? '') ?: '&mdash;') . '</div></div>
-    <div class="cell"><div class="k">Branch</div><div class="v" style="font-size:8pt;">' . (birEsc($r['branch'] ?? '') ?: '&mdash;') . '</div></div>
+    <div class="cell"><div class="k">Position</div><div class="v" style="font-size:8pt;">' . (birEsc($r['position'] ?? '') ?: '-') . '</div></div>
+    <div class="cell"><div class="k">Branch</div><div class="v" style="font-size:8pt;">' . (birEsc($r['branch'] ?? '') ?: '-') . '</div></div>
     <div class="cell"><div class="k">Covered Dates</div><div class="v" style="font-size:8pt;">' . $periodRange . '</div></div>
     <div class="cell"><div class="k">Hrs / OT / Late</div><div class="v" style="font-size:8pt;">'
       . number_format((float)$r['hours_worked'], 1) . ' / '
@@ -503,12 +501,12 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     <div class="sig">
       <div class="box">' . $sigImg . '</div>
       <div class="ln"><div class="nm">' . birEsc($r['emp_name']) . '</div>
-      <div class="rl">Received by &mdash; Employee signature over printed name</div></div>
+      <div class="rl">Received by - Employee signature over printed name</div></div>
     </div>
     <div class="sig">
       <div class="box"></div>
       <div class="ln"><div class="nm">' . $signatory . '</div>
-      <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' &mdash; Authorised signatory</div></div>
+      <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Authorised signatory</div></div>
     </div>
   </div>
 
@@ -622,9 +620,9 @@ function birRenderSummaryDoc(array $rows, array $ctx): string {
     <div class="sigs" style="margin-top:6mm;">
       <div class="sig"><div class="box"></div><div class="ln">
         <div class="nm">' . (trim($cfg['bir_signatory_name']) !== '' ? birEsc($cfg['bir_signatory_name']) : '&nbsp;') . '</div>
-        <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' &mdash; Prepared by</div></div></div>
+        <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Prepared by</div></div></div>
       <div class="sig"><div class="box"></div><div class="ln">
-        <div class="nm">&nbsp;</div><div class="rl">Approved by &mdash; Signature over printed name</div></div></div>
+        <div class="nm">&nbsp;</div><div class="rl">Approved by - Signature over printed name</div></div></div>
     </div>
 
     ' . birFooter($cfg) . '
@@ -660,9 +658,9 @@ function birRenderReportDoc(string $heading, string $subheading, array $cols, st
     <div class="sigs" style="margin-top:6mm;">
       <div class="sig"><div class="box"></div><div class="ln">
         <div class="nm">' . (trim($cfg['bir_signatory_name']) !== '' ? birEsc($cfg['bir_signatory_name']) : '&nbsp;') . '</div>
-        <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' &mdash; Prepared by</div></div></div>
+        <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Prepared by</div></div></div>
       <div class="sig"><div class="box"></div><div class="ln">
-        <div class="nm">&nbsp;</div><div class="rl">Noted by &mdash; Signature over printed name</div></div></div>
+        <div class="nm">&nbsp;</div><div class="rl">Noted by - Signature over printed name</div></div></div>
     </div>
     ' . birFooter($cfg) . '
   </div>
@@ -683,7 +681,7 @@ function birShell(string $title, string $content, array $ctx, string $barNote = 
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>' . birEsc($title) . ' &mdash; ' . birEsc($ctx['cfg']['company_name']) . '</title>
+<title>' . birEsc($title) . ' - ' . birEsc($ctx['cfg']['company_name']) . '</title>
 <style>' . $css . '</style>
 </head>
 <body>
@@ -707,7 +705,7 @@ if (' . $autoOpen . ') {
 /* =============================================================
  *  BONUS / DEDUCTION ADJUSTMENT
  *  same letterhead, same footer, same two-copy layout as the
- *  payslip receipt — a bonus payout is money handed to the employee
+ *  payslip receipt - a bonus payout is money handed to the employee
  *  and needs its own acknowledgement; a deduction needs the
  *  employee's conforme.
  * ============================================================= */
@@ -725,14 +723,14 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
     $heading = $isBonus ? 'Bonus Advice &amp; Acknowledgement Receipt'
                         : 'Deduction Advice &amp; Employee Conforme';
     $amtLab  = $isBonus ? 'Amount Received' : 'Amount Deducted';
-    $sigRole = $isBonus ? 'Received by &mdash; Employee signature over printed name'
-                        : 'Conforme &mdash; Employee signature over printed name';
+    $sigRole = $isBonus ? 'Received by - Employee signature over printed name'
+                        : 'Conforme - Employee signature over printed name';
     $ackText = $isBonus
         ? 'I acknowledge having received from ' . birEsc($cfg['bir_registered_name']) . ' the amount stated above as the bonus / additional compensation described, and that it forms part of my compensation for the pay period indicated.'
         : 'I confirm that the deduction stated above was explained to me, that I consent to it being withheld from my salary for the pay period indicated, and that the reason given is correct.';
 
     $signatory = trim($cfg['bir_signatory_name']) !== '' ? birEsc($cfg['bir_signatory_name']) : '&nbsp;';
-    $entryDate = !empty($h['entry_date']) ? date('M j, Y', strtotime($h['entry_date'])) : '&mdash;';
+    $entryDate = !empty($h['entry_date']) ? date('M j, Y', strtotime($h['entry_date'])) : '-';
 
     /* An entry recorded after the period was already finalized is a correction.
        It must say so on the paper, otherwise two receipts for the same pay
@@ -741,7 +739,7 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
     $revBox = $cycle > 0
         ? '<div style="margin:2mm 0;padding:1.6mm 2.4mm;border:1.1px solid #92400e;border-radius:1mm;'
         . 'background:#fffbeb;color:#92400e;font-size:7pt;font-weight:700;">'
-        . 'REVISION &mdash; recorded after ' . birEsc($ctx['period_label'] ?? 'this pay period')
+        . 'REVISION - recorded after ' . birEsc($ctx['period_label'] ?? 'this pay period')
         . ' had already been finalized (' . $cycle . '&times;). This entry corrects the period and '
         . 'the employee&rsquo;s pay was recomputed accordingly.</div>'
         : '';
@@ -762,8 +760,8 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
     <div class="cell span2"><div class="k">Employee Name</div><div class="v">' . birEsc($h['emp_name']) . '</div></div>
 
     <div class="cell"><div class="k">Type</div><div class="v">' . birEsc($h['entry_type']) . '</div></div>
-    <div class="cell"><div class="k">Pay Period</div><div class="v" style="font-size:7.4pt;">' . (birEsc($ctx['period_label'] ?? '') ?: '&mdash;') . '</div></div>
-    <div class="cell span2"><div class="k">Reason / Particulars</div><div class="v" style="font-size:7.6pt;font-weight:500;">' . (birEsc($h['reason']) ?: '&mdash;') . '</div></div>
+    <div class="cell"><div class="k">Pay Period</div><div class="v" style="font-size:7.4pt;">' . (birEsc($ctx['period_label'] ?? '') ?: '-') . '</div></div>
+    <div class="cell span2"><div class="k">Reason / Particulars</div><div class="v" style="font-size:7.6pt;font-weight:500;">' . (birEsc($h['reason']) ?: '-') . '</div></div>
   </div>
 
   <div class="net">
@@ -781,7 +779,7 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
     <div class="sig">
       <div class="box"></div>
       <div class="ln"><div class="nm">' . (birEsc($h['processed_by'] ?? '') ?: $signatory) . '</div>
-      <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' &mdash; Processed by</div></div>
+      <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Processed by</div></div>
     </div>
   </div>
 

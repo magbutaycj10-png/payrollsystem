@@ -8,12 +8,12 @@ function openDoc(params) {
                 '_blank', 'width=980,height=760');
 }
 
-/* One entry — advice + acknowledgement receipt, employee and company copy. */
+/* One entry - advice + acknowledgement receipt, employee and company copy. */
 function printReceipt(id) {
     openDoc({ doc: 'adjustment', id: id, copies: 'both' });
 }
 
-/* Register of everything currently filtered on screen — the "corrections
+/* Register of everything currently filtered on screen - the "corrections
    only" filter included, so the printed register matches the table. */
 function printAll() {
     const q = new URLSearchParams(window.location.search);

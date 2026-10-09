@@ -2,8 +2,8 @@
 // =============================================================
 //  Database connection + request security
 //
-//  Nothing about the database is written in this file — host, user and
-//  password all come from environment variables — so the code can be
+//  Nothing about the database is written in this file - host, user and
+//  password all come from environment variables - so the code can be
 //  published (GitHub) without giving the database away.
 //
 //    DB_HOST    database host                     (required)
@@ -11,7 +11,7 @@
 //    DB_NAME    database name                     (required)
 //    DB_USER    user                              (required)
 //    DB_PASS    password                          (required)
-//    DB_SSL_CA  path to the CA certificate (.pem) — or —
+//    DB_SSL_CA  path to the CA certificate (.pem) - or -
 //    DB_SSL_CA_PEM  the certificate's text itself (easiest on Render)
 //
 //  Local (launch.bat):  secrets.bat sets them. It is gitignored;
@@ -32,7 +32,7 @@ define('DB_CHAR', 'utf8mb4');
 
 // Philippine time for everything: PHP's dates ("today", printed-on lines,
 // greetings) and the database's NOW() / timestamps, which are shown as
-// stored. Both default to UTC — 8 hours behind — which put "today" on the
+// stored. Both default to UTC - 8 hours behind - which put "today" on the
 // wrong date before 8 AM. The Philippines has no daylight saving, so the
 // fixed +08:00 offset is exact all year.
 define('APP_TZ',     $_env('APP_TZ', 'Asia/Manila'));
@@ -51,7 +51,7 @@ function _resolveCaPath(): string {
     $path = getenv('DB_SSL_CA');
     if ($path !== false && $path !== '' && is_file($path)) return $path;
 
-    /* 2. the certificate text in an environment variable — written once to a
+    /* 2. the certificate text in an environment variable - written once to a
           private temp file, since the MySQL driver wants a file */
     $pem = getenv('DB_SSL_CA_PEM');
     if ($pem !== false && trim($pem) !== '') {
@@ -71,7 +71,7 @@ function _resolveCaPath(): string {
 }
 
 // =============================================================
-//  Request security — runs for every page, before any session starts
+//  Request security - runs for every page, before any session starts
 // =============================================================
 
 /* HTTPS, directly or behind a proxy that terminates it (Render does) */
@@ -92,7 +92,7 @@ function _hostKey(?string $host, ?int $port, bool $https): string {
  * A form or script on ANOTHER website must not be able to act with a
  * signed-in user's session (cross-site request forgery). Browsers say where a
  * request comes from (Origin, or Referer); a POST from a different site is
- * refused. Machine clients send neither and are let through — the biometric
+ * refused. Machine clients send neither and are let through - the biometric
  * agent authenticates with its own API key.
  */
 function _rejectCrossSitePost(): void {
@@ -170,7 +170,7 @@ function getDB(): PDO {
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET time_zone = '" . APP_TZ_SQL . "'",
     ];
 
-    /* Encrypted, and the server's certificate must be signed by the CA we hold —
+    /* Encrypted, and the server's certificate must be signed by the CA we hold -
        so nobody in between can pose as the database. */
     if (DB_SSL_CA !== '' && defined('PDO::MYSQL_ATTR_SSL_CA')) {
         $options[PDO::MYSQL_ATTR_SSL_CA]                 = DB_SSL_CA;
@@ -181,7 +181,7 @@ function getDB(): PDO {
         $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
     } catch (PDOException $e) {
         /* Usually the internet dropped or the database is asleep: say that,
-           log the technical detail (errors.php) — never show it. */
+           log the technical detail (errors.php) - never show it. */
         if (function_exists('showAppError')) {
             showAppError(friendlyError($e), logAppError($e), 503);
         }
@@ -194,7 +194,7 @@ function getDB(): PDO {
 }
 
 function _dbErrorPage(string $error): string {
-    return '<!DOCTYPE html><html><head><title>Payroll — Setup Error</title>
+    return '<!DOCTYPE html><html><head><title>Payroll - Setup Error</title>
     <style>
         *{box-sizing:border-box;margin:0;padding:0}
         body{font-family:system-ui,sans-serif;background:#0f172a;color:#f1f5f9;

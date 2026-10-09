@@ -3,7 +3,7 @@
  * manager/manual-attendance.php
  * Records one employee's attendance for one DAY, for when the biometric
  * device missed it. The day is saved with the uploaded days (biometric_daily)
- * and the pay period is recomputed from all of them — so it adds to what the
+ * and the pay period is recomputed from all of them - so it adds to what the
  * daily uploads recorded instead of replacing it, and the next upload keeps
  * it (unless that upload holds the same day, which then replaces it).
  */
@@ -26,7 +26,7 @@ $openPeriods = $db->query("SELECT * FROM payroll_periods WHERE status='Open' ORD
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emp_id = trim($_POST['emp_id'] ?? '');
     $date   = trim($_POST['att_date'] ?? '');
-    /* "worked" — hours below; "off" — a day off (no duty: not absent, not deducted) */
+    /* "worked" - hours below; "off" - a day off (no duty: not absent, not deducted) */
     $dayOff = ($_POST['day_status'] ?? 'worked') === 'off';
     /* Typed hours are checked, not quietly clamped: 30 h used to become 24 h of pay, and 12 OT h on top of it was accepted */
     $hoursProblem = $dayOff ? null : dayHoursProblem(($_POST['hours_worked'] ?? '') === '' ? 0 : $_POST['hours_worked'],
@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
         $msg = ['type' => 'error', 'text' => 'Choose the date of the attendance.'];
     } elseif ($hoursProblem !== null) {
-        $msg = ['type' => 'error', 'text' => "Not saved — {$hoursProblem}. Check the hours and try again."];
+        $msg = ['type' => 'error', 'text' => "Not saved - {$hoursProblem}. Check the hours and try again."];
     } elseif (!$period) {
         $msg = ['type' => 'error', 'text' => 'No open pay period covers ' . date('M d, Y', strtotime($date))
                                            . '. Ask the admin to create or unlock it.'];
@@ -95,7 +95,7 @@ $recentManual = $recentManual->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manual Attendance — Manager Portal</title>
+    <title>Manual Attendance - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>
@@ -126,7 +126,7 @@ $recentManual = $recentManual->fetchAll();
                     <div class="p-form-group">
                         <label>Employee *</label>
                         <select name="emp_id" class="p-form-control" required>
-                            <option value="">— Select Employee —</option>
+                            <option value="">- Select Employee -</option>
                             <?php foreach ($employees as $e): ?>
                             <option value="<?= htmlspecialchars($e['emp_id']) ?>" <?= ($_POST['emp_id'] ?? '') === $e['emp_id'] ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($e['full_name']) ?> (<?= htmlspecialchars($e['emp_id']) ?>)
@@ -143,7 +143,7 @@ $recentManual = $recentManual->fetchAll();
                         <label>Day</label>
                         <select name="day_status" class="p-form-control" onchange="document.querySelectorAll('.when-worked').forEach(el => el.style.display = this.value === 'off' ? 'none' : '')">
                             <option value="worked" <?= ($_POST['day_status'] ?? '') !== 'off' ? 'selected' : '' ?>>Worked</option>
-                            <option value="off"    <?= ($_POST['day_status'] ?? '') === 'off' ? 'selected' : '' ?>>Day off — no duty</option>
+                            <option value="off"    <?= ($_POST['day_status'] ?? '') === 'off' ? 'selected' : '' ?>>Day off - no duty</option>
                         </select>
                     </div>
                     <div class="p-form-group when-worked">
@@ -161,7 +161,7 @@ $recentManual = $recentManual->fetchAll();
                 </div>
 
                 <div class="p-alert p-alert-info" style="margin-top:14px;">
-                    The day goes into the open pay period that covers its date, next to the uploaded days — nothing already recorded is removed.
+                    The day goes into the open pay period that covers its date, next to the uploaded days - nothing already recorded is removed.
                     Entering the same employee and date again corrects that day. Recorded under your name
                     (<strong><?= htmlspecialchars($m['name']) ?></strong>).
                 </div>

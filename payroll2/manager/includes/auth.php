@@ -66,7 +66,7 @@ function mgrEmpIds(): ?array {
  * mgrScopeWhere()
  * SQL fragment + bind params restricting a query to this manager's employees.
  * Filters on emp_id, so it works against any table that carries one
- * (employees, payroll, attendance, leave_requests) — pass the table alias.
+ * (employees, payroll, attendance, leave_requests) - pass the table alias.
  */
 function mgrScopeWhere(string $alias = 'e'): array {
     $ids = mgrEmpIds();

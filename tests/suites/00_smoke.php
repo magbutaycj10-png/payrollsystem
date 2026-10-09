@@ -1,5 +1,5 @@
 <?php
-/* 00 — is the test rig itself sound? If these fail, nothing else means anything. */
+/* 00 - is the test rig itself sound? If these fail, nothing else means anything. */
 
 T::suite('00 · Test rig', function () {
 

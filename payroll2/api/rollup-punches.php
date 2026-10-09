@@ -9,14 +9,14 @@
  *
  * It deliberately does NOT write to biometric_daily, attendance or payroll
  * itself. It hands the rows back so the existing Daily Biometrics flow can
- * post them through save-daily-attendance.php — which means every bit of
+ * post them through save-daily-attendance.php - which means every bit of
  * payroll maths (SSS, PhilHealth, Pag-IBIG, BIR brackets, OT and late rates)
  * stays in one place instead of being duplicated here.
  *
  *   GET/POST api/rollup-punches.php?period_id=12
  *   -> {"ok":true,"rows":[...],"unmatched":[...],"days":31,"punches":420}
  *
- * Admin session required — this is an operator action, not a machine one.
+ * Admin session required - this is an operator action, not a machine one.
  *
  * Shift rules come from the settings table, so they can be changed without
  * touching code:
@@ -24,7 +24,7 @@
  *     shift_end       default 17:00
  *     grace_minutes   default 15
  *     break_minutes   default 60
- *     standard_hours  default 8 — an employee's own Hours per Duty Day wins
+ *     standard_hours  default 8 - an employee's own Hours per Duty Day wins
  */
 
 require __DIR__ . '/../includes/helpers.php';
@@ -131,7 +131,7 @@ foreach ($byDay as $empId => $days) {
         $first = $punches[0]['time'];
         $last  = $punches[count($punches) - 1]['time'];
 
-        // A lone punch means someone forgot to clock out — record the day
+        // A lone punch means someone forgot to clock out - record the day
         // with zero hours so it shows up for manual correction rather than
         // silently inflating or vanishing.
         if (count($punches) < 2) {
@@ -151,7 +151,7 @@ foreach ($byDay as $empId => $days) {
         $outTs = strtotime($last);
         $span  = ($outTs - $inTs) / 3600.0;
 
-        /* Deduct the unpaid break only from a day long enough to have taken one — but never so that a LONGER
+        /* Deduct the unpaid break only from a day long enough to have taken one - but never so that a LONGER
            day pays LESS: a half day (4 h) pays 4 h, and so must one that runs a few minutes past it. Past half
            the duty day the break comes off, down to no less than that half day. */
         if ($span > ($std / 2)) {

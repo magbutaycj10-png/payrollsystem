@@ -29,7 +29,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Salary Forecast — Payroll System</title>
+    <title>Salary Forecast - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* ── Forecast-specific styles ── */
@@ -53,7 +53,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
         /* Chart area */
         .chart-area { height: 320px; position: relative; }
 
-        /* Orange3 guide — collapsible section */
+        /* Orange3 guide - collapsible section */
         .guide-section { margin-top: 28px; }
 
         .guide-toggle {
@@ -142,13 +142,13 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
             <p style="margin-top:6px;">
                 <label for="fcTarget" style="font-weight:600;font-size:.85rem;">Forecast:</label>
                 <select id="fcTarget" class="form-control" style="display:inline-block;width:auto;min-width:300px;" onchange="runForecast()">
-                    <option value="total_labor_cost" selected>Total labor cost — what the budget must cover</option>
-                    <option value="total_net">Net pay — what employees take home</option>
+                    <option value="total_labor_cost" selected>Total labor cost - what the budget must cover</option>
+                    <option value="total_net">Net pay - what employees take home</option>
                 </select>
                 <span id="fcTargetNote" style="font-size:.8rem;color:#6b7280;margin-left:8px;"></span>
             </p>
         </div>
-        <!-- Export button — JS populates history before enabling this -->
+        <!-- Export button - JS populates history before enabling this -->
         <button class="btn btn-ghost" id="exportBtn" onclick="exportCSVBtn()" disabled>
             Export CSV for Orange3
         </button>
@@ -158,7 +158,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
     <div id="fcStatus" class="alert alert-info">Running forecast models, please wait…</div>
     <div id="fcError"  class="alert alert-error" style="display:none;"></div>
 
-    <!-- Main content — shown after models finish -->
+    <!-- Main content - shown after models finish -->
     <div id="fcContent" style="display:none;">
 
         <!-- Data quality warning (shown when < 6 periods) -->
@@ -168,8 +168,8 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
         <div class="fc-cards">
 
             <div class="card card-accent fc-card" style="grid-column: span 2;">
-                <div class="card-label" id="cardConsensusLabel">Consensus Forecast — <?= $fcPeriodNoun ?></div>
-                <div class="card-value" id="cardConsensus">—</div>
+                <div class="card-label" id="cardConsensusLabel">Consensus Forecast - <?= $fcPeriodNoun ?></div>
+                <div class="card-value" id="cardConsensus">-</div>
                 <div class="card-sub"  id="cardDiff">vs last period</div>
             </div>
 
@@ -177,7 +177,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 <div class="card-label">
                     <span class="model-badge model-rf">RF</span> Random Forest
                 </div>
-                <div class="card-value" id="cardRF">—</div>
+                <div class="card-value" id="cardRF">-</div>
                 <div class="card-sub"   id="cardRFDiff" style="color:var(--text-muted);">change vs last</div>
             </div>
 
@@ -185,14 +185,14 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 <div class="card-label">
                     <span class="model-badge model-arima">ARIMA</span> ARIMA(2,1,0)
                 </div>
-                <div class="card-value" id="cardARIMA">—</div>
+                <div class="card-value" id="cardARIMA">-</div>
                 <div class="card-sub"   id="cardARIMADiff" style="color:var(--text-muted);">change vs last</div>
             </div>
 
             <div class="card card-purple fc-card">
                 <div class="card-label"><?= $fcPeriodNoun ?> Signal</div>
                 <div class="card-value" style="font-size:1rem;margin-top:8px;">
-                    <span id="cardTP">—</span>
+                    <span id="cardTP">-</span>
                 </div>
                 <div class="card-sub" style="margin-top:6px;">Turning point detection</div>
             </div>
@@ -280,7 +280,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
                 <!-- Part A: Setup -->
                 <h3 style="font-size:.95rem;font-weight:700;margin-bottom:14px;color:#1e293b;">
-                    Part A — Install Orange3
+                    Part A - Install Orange3
                 </h3>
                 <div class="step-list">
                     <div class="step-item">
@@ -314,7 +314,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
                 <!-- Part B: Random Forest in Orange -->
                 <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part B — Random Forest in Orange3
+                    Part B - Random Forest in Orange3
                 </h3>
                 <p style="font-size:.85rem;color:#6b7280;margin-bottom:14px;">
                     Random Forest treats forecasting as a regression problem.
@@ -374,7 +374,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                                Connect <em>Select Columns &rarr; Test &amp; Score (Data input)</em>
                                and <em>Random Forest &rarr; Test &amp; Score (Learner input)</em>.
                                Use <strong>Cross-validation (k=3)</strong> since datasets are small.
-                               Check the <strong>RMSE</strong> and <strong>R²</strong> values —
+                               Check the <strong>RMSE</strong> and <strong>R²</strong> values -
                                higher R² (closer to 1) means a better fit.</p>
                         </div>
                     </div>
@@ -392,11 +392,11 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
                 <!-- Part C: ARIMA in Orange -->
                 <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part C — ARIMA in Orange3 (Time Series Add-on)
+                    Part C - ARIMA in Orange3 (Time Series Add-on)
                 </h3>
                 <p style="font-size:.85rem;color:#6b7280;margin-bottom:14px;">
                     ARIMA models the payroll as a sequence in time.
-                    It captures autocorrelation — the idea that the next <?= $fcPeriodWord ?>&rsquo;s salary
+                    It captures autocorrelation - the idea that the next <?= $fcPeriodWord ?>&rsquo;s salary
                     is partly predictable from the past few months' salaries.
                     ARIMA(2,1,0) means: use 2 past values after first-order differencing.
                 </p>
@@ -418,7 +418,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                             <h4>Load the same CSV with File widget</h4>
                             <p>Use the same <strong>File</strong> widget from Part B, or add a new one.
                                Make sure the <code>period_index</code> column is present
-                               — it will be used as the time axis.</p>
+                               - it will be used as the time axis.</p>
                         </div>
                     </div>
                     <div class="step-item">
@@ -466,7 +466,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                         <div class="step-content">
                             <h4>Read the forecast table</h4>
                             <p>Add a <strong>Data Table</strong> widget connected to the ARIMA output.
-                               This shows the numeric forecast values per period —
+                               This shows the numeric forecast values per period -
                                compare these to what this page predicts to cross-validate.</p>
                         </div>
                     </div>
@@ -474,7 +474,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
                 <!-- Part D: Interpreting results -->
                 <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part D — Interpreting Results &amp; Turning Points
+                    Part D - Interpreting Results &amp; Turning Points
                 </h3>
                 <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:16px;font-size:.85rem;line-height:1.8;">
                     <p><strong>Which model to trust?</strong><br>
@@ -486,7 +486,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                     <p style="margin-top:12px;"><strong>What is a Turning Point?</strong><br>
                     A <strong>Peak</strong> means salary cost hit a local high and is predicted to fall.
                     A <strong>Trough</strong> means it hit a local low and is predicted to rise.
-                    Use these to plan cash flow — if a peak is predicted, you may need
+                    Use these to plan cash flow - if a peak is predicted, you may need
                     extra budget this <?= $fcPeriodWord ?> before it drops next <?= $fcPeriodWord ?>.</p>
 
                     <p style="margin-top:12px;"><strong>When predictions improve:</strong><br>
@@ -495,7 +495,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                     12+ periods = reliable forecasts with seasonal detection.</p>
 
                     <p style="margin-top:12px;"><strong>In Orange, find turning points by:</strong><br>
-                    Adding a <strong>Line Chart</strong> to the historical data —
+                    Adding a <strong>Line Chart</strong> to the historical data -
                     local peaks and troughs are visually obvious.
                     The Time Series add-on also has a <strong>Moving Transform</strong>
                     widget that can smooth the series to make turning points clearer.</p>
@@ -542,7 +542,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 <thead>
                     <tr>
                         <th>ID</th><th>Name</th><th>Hours</th><th>OT hrs</th><th>Late hrs</th>
-                        <th>Gross Pay</th><th title="Overtime less late — already part of Gross Pay">incl. OT−Late</th><th>Bonus</th><th>Deductions</th>
+                        <th>Gross Pay</th><th title="Overtime less late - already part of Gross Pay">incl. OT−Late</th><th>Bonus</th><th>Deductions</th>
                         <th>Tax</th><th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th>
                         <th>Net Pay</th><th>Print</th>
                     </tr>
@@ -640,8 +640,8 @@ async function openDetail(periodId, periodLabel) {
             <td>${parseFloat(r.late_hours).toFixed(1)}</td>
             <td>&#8369;${parseFloat(r.gross_pay).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
             <td>&#8369;${parseFloat(r.ot_late_adj).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
-            <td>${r.bonus > 0 ? '<span style="color:#16a34a;">&#8369;'+parseFloat(r.bonus).toLocaleString('en-PH',{minimumFractionDigits:2})+'</span>' : '—'}</td>
-            <td>${r.other_deductions > 0 ? '<span style="color:#dc2626;">&#8369;'+parseFloat(r.other_deductions).toLocaleString('en-PH',{minimumFractionDigits:2})+'</span>' : '—'}</td>
+            <td>${r.bonus > 0 ? '<span style="color:#16a34a;">&#8369;'+parseFloat(r.bonus).toLocaleString('en-PH',{minimumFractionDigits:2})+'</span>' : '-'}</td>
+            <td>${r.other_deductions > 0 ? '<span style="color:#dc2626;">&#8369;'+parseFloat(r.other_deductions).toLocaleString('en-PH',{minimumFractionDigits:2})+'</span>' : '-'}</td>
             <td>&#8369;${parseFloat(r.withholding_tax).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
             <td>&#8369;${parseFloat(r.sss).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
             <td>&#8369;${parseFloat(r.philhealth).toLocaleString('en-PH',{minimumFractionDigits:2})}</td>
@@ -669,7 +669,7 @@ document.getElementById('detailModal').addEventListener('click', function(e) {
 /* ── Printing ───────────────────────────────────────────────
  * All three buttons open print-doc.php, so the forecast modal
  * issues exactly the same documents as Reports &
- * Payslips — same letterhead, same employee/company copies,
+ * Payslips - same letterhead, same employee/company copies,
  * same footer.
  */
 function _openDoc(params) {
@@ -677,12 +677,12 @@ function _openDoc(params) {
                 '_blank', 'width=980,height=760');
 }
 
-/* One employee — payslip + acknowledgement receipt, both copies. */
+/* One employee - payslip + acknowledgement receipt, both copies. */
 function printSinglePayslip(payrollId) {
     _openDoc({ doc: 'payslip', payroll_id: payrollId, copies: 'both' });
 }
 
-/* Every employee in the period — one sheet each. */
+/* Every employee in the period - one sheet each. */
 function printAllPayslipsModal() {
     if (!_detailData || !_detailData.period) return;
     _openDoc({ doc: 'payslip', period: _detailData.period.id, copies: 'both' });

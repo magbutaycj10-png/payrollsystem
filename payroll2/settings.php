@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
     $name   = trim($_POST['branch_name'] ?? '');
     $bid    = (int)($_POST['branch_id'] ?? 0);
 
-    /* The name this id currently carries — also proves the row exists. */
+    /* The name this id currently carries - also proves the row exists. */
     $current = null;
     if ($bid) {
         $st = $db->prepare("SELECT name FROM branches WHERE id = ?");
@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
             } elseif ($name === '') {
                 $msg = ['type' => 'error', 'text' => 'A branch needs a name.'];
             } elseif ($name === $current) {
-                $msg = ['type' => 'success', 'text' => 'Nothing to change — the name is already "' . $name . '".'];
+                $msg = ['type' => 'success', 'text' => 'Nothing to change - the name is already "' . $name . '".'];
             } else {
                 $db->beginTransaction();
                 try {
@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
             if ($current === null) {
                 $msg = ['type' => 'error', 'text' => 'That branch no longer exists.'];
             } else {
-                /* Refuse while anything still points at the name — deleting the
+                /* Refuse while anything still points at the name - deleting the
                    row would otherwise strand those employees on a branch that
                    is no longer in the list. */
                 $c = $db->prepare("SELECT COUNT(*) FROM employees WHERE branch = ?");
@@ -85,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
 
                 if ($empUse || $mgrUse) {
                     $msg = ['type' => 'error', 'text' => sprintf(
-                        'Cannot delete "%s" — it is still assigned to %d employee(s) and %d manager account(s). Move them to another branch first.',
+                        'Cannot delete "%s" - it is still assigned to %d employee(s) and %d manager account(s). Move them to another branch first.',
                         $current, $empUse, $mgrUse
                     )];
                 } else {
@@ -106,11 +106,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
         'overtime_rate', 'late_rate', 'payroll_period',
         'overtime_method', 'overtime_multiplier',
         'contribution_timing_sss', 'contribution_timing_philhealth', 'contribution_timing_pagibig',
-        // Company details — printed on every payslip, receipt and report
+        // Company details - printed on every payslip, receipt and report
         'bir_registered_name', 'bir_business_style', 'bir_address', 'bir_tin',
         'bir_system_name', 'bir_signatory_name', 'bir_signatory_position',
     ];
-    /* What a value must be to be saved. A negative overtime rate used to be accepted — and then SUBTRACTED from pay. */
+    /* What a value must be to be saved. A negative overtime rate used to be accepted - and then SUBTRACTED from pay. */
     $settingErrors = [];
     $check = [
         'overtime_rate'       => fn($v) => pesoProblem('Overtime rate', $v, MAX_RATE_PESOS),
@@ -160,7 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
         } elseif (strlen($newPass) < 8) {
             $msg = ['type' => 'error', 'text' => 'New password must be at least 8 characters.'];
         } elseif (hash_equals(DEFAULT_ADMIN_PASSWORD, $newPass) || hash_equals($currentPass, $newPass)) {
-            $msg = ['type' => 'error', 'text' => 'Choose a new password — not the default one, and not the current one.'];
+            $msg = ['type' => 'error', 'text' => 'Choose a new password - not the default one, and not the current one.'];
         } else {
             $db->prepare("UPDATE users SET password_hash=? WHERE id=?")
                ->execute([password_hash($newPass, PASSWORD_BCRYPT), $adminUser['id']]);
@@ -192,7 +192,7 @@ $branchRows = $db->query("
   ORDER BY b.name
 ")->fetchAll();
 
-/* Branch names sitting on employee rows that are not in the list — only
+/* Branch names sitting on employee rows that are not in the list - only
    possible on data that predates the managed list. Offered for adoption
    rather than silently ignored. */
 $orphanBranches = $db->query("
@@ -215,7 +215,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Settings — Payroll System</title>
+    <title>Settings - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
@@ -237,7 +237,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
     <?php if (!empty($_SESSION['must_change_pw'])): ?>
         <div class="alert alert-error">
             <span><strong>Change the admin password before continuing.</strong>
-            It is still the default one, which anybody reading the code knows — and the live site refuses it.
+            It is still the default one, which anybody reading the code knows - and the live site refuses it.
             Use the Admin Account section below; the rest of the system opens once it is changed.</span>
             <a href="#adminAccount">Change it now</a>
         </div>
@@ -254,7 +254,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                         <div style="padding:9px 12px;border-radius:7px;border:1.5px solid #e5e7eb;background:#f9fafb;font-weight:600;color:#111827;">
                             L&amp;N Pharmacy
                         </div>
-                        <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">Fixed — contact your developer to change</span>
+                        <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">Fixed - contact your developer to change</span>
                     </div>
                     <div class="form-group">
                         <label>Default Pay Schedule</label>
@@ -263,7 +263,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                             /* Value stays the stored key; only the label explains it. */
                             $periodOpts = [
                                 'Monthly'      => 'Monthly',
-                                'Semi-Monthly' => 'Semi-Monthly (kinsenas — twice a month)',
+                                'Semi-Monthly' => 'Semi-Monthly (kinsenas - twice a month)',
                                 'Weekly'       => 'Weekly',
                             ];
                             foreach ($periodOpts as $val => $label): ?>
@@ -380,7 +380,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                     <span>
                         <strong>Overtime is paid below the legal minimum for <?= count($otShort) ?> employee(s).</strong>
                         The Labor Code (Art. 87) requires at least the hourly rate plus 25% on an ordinary working day, but the flat rate
-                        pays every employee &#8369;<?= number_format($otShort[0]['paid'], 2) ?> an hour &mdash;
+                        pays every employee &#8369;<?= number_format($otShort[0]['paid'], 2) ?> an hour -
                         e.g. <?= htmlspecialchars($otShort[0]['full_name']) ?> should get &#8369;<?= number_format($otShort[0]['legal'], 2) ?> an hour.
                         Choose <em>Labor Code</em> as the overtime method to pay each employee their own rate.
                         (Rest-day, holiday and night-shift premiums are higher still and are not computed.)
@@ -392,15 +392,15 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                         <label>Overtime Method</label>
                         <select name="overtime_method" class="form-control">
                             <option value="flat"       <?= ($s['overtime_method'] ?? 'flat') !== 'labor_code' ? 'selected' : '' ?>>Flat ₱ per hour (everybody)</option>
-                            <option value="labor_code" <?= ($s['overtime_method'] ?? 'flat') === 'labor_code' ? 'selected' : '' ?>>Labor Code — own hourly rate × multiplier</option>
+                            <option value="labor_code" <?= ($s['overtime_method'] ?? 'flat') === 'labor_code' ? 'selected' : '' ?>>Labor Code - own hourly rate × multiplier</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Overtime Rate (₱/hr) — flat method</label>
+                        <label>Overtime Rate (₱/hr) - flat method</label>
                         <input type="number" name="overtime_rate" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" value="<?= htmlspecialchars($s['overtime_rate'] ?? '150') ?>">
                     </div>
                     <div class="form-group">
-                        <label>Overtime Multiplier — Labor Code method</label>
+                        <label>Overtime Multiplier - Labor Code method</label>
                         <input type="number" name="overtime_multiplier" class="form-control" step="0.01" min="1" max="3" value="<?= htmlspecialchars($s['overtime_multiplier'] ?? '1.25') ?>">
                         <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">1.25 = hourly rate + 25%, the legal minimum on an ordinary working day (Labor Code Art. 87).</span>
                     </div>
@@ -428,19 +428,19 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                     [$R['sss']['name'],
                      'Employee share ' . $pct($R['sss']['ee_rate']) . ' of the Monthly Salary Credit (employer 10%, total 15%). '
                      . 'Credit in ' . $php($R['sss']['msc_step']) . ' steps from ' . $php($R['sss']['msc_min']) . ' to ' . $php($R['sss']['msc_max'])
-                     . ' — employee pays ' . $php($R['sss']['msc_min'] * $R['sss']['ee_rate']) . ' to ' . $php($R['sss']['msc_max'] * $R['sss']['ee_rate']) . ' a month.',
+                     . ' - employee pays ' . $php($R['sss']['msc_min'] * $R['sss']['ee_rate']) . ' to ' . $php($R['sss']['msc_max'] * $R['sss']['ee_rate']) . ' a month.',
                      $R['sss']['since'], $R['sss']['source']],
                     [$R['philhealth']['name'],
                      $pct($R['philhealth']['rate']) . ' of monthly basic salary, split equally with the employer (employee '
                      . $pct($R['philhealth']['rate'] * $R['philhealth']['ee_share']) . '). Salary counted from '
-                     . $php($R['philhealth']['floor']) . ' to ' . $php($R['philhealth']['ceiling']) . ' — employee pays '
+                     . $php($R['philhealth']['floor']) . ' to ' . $php($R['philhealth']['ceiling']) . ' - employee pays '
                      . $php($R['philhealth']['floor'] * $R['philhealth']['rate'] * $R['philhealth']['ee_share']) . ' to '
                      . $php($R['philhealth']['ceiling'] * $R['philhealth']['rate'] * $R['philhealth']['ee_share']) . ' a month.',
                      $R['philhealth']['since'], $R['philhealth']['source']],
                     [$R['pagibig']['name'],
                      'Employee ' . $pct($R['pagibig']['rate']) . ' (' . $pct($R['pagibig']['rate_low']) . ' if earning '
                      . $php($R['pagibig']['low_limit']) . ' or less) of pay up to ' . $php($R['pagibig']['max_comp'])
-                     . ' — at most ' . $php($R['pagibig']['max_comp'] * $R['pagibig']['rate']) . ' a month; the employer matches it.',
+                     . ' - at most ' . $php($R['pagibig']['max_comp'] * $R['pagibig']['rate']) . ' a month; the employer matches it.',
                      $R['pagibig']['since'], $R['pagibig']['source']],
                     [$R['bir']['name'],
                      'TRAIN graduated tables on taxable pay (gross pay minus the employee\'s SSS, PhilHealth and Pag-IBIG): '
@@ -452,7 +452,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                 <div style="margin-top:22px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">
                         <strong style="font-size:.92rem;">Contribution tables in use</strong>
-                        <span style="font-size:.78rem;color:#6b7280;">Set by law — applied automatically, not edited here</span>
+                        <span style="font-size:.78rem;color:#6b7280;">Set by law - applied automatically, not edited here</span>
                     </div>
                     <table class="data-table" style="min-width:0;">
                         <thead><tr><th style="width:130px;">Deduction</th><th>How it is computed</th><th style="width:120px;">In effect since</th><th style="width:210px;">Basis</th></tr></thead>
@@ -511,13 +511,13 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
     </form>
 
-    <!-- Branches — the list every employee and branch-scoped manager picks from.
+    <!-- Branches - the list every employee and branch-scoped manager picks from.
          Outside the settings form above: each row posts its own action. -->
     <div class="box" style="margin-top:24px;">
         <div class="box-header">
             <h2>Branches</h2>
             <span style="font-size:.8rem;color:#6b7280;">
-                <?= count($branchRows) ?> branch<?= count($branchRows) === 1 ? '' : 'es' ?> &mdash;
+                <?= count($branchRows) ?> branch<?= count($branchRows) === 1 ? '' : 'es' ?> -
                 offered when adding an employee or scoping a manager
             </span>
         </div>
@@ -582,7 +582,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                                         (int)$b['mgr_count'] ? (int)$b['mgr_count'] . ' manager' . ((int)$b['mgr_count'] === 1 ? '' : 's') : '',
                                     ]); ?>
                                     <span style="font-size:.76rem;color:#6b7280;line-height:1.35;display:inline-block;max-width:170px;">
-                                        Can&rsquo;t delete &mdash; <?= implode(' and ', $who) ?> assigned.
+                                        Can&rsquo;t delete - <?= implode(' and ', $who) ?> assigned.
                                         Move them to another branch first.
                                     </span>
                                 <?php else: ?>
@@ -608,17 +608,17 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
         </div>
     </div>
 
-    <!-- Account Storage — shows exactly where each account type lives in the DB -->
+    <!-- Account Storage - shows exactly where each account type lives in the DB -->
     <div class="box" style="margin-top:24px;">
         <div class="box-header">
             <h2>Account Storage</h2>
-            <span style="font-size:.8rem;color:#6b7280;">All accounts live in the <code>users</code> table — distinguished by the <code>role</code> column</span>
+            <span style="font-size:.8rem;color:#6b7280;">All accounts live in the <code>users</code> table - distinguished by the <code>role</code> column</span>
         </div>
         <div class="box-body">
 
             <!-- Admin account -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:8px;">
-                Admin &mdash; <code style="font-weight:400;">users.role = 'admin'</code>
+                Admin - <code style="font-weight:400;">users.role = 'admin'</code>
             </p>
             <?php if ($adminUser): ?>
             <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;margin-bottom:20px;">
@@ -640,12 +640,12 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                 </div>
             </div>
             <?php else: ?>
-            <div class="alert alert-warn" style="margin-bottom:20px;">No admin account found. Reload the page — the system will create one automatically.</div>
+            <div class="alert alert-warn" style="margin-bottom:20px;">No admin account found. Reload the page - the system will create one automatically.</div>
             <?php endif; ?>
 
             <!-- Manager accounts -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:8px;">
-                Managers &mdash; <code style="font-weight:400;">users.role = 'manager'</code>
+                Managers - <code style="font-weight:400;">users.role = 'manager'</code>
                 &nbsp;<a href="managers.php" style="font-size:.75rem;font-weight:400;color:#3b82f6;">Manage &rarr;</a>
             </p>
             <?php if (empty($managers)): ?>
@@ -681,7 +681,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
             <!-- Earner note -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:6px;">
-                Earners (employees with portal access) &mdash; <code style="font-weight:400;">users.role = 'earner'</code>
+                Earners (employees with portal access) - <code style="font-weight:400;">users.role = 'earner'</code>
                 &nbsp;<a href="employee.php" style="font-size:.75rem;font-weight:400;color:#3b82f6;">Manage &rarr;</a>
             </p>
             <p style="font-size:.85rem;color:#6b7280;margin-bottom:20px;">

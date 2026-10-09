@@ -1,13 +1,13 @@
 <?php
 /*
- * Mutations — a self-check of the test suite itself: does it FAIL when the application is wrong?
+ * Mutations - a self-check of the test suite itself: does it FAIL when the application is wrong?
  *
  *   run-tests.bat --mutation-check                  the current application: M01–M20 (M19 reworded) plus M21–M45,
  *                                                   bugs that can only exist in the code the audit and the 13th month added
  *   run-tests.bat --mutation-check --app=<folder>   another copy; an older one gets only M01–M20
  *
- * Each mutation edits one line of the COPY of the app that the run uses (never the source tree) — a changed rate,
- * a dropped term, floor instead of round — and the named suite must then report a failure. "SURVIVED" means the suite
+ * Each mutation edits one line of the COPY of the app that the run uses (never the source tree) - a changed rate,
+ * a dropped term, floor instead of round - and the named suite must then report a failure. "SURVIVED" means the suite
  * could not see that bug.
  */
 final class Mutations
@@ -93,7 +93,7 @@ final class Mutations
     public static function check(array $only = []): int
     {
         $fixed = self::appIsFixed();
-        echo "\033[1mMutation check\033[0m — each bug is injected into a COPY of the app; the named suite must fail.\n"
+        echo "\033[1mMutation check\033[0m - each bug is injected into a COPY of the app; the named suite must fail.\n"
            . '  application: ' . AppCopy::original() . ' (' . ($fixed ? 'with the audit fixes' : 'original code') . ")\n\n";
         $killed = $survived = 0;
         $php = [PHP_BINARY];

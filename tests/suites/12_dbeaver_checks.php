@@ -1,10 +1,10 @@
 <?php
 /*
- * 12 — The audit queries you run yourself in DBeaver (tests/dbeaver_checks.sql), tested here on a MySQL 8 database so you
+ * 12 - The audit queries you run yourself in DBeaver (tests/dbeaver_checks.sql), tested here on a MySQL 8 database so you
  * can trust what they say about the live one.
  *
  *   · the file parses: every check has an id, a title, an expectation and exactly one statement
- *   · on correctly computed payroll — nine months, every salary type and run shape, bonuses, a finalized period — every
+ *   · on correctly computed payroll - nine months, every salary type and run shape, bonuses, a finalized period - every
  *     "expect: none" query returns no rows (on the audit-fixed application)
  *   · the same queries run on the ORIGINAL application's payroll flag exactly the two things it gets wrong in this data
  *     (tax over-withheld and not returned, a salaried employee paid for days before the hire date)
@@ -28,7 +28,7 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
     });
 
     T::test('on correctly computed payroll every "expect: none" query returns no rows (and the corrected tax refund shows up as a finding)', function (T $t) {
-        if (!AppCopy::hasFixes()) T::skip('the original application computes two things wrongly in this data — see the next test');
+        if (!AppCopy::hasFixes()) T::skip('the original application computes two things wrongly in this data - see the next test');
         $set = qa_sql_dataset();
         $problems = [];
         foreach (qa_sql_checks() as $c) {
@@ -43,13 +43,13 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
         $r01 = qa_sql_run($byId['R01']);
         $t->same(9, count($r01), 'R01: nine months');
         foreach ($r01 as $row) $t->money(0, $row['unexplained_difference'], 'R01 ' . $row['month'] . ' foots');
-        // the month report agrees with the figures worked out by hand for July (Example H) — gross 250,000.00, tax 57,206.70, net 188,343.30
+        // the month report agrees with the figures worked out by hand for July (Example H) - gross 250,000.00, tax 57,206.70, net 188,343.30
         $jul = array_values(array_filter($r01, fn($r) => $r['month'] === '2026-07'))[0];
         $t->moneyMap(['gross_pay' => 25000000, 'withholding_tax' => 5720670, 'net_pay' => 18834330], $jul, 'R01 July');
     });
 
     T::test('on the ORIGINAL application\'s payroll the queries find exactly its two known mistakes: over-withheld tax (D-02) and pay for days before the hire date (D-03)', function (T $t) {
-        if (AppCopy::hasFixes()) T::skip('this is what the original application does — the fixed one is checked above');
+        if (AppCopy::hasFixes()) T::skip('this is what the original application does - the fixed one is checked above');
         qa_sql_dataset();
         $byId = array_column(qa_sql_checks(), null, 'id');
         $problems = [];
@@ -61,7 +61,7 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
         $t->same([], $problems, 'apart from the tax query, nothing should be flagged on correctly computed pay');
         $tax = qa_sql_run($byId['C13']);
         $t->same(1, count($tax), 'one employee-month has the wrong tax: ' . json_encode($tax));
-        $t->same('2026-05', $tax[0]['month'] ?? null, 'May — the first cut-off took ₱289.95 and the month owes nothing');
+        $t->same('2026-05', $tax[0]['month'] ?? null, 'May - the first cut-off took ₱289.95 and the month owes nothing');
         $t->money('289.95', $tax[0]['over_withheld'] ?? 0, 'over-withheld, never returned');
         $hire = qa_sql_run($byId['C51']);
         $t->same(1, count($hire), 'C51 finds the June hire paid in full: ' . json_encode($hire));

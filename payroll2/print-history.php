@@ -18,7 +18,7 @@ $logs = $db->query("
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Print History — Payroll System</title>
+    <title>Print History - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
@@ -52,7 +52,7 @@ $logs = $db->query("
                     <?php foreach ($logs as $i => $l): ?>
                     <tr>
                         <td><?= $i + 1 ?></td>
-                        <td><?= date('M d, Y — h:i A', strtotime($l['log_datetime'])) ?></td>
+                        <td><?= date('M d, Y - h:i A', strtotime($l['log_datetime'])) ?></td>
                         <td><?= htmlspecialchars($l['document_name']) ?></td>
                         <td>
                             <span class="badge badge-<?= $l['document_type'] === 'PDF Export' ? 'blue' : 'green' ?>">
@@ -63,10 +63,10 @@ $logs = $db->query("
                             <?php if ($l['period_label']): ?>
                                 <span class="badge badge-yellow"><?= htmlspecialchars($l['period_label']) ?></span>
                             <?php else: ?>
-                                —
+                                -
                             <?php endif; ?>
                         </td>
-                        <td><?= htmlspecialchars($l['printed_by'] ?? '') ?: '&mdash;' ?></td>
+                        <td><?= htmlspecialchars($l['printed_by'] ?? '') ?: '-' ?></td>
                     </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>

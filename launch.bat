@@ -1,5 +1,5 @@
 @echo off
-:: launch.bat — starts the PHP built-in server.
+:: launch.bat - starts the PHP built-in server.
 :: Uses %%~dp0 (the folder this .bat lives in) so paths work on any drive or folder.
 
 :: %~dp0 always ends with \, strip it for clean concatenation

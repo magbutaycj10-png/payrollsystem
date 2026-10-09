@@ -64,7 +64,7 @@ if ($apiKey === '') {
 $db = getDB();
 applySchemaPatches();
 
-/* Look the key up by hash — the plaintext key is never stored. */
+/* Look the key up by hash - the plaintext key is never stored. */
 $keyHash = hash('sha256', $apiKey);
 $keyStmt = $db->prepare(
     "SELECT id, device_id FROM biometric_api_keys
@@ -155,7 +155,7 @@ try {
             continue;
         }
 
-        /* Reject clock-skewed futures — a terminal with a wrong date would
+        /* Reject clock-skewed futures - a terminal with a wrong date would
            otherwise land punches in a period that has not happened yet. */
         if ($dt->getTimestamp() > time() + 86400) {
             $rejected++;

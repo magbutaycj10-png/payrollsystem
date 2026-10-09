@@ -5,9 +5,9 @@ requireManager();
 /*
  * Team analytics for the open payroll period.
  *
- * Home answers "what is waiting on me" — counts, to-dos, shortcuts.
+ * Home answers "what is waiting on me" - counts, to-dos, shortcuts.
  * This page deliberately answers a different question: "how is my team
- * tracking" — rates, totals and trends. Nothing here is a to-do list.
+ * tracking" - rates, totals and trends. Nothing here is a to-do list.
  */
 
 $activePage = 'dashboard';
@@ -51,11 +51,11 @@ if ($periodId) {
     $people      = (int)($r['people']     ?? 0);
 }
 $approvalPct = $attTotal ? round($attApproved / $attTotal * 100) : 0;
-/* attendance.hours_worked is regular time only — overtime is kept apart from it */
+/* attendance.hours_worked is regular time only - overtime is kept apart from it */
 $avgHours    = $people ? ($sumHours + $sumOt) / $people : 0;
 $otShare     = ($sumHours + $sumOt) ? round($sumOt / ($sumHours + $sumOt) * 100, 1) : 0;
 
-/* ── Team hours across the last six periods — the trend ───────────────── */
+/* ── Team hours across the last six periods - the trend ───────────────── */
 $trendSt = $db->prepare("
     SELECT pp.period_label,
            COALESCE(SUM(a.hours_worked),0)   AS hours,
@@ -140,7 +140,7 @@ $recentLeave = $recentLeave->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard — Manager Portal</title>
+    <title>Dashboard - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <style>
@@ -296,7 +296,7 @@ $recentLeave = $recentLeave->fetchAll();
                     </div>
                     <div class="prog-note">
                         <?= $approvalPct >= 100
-                            ? 'Everything is signed off — payroll can be processed for your team.'
+                            ? 'Everything is signed off - payroll can be processed for your team.'
                             : 'Payroll stays on hold until the remaining records are approved.' ?>
                         <a href="/manager/timesheets.php" style="font-weight:700;color:var(--accent);text-decoration:none;">Open timesheets &rarr;</a>
                     </div>

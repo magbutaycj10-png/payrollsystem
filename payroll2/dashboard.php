@@ -5,14 +5,14 @@ requireAuth();
 $activePage = 'dashboard';
 $db         = getDB();
 
-/* Most recent payroll period BY DATE that has payroll — a period entered later for an older month is not "latest" */
+/* Most recent payroll period BY DATE that has payroll - a period entered later for an older month is not "latest" */
 $latestPeriodRow   = $db->query("SELECT pp.id, pp.period_label, pp.status, pp.period_type FROM payroll_periods pp
                                   WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
                                   ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1")->fetch()
                   ?: $db->query("SELECT id, period_label, status, period_type FROM payroll_periods ORDER BY period_start DESC, id DESC LIMIT 1")->fetch();
 $latestPeriod      = $latestPeriodRow['id']           ?? null;
 $latestPeriodLabel = $latestPeriodRow['period_label'] ?? null;
-/* What one point of the trend below is: a month, a cut-off or a week — the card must say what it predicts */
+/* What one point of the trend below is: a month, a cut-off or a week - the card must say what it predicts */
 $nextWord = match (periodType($latestPeriodRow['period_type'] ?? null)) { 'Semi-Monthly' => 'Cut-off', 'Weekly' => 'Week', default => 'Month' };
 
 /* Aggregate totals for the latest period, including bonuses and deductions */
@@ -37,10 +37,10 @@ if ($latestPeriod) {
 
 /*
  * Payroll trend data for the chart and linear-regression forecast.
- * Uses ALL periods (Open + Locked) — no longer requires Finalized status —
+ * Uses ALL periods (Open + Locked) - no longer requires Finalized status -
  * so the prediction works as soon as attendance is uploaded.
  */
-/* The SIX MOST RECENT periods (newest first inside, oldest first outside) — the trend is about now, not about the first six ever */
+/* The SIX MOST RECENT periods (newest first inside, oldest first outside) - the trend is about now, not about the first six ever */
 $monthly = $db->query("
     SELECT * FROM (
         SELECT pp.id, pp.period_label, pp.period_start,
@@ -116,7 +116,7 @@ $pipeline = [
     ['label' => 'Period finalized',    'note' => $periodStatus ?: 'No period yet',               'done' => $periodLocked],
 ];
 
-/* Where the money goes — feeds the composition doughnut */
+/* Where the money goes - feeds the composition doughnut */
 $composition = ['net' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'tax' => 0.0, 'other' => 0.0];
 if ($latestPeriod) {
     $c = $db->prepare("
@@ -134,7 +134,7 @@ if ($latestPeriod) {
 $totalDeductions = $composition['sss'] + $composition['philhealth'] + $composition['pagibig']
                  + $composition['tax'] + $composition['other'];
 
-/* Highest paid this period — bars are drawn relative to the top row */
+/* Highest paid this period - bars are drawn relative to the top row */
 $topEarners = [];
 if ($latestPeriod) {
     $te = $db->prepare("
@@ -172,7 +172,7 @@ if ($latestPeriod) {
 $branchMaxNet = 0;
 foreach ($byBranch as $b) { $branchMaxNet = max($branchMaxNet, (float)$b['net']); }
 
-/* Recent activity — adjustments and finalize/reopen events, newest first */
+/* Recent activity - adjustments and finalize/reopen events, newest first */
 $activity = [];
 try {
     $activity = $db->query("
@@ -206,7 +206,7 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard — Payroll System</title>
+    <title>Dashboard - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
     <style>
@@ -397,12 +397,12 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
             <div class="card-sub"><?= htmlspecialchars($latestPeriodLabel ?? 'No data') ?></div>
         </div>
 
-        <!-- Prediction card — spans full width, pulses when a value is available -->
+        <!-- Prediction card - spans full width, pulses when a value is available -->
         <div class="card card-sky <?= $n >= 2 ? 'card-predict-active' : '' ?>"
              style="grid-column: 1 / -1;">
             <div class="card-label">Predicted Next <?= $nextWord ?> Net Payroll</div>
             <div class="card-value" style="color:#0ea5e9;font-size:2rem;">
-                <?= $n >= 2 ? '&#8369;' . number_format($predicted, 2) : '&mdash;' ?>
+                <?= $n >= 2 ? '&#8369;' . number_format($predicted, 2) : '-' ?>
             </div>
             <div class="card-sub">
                 <?php if ($n >= 2): ?>
@@ -457,7 +457,7 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
                 <span><?= $latestPeriodLabel ? htmlspecialchars($latestPeriodLabel) : 'No period yet' ?></span>
             </span>
             <span class="<?= $periodLocked ? 'todo-num-ok' : 'todo-num' ?>">
-                <?= $periodLocked ? 'Closed' : ($payrollRows ?: '—') ?>
+                <?= $periodLocked ? 'Closed' : ($payrollRows ?: '-') ?>
             </span>
         </a>
         <a class="todo" href="reports.php">
@@ -637,8 +637,8 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
                         <td><?= htmlspecialchars($r['emp_name']) ?></td>
                         <td><?= number_format($r['hours_worked'], 1) ?> hrs</td>
                         <td>&#8369;<?= number_format($r['gross_pay'], 2) ?></td>
-                        <td><?= $r['bonus'] > 0 ? '<span style="color:#16a34a;">&#8369;' . number_format($r['bonus'], 2) . '</span>' : '—' ?></td>
-                        <td><?= $r['other_deductions'] > 0 ? '<span style="color:#dc2626;">&#8369;' . number_format($r['other_deductions'], 2) . '</span>' : '—' ?></td>
+                        <td><?= $r['bonus'] > 0 ? '<span style="color:#16a34a;">&#8369;' . number_format($r['bonus'], 2) . '</span>' : '-' ?></td>
+                        <td><?= $r['other_deductions'] > 0 ? '<span style="color:#dc2626;">&#8369;' . number_format($r['other_deductions'], 2) . '</span>' : '-' ?></td>
                         <td><strong>&#8369;<?= number_format($r['net_pay'], 2) ?></strong></td>
                         <td><span class="badge badge-blue"><?= htmlspecialchars($r['period_label']) ?></span></td>
                         <td>

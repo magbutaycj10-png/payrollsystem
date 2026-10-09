@@ -4,7 +4,7 @@ requireManager();
 
 /*
  * Landing page shown right after a manager signs in.
- * Leads with what is waiting on them — timesheets and leave — then the
+ * Leads with what is waiting on them - timesheets and leave - then the
  * shortcuts into the rest of the portal. Detail stays on the dashboard.
  */
 
@@ -48,7 +48,7 @@ $toDo     = $pendingTimesheets + $pendingLeave;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home — Manager Portal</title>
+    <title>Home - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
     <style>
         .lp-hero {

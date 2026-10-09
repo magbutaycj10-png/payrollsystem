@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Profile — Employee Portal</title>
+    <title>My Profile - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>
@@ -110,20 +110,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
                 <div class="p-form-group">
                     <label>Position</label>
-                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['position'] ?? '—') ?></div>
+                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['position'] ?? '-') ?></div>
                 </div>
                 <div class="p-form-group">
                     <label>Branch</label>
-                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['branch'] ?? '—') ?></div>
+                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['branch'] ?? '-') ?></div>
                 </div>
                 <div class="p-form-group">
                     <label>Email (Company)</label>
-                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['email'] ?? '—') ?></div>
+                    <div class="p-form-control" style="background:#f9fafb;color:#6b7280;"><?= htmlspecialchars($empInfo['email'] ?? '-') ?></div>
                 </div>
                 <div class="p-form-group">
                     <label>Date Hired</label>
                     <div class="p-form-control" style="background:#f9fafb;color:#6b7280;">
-                        <?= $empInfo['date_hired'] ? date('F j, Y', strtotime($empInfo['date_hired'])) : '—' ?>
+                        <?= $empInfo['date_hired'] ? date('F j, Y', strtotime($empInfo['date_hired'])) : '-' ?>
                     </div>
                 </div>
             </div>
@@ -163,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <select name="emergency_relation" class="p-form-control">
                             <?php foreach (['', 'Spouse','Parent','Sibling','Child','Relative','Friend','Other'] as $rel): ?>
                             <option value="<?= $rel ?>" <?= ($profile['emergency_relation'] ?? '') === $rel ? 'selected' : '' ?>>
-                                <?= $rel ?: '— Select —' ?>
+                                <?= $rel ?: '- Select -' ?>
                             </option>
                             <?php endforeach; ?>
                         </select>

@@ -9,9 +9,9 @@ function escHtml(v) {
  * Client-side salary forecasting engine.
  *
  * Implements two independent models:
- *   1. Random Forest Regression  — captures non-linear relationships
+ *   1. Random Forest Regression  - captures non-linear relationships
  *      between period index, month, employee count, etc. and net pay.
- *   2. ARIMA(2,1,0)              — classic time-series model that learns
+ *   2. ARIMA(2,1,0)              - classic time-series model that learns
  *      from the autocorrelation structure of the payroll series.
  *
  * Also provides turning-point detection on the historical series and
@@ -21,7 +21,7 @@ function escHtml(v) {
 'use strict';
 
 /* ============================================================
-   SECTION 1 — Random Forest Regression
+   SECTION 1 - Random Forest Regression
    ============================================================ */
 
 /*
@@ -46,7 +46,7 @@ class RegressionTree {
     /* Arithmetic mean of an array */
     _mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
 
-    /* Mean Squared Error — used as the split quality metric */
+    /* Mean Squared Error - used as the split quality metric */
     _mse(arr) {
         const m = this._mean(arr);
         return arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length;
@@ -89,7 +89,7 @@ class RegressionTree {
             }
         }
 
-        /* No useful split found — make a leaf */
+        /* No useful split found - make a leaf */
         if (!bestSplit) return { leaf: true, value: this._mean(y) };
 
         return {
@@ -114,7 +114,7 @@ class RegressionTree {
 
 /*
  * A small seeded random-number generator (mulberry32). The forest used Math.random(), so the same payroll
- * history gave a different budget on every page load — an auditor could never reproduce the number. Seeded
+ * history gave a different budget on every page load - an auditor could never reproduce the number. Seeded
  * from the data itself (see seedFrom), the same history now always gives the same forecast.
  */
 function makeRng(seed) {
@@ -197,12 +197,12 @@ class RandomForestRegressor {
 }
 
 /* ============================================================
-   SECTION 2 — ARIMA(2, 1, 0)
+   SECTION 2 - ARIMA(2, 1, 0)
    ============================================================
    ARIMA stands for:
-     AR  — AutoRegressive: uses past values to predict the next
-     I   — Integrated: differencing to remove trend/non-stationarity
-     MA  — Moving Average: not used here (order = 0)
+     AR  - AutoRegressive: uses past values to predict the next
+     I   - Integrated: differencing to remove trend/non-stationarity
+     MA  - Moving Average: not used here (order = 0)
 
    ARIMA(2,1,0) means:
      p=2  use the last 2 values of the differenced series
@@ -326,11 +326,11 @@ function arimaForecast(series, steps = 1, p = 2, d = 1) {
 }
 
 /* ============================================================
-   SECTION 3 — Turning Point Detection
+   SECTION 3 - Turning Point Detection
    ============================================================
    A turning point is a local maximum (peak) or minimum (trough)
    in the time series.  They indicate months where salary cost
-   reversed direction — useful for budget planning.
+   reversed direction - useful for budget planning.
 */
 
 /*
@@ -363,18 +363,18 @@ function classifyNextPeriod(series, nextVal) {
     const prev2 = series[series.length - 2];
     const risingBefore = prev  > prev2;
     const risingAfter  = nextVal > prev;
-    if ( risingBefore && !risingAfter) return 'Peak — salary expected to decrease next ' + periodWord();
-    if (!risingBefore &&  risingAfter) return 'Trough — salary expected to increase next ' + periodWord();
+    if ( risingBefore && !risingAfter) return 'Peak - salary expected to decrease next ' + periodWord();
+    if (!risingBefore &&  risingAfter) return 'Trough - salary expected to increase next ' + periodWord();
     return null; /* continuation of existing trend */
 }
 
 /* ============================================================
-   SECTION 4 — Pay-period calendar
+   SECTION 4 - Pay-period calendar
    ============================================================
    The payroll calendar is whatever Settings says: one run a month,
    two (kinsenas), or four. Everything below forecasts the next
    PERIOD, which is only the next month when there is one run a
-   month — on a kinsenas calendar it is the other half of the same
+   month - on a kinsenas calendar it is the other half of the same
    month half the time.
 */
 
@@ -416,21 +416,21 @@ function periodWord() {
 }
 
 /* ============================================================
-   SECTION 4b — Feature Engineering for Random Forest
+   SECTION 4b - Feature Engineering for Random Forest
    ============================================================ */
 
 /*
  * buildFeatures()
  * Converts a payroll history record into a numeric feature vector.
  * Features chosen:
- *   [0] period_index  — linear trend signal
- *   [1] month         — captures seasonal patterns (e.g. 13th month in Dec)
- *   [2] half          — which run within the month (1 or 2). On a kinsenas
+ *   [0] period_index  - linear trend signal
+ *   [1] month         - captures seasonal patterns (e.g. 13th month in Dec)
+ *   [2] half          - which run within the month (1 or 2). On a kinsenas
  *                       calendar the two halves are not interchangeable:
  *                       contributions and 13th-month land on one of them.
- *   [3] employee_count — more employees = higher payroll
- *   [4] avg_gross     — average pay rate per employee
- *   [5] prev_net      — the previous period's actual total (momentum signal)
+ *   [3] employee_count - more employees = higher payroll
+ *   [4] avg_gross     - average pay rate per employee
+ *   [5] prev_net      - the previous period's actual total (momentum signal)
  */
 function buildFeatures(record, prevNet) {
     return [
@@ -445,7 +445,7 @@ function buildFeatures(record, prevNet) {
 
 /*
  * buildNextFeatures()
- * Constructs the feature vector for the NEXT (unknown) period — the next
+ * Constructs the feature vector for the NEXT (unknown) period - the next
  * kinsena on a semi-monthly calendar, the next month on a monthly one.
  * We assume employee count and avg gross stay close to the last known values.
  */
@@ -467,7 +467,7 @@ function buildNextFeatures(history, field = 'total_net') {
  * randomForestForecast()
  * The forest is taught the CHANGE from one period to the next, and the forecast is the last
  * actual value plus the change it predicts. A tree can only answer with numbers it has seen, so a
- * forest that predicts the LEVEL can never forecast above the highest payroll on record — a payroll
+ * forest that predicts the LEVEL can never forecast above the highest payroll on record - a payroll
  * rising ₱10k a period would be "forecast" to stop rising. Changes can repeat, levels cannot.
  * `field` is the series being forecast: 'total_labor_cost' (default for budgeting) or 'total_net'.
  */
@@ -484,7 +484,7 @@ function randomForestForecast(history, field = 'total_net') {
 }
 
 /* ============================================================
-   SECTION 5 — Main Orchestration
+   SECTION 5 - Main Orchestration
    ============================================================ */
 
 /*
@@ -526,7 +526,7 @@ async function runForecast() {
         return;
     }
 
-    /* What is forecast: the company's LABOR COST (pay + bonus + employer SSS / EC / PhilHealth / Pag-IBIG — what a
+    /* What is forecast: the company's LABOR COST (pay + bonus + employer SSS / EC / PhilHealth / Pag-IBIG - what a
        budget has to cover) or the employees' take-home net pay. Chosen on the page; labor cost is the default. */
     const field  = pickTarget(history);
     const series = history.map(r => r[field]);
@@ -565,22 +565,22 @@ function pickTarget(history) {
 }
 
 /* ============================================================
-   SECTION 6 — Rendering helpers
+   SECTION 6 - Rendering helpers
    ============================================================ */
 
-/* Money is always shown to the centavo (two decimals) — a forecast is a float with many — and a negative amount keeps its sign in front */
+/* Money is always shown to the centavo (two decimals) - a forecast is a float with many - and a negative amount keeps its sign in front */
 const fmt  = n  => {
     const v = parseFloat(n);
     return (v < 0 ? '−' : '') + '₱' + Math.abs(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 const fmtSigned = n => (n >= 0 ? '+' : '') + fmt(n);
-const pct  = (a, b) => b ? (((a - b) / Math.abs(b)) * 100).toFixed(1) + '%' : '—';
+const pct  = (a, b) => b ? (((a - b) / Math.abs(b)) * 100).toFixed(1) + '%' : '-';
 
 /* Put the name of the series being forecast into the page's headings */
 function renderTargetLabels(field) {
     const t = TARGETS[field] || TARGETS.total_net;
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-    set('cardConsensusLabel', 'Consensus Forecast — ' + (typeof FC_NOUN !== 'undefined' ? FC_NOUN : 'Next Period') + ' ' + t.name);
+    set('cardConsensusLabel', 'Consensus Forecast - ' + (typeof FC_NOUN !== 'undefined' ? FC_NOUN : 'Next Period') + ' ' + t.name);
     set('chartTitle', 'Historical ' + t.name + ' + Forecast');
     set('thTpValue', t.name);
     set('fcTargetNote', t.name + ': ' + t.note);
@@ -646,14 +646,14 @@ function renderChart(history, rfPred, arimaPred, field = 'total_net') {
     const seriesName = (TARGETS[field] || TARGETS.total_net).name;
     const lastLabel  = history[history.length - 1];
 
-    /* Label for the next payroll run — next kinsena or next month, per the calendar */
+    /* Label for the next payroll run - next kinsena or next month, per the calendar */
     const nextLabel2 = periodName(nextPeriodOf(lastLabel)) + ' (Forecast)';
 
     const allLabels  = [...labels, nextLabel2];
 
-    /* Actual line — null for the forecast point so it doesn't extend */
+    /* Actual line - null for the forecast point so it doesn't extend */
     const actualLine = [...actuals, null];
-    /* RF forecast line — flat up to last actual, then the prediction */
+    /* RF forecast line - flat up to last actual, then the prediction */
     const rfLine     = [...Array(actuals.length - 1).fill(null), actuals[actuals.length - 1], rfPred];
     /* ARIMA forecast line */
     const arimaLine  = arimaPred
@@ -721,7 +721,7 @@ function renderChart(history, rfPred, arimaPred, field = 'total_net') {
                 tooltip: {
                     callbacks: {
                         label: ctx => ' ' + ctx.dataset.label + ': ' +
-                            (ctx.raw !== null ? fmt(ctx.raw) : '—'),
+                            (ctx.raw !== null ? fmt(ctx.raw) : '-'),
                     }
                 }
             },
@@ -782,7 +782,7 @@ function renderTable(history) {
     const tbody = document.getElementById('histBody');
     tbody.innerHTML = '';
 
-    /* Newest first — pass period_id from the API data for the detail modal */
+    /* Newest first - pass period_id from the API data for the detail modal */
     [...history].reverse().forEach(r => {
         const tr = document.createElement('tr');
         tr.style.cursor = 'pointer';
@@ -796,8 +796,8 @@ function renderTable(history) {
             <td><strong>${escHtml(r.label)}</strong></td>
             <td>${r.employee_count}</td>
             <td>${fmt(r.total_gross)}</td>
-            <td>${r.total_bonus > 0 ? '<span style="color:#16a34a;">' + fmt(r.total_bonus) + '</span>' : '—'}</td>
-            <td>${r.total_deductions > 0 ? '<span style="color:#dc2626;">' + fmt(r.total_deductions) + '</span>' : '—'}</td>
+            <td>${r.total_bonus > 0 ? '<span style="color:#16a34a;">' + fmt(r.total_bonus) + '</span>' : '-'}</td>
+            <td>${r.total_deductions > 0 ? '<span style="color:#dc2626;">' + fmt(r.total_deductions) + '</span>' : '-'}</td>
             <td><strong>${fmt(r.total_net)}</strong></td>
             <td title="The company's share of SSS, Employees' Compensation, PhilHealth and Pag-IBIG">${fmt(r.total_employer_share || 0)}</td>
             <td><strong>${fmt(r.total_labor_cost || (r.total_gross + r.total_bonus))}</strong></td>

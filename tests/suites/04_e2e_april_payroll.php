@@ -1,6 +1,6 @@
 <?php
 /*
- * 04 — End to end: a month of payroll the way the pharmacy runs it, through the real pages and endpoints.
+ * 04 - End to end: a month of payroll the way the pharmacy runs it, through the real pages and endpoints.
  *
  *   timesheet CSV → (browser parsing, ported) → api/create-period → api/save-daily-attendance → payroll
  *   → adjustments.php (bonus / deduction) → api/update-payroll (finalize / unlock) → print-doc.php (payslips, register)
@@ -35,7 +35,7 @@ function qa_expected(array $emp, array $payloadByRun, array $runs, array $upto):
     return $out;
 }
 
-T::suite('04 · End to end — April 2026 on a kinsenas calendar', function () {
+T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
     Fixtures::reset();
     $S = new stdClass();                              // the story's shared state
 
@@ -62,7 +62,7 @@ T::suite('04 · End to end — April 2026 on a kinsenas calendar', function () {
             $row = Fixtures::payroll($S->periods[$k])[$id] ?? null;
             $d = Scenario::diff($row, $exp[$name][$k]);
             $t->checks += 14;
-            if ($d) $t->same([], $d, "$when — $name, cut-off " . ($k + 1));
+            if ($d) $t->same([], $d, "$when - $name, cut-off " . ($k + 1));
         }
         $S->exp = $exp;
     };
@@ -111,14 +111,14 @@ T::suite('04 · End to end — April 2026 on a kinsenas calendar', function () {
         $t->ok(!isset($row['QA']), 'no line for the unregistered name');
     });
 
-    T::test('cut-off 1 by hand: ALMA — 13 duty days, 1 h undertime, 1 h overtime', function (T $t) use ($S) {
+    T::test('cut-off 1 by hand: ALMA - 13 duty days, 1 h undertime, 1 h overtime', function (T $t) use ($S) {
         $a = Fixtures::payroll($S->periods[0])[$S->emp['ALMA REYES']];
         // 480 × (13 × 8 − 1) / 8 = 6,180.00 + 1 h OT × 45 = 6,225.00 ; SSS credit 6,000 → 300.00 ; below the ₱10,417 semi-monthly exemption
         $t->moneyMap(['gross_pay' => '6225.00', 'ot_late_adj' => '45.00', 'sss' => '300.00', 'philhealth' => '0.00', 'pagibig' => '0.00',
                       'withholding_tax' => '0.00', 'net_pay' => '5925.00'], $a);
     });
 
-    T::test('upload cut-off 2: month settles — SSS/PhilHealth/Pag-IBIG/tax for the whole month, cut-off 1 untouched', function (T $t) use ($S, $verify) {
+    T::test('upload cut-off 2: month settles - SSS/PhilHealth/Pag-IBIG/tax for the whole month, cut-off 1 untouched', function (T $t) use ($S, $verify) {
         $before = Fixtures::payroll($S->periods[0]);
         $r = Fixtures::days($S->periods[1], $S->payload[1]);
         $t->same(true, $r['success'], json_encode($r));
@@ -148,7 +148,7 @@ T::suite('04 · End to end — April 2026 on a kinsenas calendar', function () {
             // the month's tax must not fall short of the monthly table; (over-withholding is a known defect, D-02)
             $t->ok($taxWithheld >= Ledger::tax('monthly', $taxable), "$name withheld ₱" . Ledger::fmt($taxWithheld) . ' for taxable ₱' . Ledger::fmt($taxable));
         }
-        // DANTE's month: gross 30,000 + 3 h OT ₱135 → tax 15% on (30,135 − 1,500 − 753.38 …) — checked in the ledger above; spot-check that tax exists
+        // DANTE's month: gross 30,000 + 3 h OT ₱135 → tax 15% on (30,135 − 1,500 − 753.38 …) - checked in the ledger above; spot-check that tax exists
         $d = Fixtures::payroll($S->periods[1])[$S->emp['DANTE LIM']];
         $t->ok((float)$d['withholding_tax'] > 0, 'a ₱30,000 monthly employee does pay withholding tax');
     });

@@ -1,6 +1,6 @@
 <?php
 /*
- * Fixtures — building blocks for scenarios: wipe the data, register employees, create pay
+ * Fixtures - building blocks for scenarios: wipe the data, register employees, create pay
  * periods and push attendance through the real endpoints, read the payroll back.
  */
 final class Fixtures

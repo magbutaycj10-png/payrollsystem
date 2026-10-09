@@ -17,7 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $note   = trim($_POST['review_note'] ?? '');
 
     if ($id && in_array($action, ['approve', 'reject'], true)) {
-        /* also recomputes the open payroll it touches — see decideLeave() */
+        /* also recomputes the open payroll it touches - see decideLeave() */
         $msg = decideLeave($db, $id, $action, $note, null);
     }
 }
@@ -49,8 +49,8 @@ foreach ($requests as $lr) {
     $detailMap[$lr['id']] = [
         'emp'        => $lr['emp_name'],
         'emp_id'     => $lr['emp_id'],
-        'branch'     => $lr['branch'] ?: '—',
-        'position'   => $lr['position'] ?: '—',
+        'branch'     => $lr['branch'] ?: '-',
+        'position'   => $lr['position'] ?: '-',
         'type'       => $lr['leave_type'],
         'from'       => date('M d, Y', strtotime($lr['date_from'])),
         'to'         => date('M d, Y', strtotime($lr['date_to'])),
@@ -58,10 +58,10 @@ foreach ($requests as $lr) {
         'days_label' => leaveDaysLabel($lr['date_from'], $lr['date_to'], $lr['rest_days'] ?? null),
         'reason'     => trim((string)$lr['reason']) !== '' ? $lr['reason'] : 'No reason given.',
         'status'     => $lr['status'],
-        'reviewer'   => $lr['reviewed_by'] ?: '—',
-        'note'       => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '—',
+        'reviewer'   => $lr['reviewed_by'] ?: '-',
+        'note'       => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '-',
         'submitted'  => date('M d, Y g:i A', strtotime($lr['created_at'])),
-        'reviewed'   => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '—',
+        'reviewed'   => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '-',
     ];
 }
 
@@ -72,7 +72,7 @@ $companyName = getSetting('company_name', 'My Company');
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leave Requests — Payroll System</title>
+    <title>Leave Requests - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
     <style>
@@ -136,7 +136,7 @@ $companyName = getSetting('company_name', 'My Company');
 
     <!-- Print header -->
     <div class="print-header">
-        <h2><?= htmlspecialchars($companyName) ?> — Leave Request Report</h2>
+        <h2><?= htmlspecialchars($companyName) ?> - Leave Request Report</h2>
         <p>Printed: <?= date('F j, Y g:i A') ?> &nbsp;&nbsp; Filter: <?= $filter ?></p>
     </div>
 
@@ -189,7 +189,7 @@ $companyName = getSetting('company_name', 'My Company');
                             <strong><?= htmlspecialchars($lr['emp_name']) ?></strong>
                             <br><small style="color:#9ca3af;"><?= htmlspecialchars($lr['emp_id']) ?></small>
                         </td>
-                        <td><?= htmlspecialchars($lr['branch'] ?: '—') ?></td>
+                        <td><?= htmlspecialchars($lr['branch'] ?: '-') ?></td>
                         <td><?= htmlspecialchars($lr['leave_type']) ?></td>
                         <td><?= date('M d, Y', strtotime($lr['date_from'])) ?></td>
                         <td><?= date('M d, Y', strtotime($lr['date_to'])) ?></td>
@@ -199,7 +199,7 @@ $companyName = getSetting('company_name', 'My Company');
                                 <?= $lr['status'] ?>
                             </span>
                         </td>
-                        <td style="font-size:.85rem;"><?= htmlspecialchars($lr['reviewed_by'] ?: '—') ?></td>
+                        <td style="font-size:.85rem;"><?= htmlspecialchars($lr['reviewed_by'] ?: '-') ?></td>
                         <td style="font-size:.8rem;color:#6b7280;"><?= date('M d, Y', strtotime($lr['created_at'])) ?></td>
                         <td class="no-print">
                             <button class="btn btn-ghost btn-sm" onclick="openLeave(<?= (int)$lr['id'] ?>)">Details</button>
@@ -266,7 +266,7 @@ function openLeave(id) {
     if (!d) return;
 
     document.getElementById('lmTitle').textContent    = d.emp;
-    document.getElementById('lmSub').textContent      = d.type + ' — submitted ' + d.submitted;
+    document.getElementById('lmSub').textContent      = d.type + ' - submitted ' + d.submitted;
     document.getElementById('lmEmpId').textContent    = d.emp_id;
     document.getElementById('lmBranch').textContent   = d.branch;
     document.getElementById('lmPosition').textContent = d.position;

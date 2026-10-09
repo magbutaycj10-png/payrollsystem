@@ -14,7 +14,7 @@ $defaultType = periodType(null);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Attendance — Payroll System</title>
+    <title>Upload Attendance - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -28,7 +28,7 @@ $defaultType = periodType(null);
     <div class="page-header">
         <div>
             <h1>Upload Attendance</h1>
-            <p>Bring in the hours for a pay period — then review and finalize it in Payroll Processing.</p>
+            <p>Bring in the hours for a pay period - then review and finalize it in Payroll Processing.</p>
         </div>
     </div>
 
@@ -62,7 +62,7 @@ $defaultType = periodType(null);
     fetch(payload.data)
         .then(function (res) { return res.blob(); })
         .then(function (blob) { handleFile(new File([blob], payload.name)); })
-        .catch(function () { /* ignore — the file can still be picked here */ });
+        .catch(function () { /* ignore - the file can still be picked here */ });
 })();
 </script>
 </body>

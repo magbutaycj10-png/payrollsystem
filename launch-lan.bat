@@ -1,5 +1,5 @@
 @echo off
-:: launch-lan.bat — same as launch.bat, but reachable from phones on the same Wi-Fi.
+:: launch-lan.bat - same as launch.bat, but reachable from phones on the same Wi-Fi.
 :: Binds to 0.0.0.0 instead of localhost, then prints the address to type on the phone.
 
 set BASE=%~dp0

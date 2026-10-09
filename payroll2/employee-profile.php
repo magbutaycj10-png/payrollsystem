@@ -40,7 +40,7 @@ $employees = $db->query("
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Employee Profiles — Payroll System</title>
+    <title>Employee Profiles - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
     <style>
@@ -83,10 +83,10 @@ $employees = $db->query("
                     <tr>
                         <td><strong><?= htmlspecialchars($e['emp_id']) ?></strong></td>
                         <td><?= htmlspecialchars($e['full_name']) ?></td>
-                        <td><?= htmlspecialchars($e['branch'] ?: '—') ?></td>
-                        <td><?= htmlspecialchars($e['phone'] ?: '—') ?></td>
+                        <td><?= htmlspecialchars($e['branch'] ?: '-') ?></td>
+                        <td><?= htmlspecialchars($e['phone'] ?: '-') ?></td>
                         <td style="max-width:200px;white-space:normal;font-size:.82rem;">
-                            <?= htmlspecialchars($e['address'] ?: '—') ?>
+                            <?= htmlspecialchars($e['address'] ?: '-') ?>
                         </td>
                         <td style="font-size:.82rem;">
                             <?php if ($e['emergency_name']): ?>
@@ -96,7 +96,7 @@ $employees = $db->query("
                                     <em><?= htmlspecialchars($e['emergency_relation']) ?></em>
                                 <?php endif; ?>
                             <?php else: ?>
-                                <span style="color:#9ca3af;">—</span>
+                                <span style="color:#9ca3af;">-</span>
                             <?php endif; ?>
                         </td>
                         <td style="color:#6b7280;font-size:.8rem;">

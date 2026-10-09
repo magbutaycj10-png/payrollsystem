@@ -1,5 +1,5 @@
 /* ============================================================
-   assets/css/style.css — Global Stylesheet
+   assets/css/style.css - Global Stylesheet
    ============================================================ */
 
 /* ── Reset ──────────────────────────────────────────────── */
@@ -36,7 +36,7 @@ body { display: flex; }
  * Watermark: fixed pseudo-element that sits behind the page content.
  * left: var(--sidebar-w) starts it right after the sidebar so the logo
  * appears centered only within the white content area, not the full page.
- * position:fixed means it never scrolls — no cut or jump when scrolling.
+ * position:fixed means it never scrolls - no cut or jump when scrolling.
  * pointer-events:none lets all clicks pass through to the real content.
  * z-index:-1 places it behind everything; .main-content gets z-index:0
  * (its normal stacking order) and naturally sits on top.
@@ -70,7 +70,7 @@ body::before {
     z-index: 100;
 }
 
-/* Brand section — displays the system name at the top of the sidebar */
+/* Brand section - displays the system name at the top of the sidebar */
 .sidebar-brand {
     padding: 22px 20px 18px;
     border-bottom: 1px solid rgba(255,255,255,.07);
@@ -168,7 +168,7 @@ body::before {
 .card-value { font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em; }
 .card-sub   { font-size: .78rem; color: var(--text-muted); margin-top: 4px; }
 
-/* Colour variants intentionally neutral — every card renders plain.
+/* Colour variants intentionally neutral - every card renders plain.
    The classes are kept so the markup does not need to change. */
 .card-accent,
 .card-green,
@@ -304,9 +304,9 @@ body::before {
 
 /* ── Status messages ─────────────────────────────────────── */
 .status-msg { padding: 11px 15px; border-radius: 8px; font-size: .875rem; margin-top: 14px; display: none; }
-.status-msg.show-success { display: block; background: #f0fdf4; color: #166534; border-left: 4px solid #22c55e; }
-.status-msg.show-error   { display: block; background: #fff1f2; color: #9f1239; border-left: 4px solid #f43f5e; }
-.status-msg.show-info    { display: block; background: #eff6ff; color: #1e40af; border-left: 4px solid #3b82f6; }
+.status-msg.show-success { display: block; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.status-msg.show-error   { display: block; background: #fff1f2; color: #9f1239; border: 1px solid #fecdd3; }
+.status-msg.show-info    { display: block; background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
 
 /* ── Column mapping rows (upload page) ───────────────────── */
 .map-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; flex-wrap: wrap; }
@@ -453,13 +453,13 @@ body::before {
     body { background: #fff; }
 }
 
-/* ── Responsive — Tablet ─────────────────────────────────── */
+/* ── Responsive - Tablet ─────────────────────────────────── */
 @media (max-width: 1024px) {
     :root { --sidebar-w: 210px; }
     .main-content { padding: 28px 28px; }
 }
 
-/* ── Responsive — Mobile (hamburger drawer) ──────────────── */
+/* ── Responsive - Mobile (hamburger drawer) ──────────────── */
 @media (max-width: 768px) {
     .sidebar-toggle { display: flex; }
 
@@ -489,7 +489,7 @@ body::before {
     .map-row select         { width: 100%; min-width: unset; }
 }
 
-/* ── Responsive — Small mobile ───────────────────────────── */
+/* ── Responsive - Small mobile ───────────────────────────── */
 @media (max-width: 480px) {
     .main-content   { padding: 12px 10px; padding-top: 62px; }
     .card-grid      { grid-template-columns: 1fr; }
@@ -508,4 +508,40 @@ body::before {
 
     .btn    { padding: 8px 14px; font-size: .83rem; }
     .btn-sm { padding: 5px 10px; font-size: .76rem; }
+}
+
+/* ── Ease of use (no change to colours or layout) ────────── */
+html { scroll-behavior: smooth; }
+
+/* Keyboard users can always see where they are */
+a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible,
+.btn:focus-visible, .nav-item:focus-visible, .drop-zone:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+/* Figures line up in columns and are easy to compare */
+.data-table td, .card-value, .co-card .v { font-variant-numeric: tabular-nums; }
+
+/* Pressed buttons respond; long labels in a narrow cell do not push the table apart */
+.btn:active:not(:disabled) { transform: translateY(1px); }
+
+/* Wide tables: header and the name column stay in view while scrolling */
+.table-wrap.table-sticky { max-height: 72vh; overflow: auto; }
+.table-wrap.table-sticky .data-table thead th { position: sticky; top: 0; z-index: 2; }
+.table-wrap.table-sticky .data-table th:nth-child(2),
+.table-wrap.table-sticky .data-table td:nth-child(2) {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+    box-shadow: 1px 0 0 var(--border);
+}
+.table-wrap.table-sticky .data-table thead th:nth-child(2) { z-index: 3; background: #1e293b; }
+.table-wrap.table-sticky .data-table tr:hover td:nth-child(2) { background: #f8fafc; }
+
+/* Quick filter above a table */
+.table-filter { width: 220px; max-width: 100%; }
+.table-empty-row td { text-align: center; color: var(--text-muted); padding: 22px; }
+
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { transition: none !important; }
+    .card:hover { transform: none; }
 }

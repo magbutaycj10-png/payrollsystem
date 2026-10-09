@@ -1,6 +1,6 @@
 <?php
 /*
- * employee/month-attendance.php — the logged-in employee's own month so far,
+ * employee/month-attendance.php - the logged-in employee's own month so far,
  * day by day, as their attendance gets uploaded.
  * Body: includes/month-attendance-view.php
  */
@@ -21,7 +21,7 @@ $maSelf = '/employee/month-attendance.php';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Attendance — Employee Portal</title>
+    <title>My Attendance - Employee Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>

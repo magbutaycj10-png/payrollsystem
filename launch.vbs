@@ -1,4 +1,4 @@
-' launch.vbs — double-click this to start the Payroll System silently.
+' launch.vbs - double-click this to start the Payroll System silently.
 ' Finds launch.bat in the same folder as this .vbs file automatically,
 ' so it works no matter what drive or folder the app is copied to.
 

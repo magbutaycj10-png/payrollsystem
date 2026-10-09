@@ -1,6 +1,6 @@
 <?php
 /*
- * 09 — Controls: what a payroll system must refuse, flag or escape — and where it falls short of the Labor Code.
+ * 09 - Controls: what a payroll system must refuse, flag or escape - and where it falls short of the Labor Code.
  *
  *   input sanity     implausible hours, negative rates and salaries
  *   compliance       overtime premium (Labor Code Art. 87), what the forecast measures (labor cost, not take-home)
@@ -39,7 +39,7 @@ T::suite('09 · Controls & compliance', function () {
         Http::page('settings.php', ['overtime_rate' => '-45', 'late_rate' => 'abc']);
         $ot = (string)getDB()->query("SELECT setting_value FROM settings WHERE setting_key = 'overtime_rate'")->fetchColumn();
         $late = (string)getDB()->query("SELECT setting_value FROM settings WHERE setting_key = 'late_rate'")->fetchColumn();
-        $t->ok($ot === '45' && $late === '80', "overtime_rate is now \"$ot\" and late_rate \"$late\" — a negative rate would make overtime reduce pay");
+        $t->ok($ot === '45' && $late === '80', "overtime_rate is now \"$ot\" and late_rate \"$late\" - a negative rate would make overtime reduce pay");
     }, ['defect' => 'D-16']);
 
     T::test('Employee Management refuses a negative base salary', function (T $t) {
@@ -91,7 +91,7 @@ T::suite('09 · Controls & compliance', function () {
         $res = Http::call('api/forecast-data.php', ['method' => 'GET', 'session' => Http::admin()]);
         $row = $res['json']['data'][0] ?? [];
         $t->ok(isset($row['total_labor_cost']) || isset($row['total_employer_share']),
-            'forecast-data.php offers: ' . implode(', ', array_keys($row)) . ' — the models predict "total_net", which excludes the employer\'s contributions and any bonus deducted from it');
+            'forecast-data.php offers: ' . implode(', ', array_keys($row)) . ' - the models predict "total_net", which excludes the employer\'s contributions and any bonus deducted from it');
     }, ['defect' => 'D-06']);
 
     T::test('correcting cut-off 1 after cut-off 2 was finalized still leaves the month tax and contributions exact', function (T $t) {

@@ -1,8 +1,8 @@
 <?php
 /*
- * 06 — The accountant's tie-outs.
+ * 06 - The accountant's tie-outs.
  *
- * Properties that must hold for EVERY payslip and EVERY month, whatever the inputs — checked over a
+ * Properties that must hold for EVERY payslip and EVERY month, whatever the inputs - checked over a
  * generated population (200 employee-months through the real engine) rather than hand-picked numbers:
  *   · each payslip foots (gross + bonus − deductions = net) and has no negative component
  *   · a month ends exact: the contributions taken over its runs are the contribution on the month's pay
@@ -61,7 +61,7 @@ T::suite('06 · Accounting tie-outs', function () {
             }
 
             // 1b ─ the month's TAX ends exact too: what was withheld over the month is the monthly BIR table on the month's taxable pay
-            //      (the original app keeps what it over-withheld — D-02 — so this is checked on the audit-fixed app)
+            //      (the original app keeps what it over-withheld - D-02 - so this is checked on the audit-fixed app)
             $lastRun = $spec['runs'][count($spec['runs']) - 1];
             if (AppCopy::hasFixes() && Ledger::isFinal($lastRun['type'], $lastRun['start'], $lastRun['end'])) {
                 $prevTaxable = 0; $taxSum = 0; $nRuns = count($c['app']);

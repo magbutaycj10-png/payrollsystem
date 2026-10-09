@@ -1,4 +1,4 @@
-# Biometric Attendance Sync — EPH A6 → Aiven → Payroll
+# Biometric Attendance Sync - EPH A6 → Aiven → Payroll
 
 Zero-touch background agent that pulls punches off the EPH A6 fingerprint
 terminal on a Windows client PC and pushes them to the payroll system on
@@ -32,8 +32,8 @@ python probe_device.py
 | Probe result | What it means | What to do |
 |---|---|---|
 | A CH340/CH341 port answers the handshake | The port is a real UART | Leave `serial_enabled = true`. Copy the baud/framing it prints into `config.ini`. |
-| A COM port appears but nothing answers | UART present, but this OEM's frame format differs | Send me `probe_report.txt` — the raw bytes are enough to decode it. Meanwhile the file watcher covers you. |
-| No COM port at all | The port is for **file export**, not serial | Set `serial_enabled = false`. Use the file watcher — already proven against your sample. |
+| A COM port appears but nothing answers | UART present, but this OEM's frame format differs | Send me `probe_report.txt` - the raw bytes are enough to decode it. Meanwhile the file watcher covers you. |
+| No COM port at all | The port is for **file export**, not serial | Set `serial_enabled = false`. Use the file watcher - already proven against your sample. |
 
 The last row is the most likely one, and it is not a failure. Your
 `samples/Individual Report_00001_09_001.XLS` is exactly what these terminals
@@ -45,7 +45,7 @@ Individual Report_00001_09_001.XLS: 1 punches (employee 00001)
 ```
 
 With `drives_auto = true`, plugging that stick into the PC is the whole
-workflow — the agent notices the file, parses it, uploads it, and never
+workflow - the agent notices the file, parses it, uploads it, and never
 re-parses it unless it changes.
 
 ### How the export files map to the database
@@ -62,11 +62,11 @@ Every punch cell becomes one `attendance_logs` row:
 | XLS source | → Column | Notes |
 |---|---|---|
 | `ID:00001` header | `employee_id` | Terminal number, not payroll `emp_id`. Resolved via `biometric_employee_map` at rollup time. |
-| `MM.DD` cell + year from `Date:26.09.01~...` | `punch_time` | The day cells carry no year — it comes from the period header. Dec→Jan rollover handled. |
+| `MM.DD` cell + year from `Date:26.09.01~...` | `punch_time` | The day cells carry no year - it comes from the period header. Dec→Jan rollover handled. |
 | *which* column the time sat in | `punch_state` | See mapping below |
-| — | `verify_mode` | `0` for file imports; only serial/network carry it |
+| - | `verify_mode` | `0` for file imports; only serial/network carry it |
 | `config.ini` → `device_id` | `device_id` | |
-| — | `source` | `'file'`, `'serial'` or `'network'` |
+| - | `source` | `'file'`, `'serial'` or `'network'` |
 
 Column → `punch_state`:
 
@@ -81,24 +81,24 @@ Column → `punch_state`:
 
 **The device's own totals are deliberately ignored.** The header row carries
 `Working days:30`, `Attendance days:1`, `Late Num:0`, `Early Num:0`,
-`Absences days:29` — but those are computed with the *terminal's* shift rules,
+`Absences days:29` - but those are computed with the *terminal's* shift rules,
 which are not your payroll's. `rollup-punches.php` recomputes hours, late and
 overtime from the raw punch times using the `settings` values instead, so one
 set of rules governs pay. If you ever want the device figures for
-cross-checking, they are easy to add — but they should not feed pay.
+cross-checking, they are easy to add - but they should not feed pay.
 
 ### Why not `pyzk` over the cable?
 
-`pyzk` only speaks the ZK protocol over **UDP/TCP 4370** — its `ZK()` takes
+`pyzk` only speaks the ZK protocol over **UDP/TCP 4370** - its `ZK()` takes
 an IP address and it has no serial transport at all. A CH340 link is a COM
 port, which is a different channel entirely. So the agent implements the ZK
 command frames over serial directly, and keeps `pyzk` for the `[network]`
 path if you ever put the terminal on the LAN (that path is the most reliable
-of the three — use it if the hardware allows).
+of the three - use it if the hardware allows).
 
 ---
 
-## Part 1 — Database
+## Part 1 - Database
 
 Apply once against Aiven:
 
@@ -136,7 +136,7 @@ silently dropped.
 
 ---
 
-## Part 2 — Render endpoint
+## Part 2 - Render endpoint
 
 `payroll2/api/biometric-ingest.php` deploys with the rest of the app. Live at:
 
@@ -152,7 +152,7 @@ php tools/issue-api-key.php --list
 php tools/issue-api-key.php --revoke 3
 ```
 
-The key prints **once** — only its hash is stored. A key pinned to a
+The key prints **once** - only its hash is stored. A key pinned to a
 `device_id` can only ever write as that terminal, so a leaked key cannot
 forge another device's attendance.
 
@@ -166,7 +166,7 @@ curl -X POST https://YOUR-APP.onrender.com/api/biometric-ingest.php \
         {"employee_id":"00001","punch_time":"2026-09-24 15:06:00","punch_state":0}]}'
 
 # {"ok":true,"received":1,"inserted":1,"duplicates":0,"rejected":0}
-# Send it twice — the second returns duplicates:1, inserted:0.
+# Send it twice - the second returns duplicates:1, inserted:0.
 ```
 
 > **Render free tier sleeps.** A cold start takes ~50s and the first POST may
@@ -175,7 +175,7 @@ curl -X POST https://YOUR-APP.onrender.com/api/biometric-ingest.php \
 
 ---
 
-## Part 3 — Build the agent
+## Part 3 - Build the agent
 
 On any Windows PC with Python 3.9+ (needed **once**, not on the clients):
 
@@ -198,19 +198,19 @@ pyinstaller --noconfirm --onedir --windowed ^
 lazily inside functions, so PyInstaller's static analysis misses them and the
 exe would fail at runtime instead of at build time.
 
-Output is `dist\biometric_agent\` — the exe plus `_internal\`, `config.ini`
+Output is `dist\biometric_agent\` - the exe plus `_internal\`, `config.ini`
 and `ca.pem`.
 
 > **`--onedir` is a folder, not a lone file.** The exe will not run without
 > `_internal\` beside it, so it cannot simply be dropped into the Startup
 > folder. `install_service.bat` handles this by installing to a stable
 > location and putting a **shortcut** in Startup. If you genuinely want one
-> portable file, swap `--onedir` for `--onefile` — but `config.ini` still has
+> portable file, swap `--onedir` for `--onefile` - but `config.ini` still has
 > to travel alongside it either way.
 
 ---
 
-## Part 4 — Deploy to a client PC
+## Part 4 - Deploy to a client PC
 
 Copy the whole `dist\` folder to the PC, then, **as Administrator the first
 time** (the driver needs it):
@@ -227,7 +227,7 @@ It will:
 3. Create `BiometricAgent.lnk` in
    `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup` (falling back to
    an `HKCU\...\Run` key if the shortcut fails).
-4. Start the agent immediately — no reboot.
+4. Start the agent immediately - no reboot.
 5. Open `config.ini` in Notepad so you cannot forget the last step.
 
 Set these two, and nothing else is required:
@@ -241,7 +241,7 @@ api_key = <the key from issue-api-key.php>
 ### Moving the terminal to a different PC
 
 Run `install_service.bat` on the new PC and `uninstall_service.bat` on the
-old one. Nothing else — no COM port to configure, no software to open. The
+old one. Nothing else - no COM port to configure, no software to open. The
 agent re-detects the port by USB VID:PID, so `COM3` on one PC and `COM17` on
 the next makes no difference.
 
@@ -250,7 +250,7 @@ overlap. `biometric_agent_state` shows you which host reported last.
 
 ---
 
-## Part 5 — Punches into payroll
+## Part 5 - Punches into payroll
 
 `attendance_logs` is a staging table; it does not touch payroll on its own.
 
@@ -266,7 +266,7 @@ accepts:
 ```
 
 It deliberately does **not** write to `biometric_daily`, `attendance` or
-`payroll` itself — it hands the rows back so your existing Daily Biometrics
+`payroll` itself - it hands the rows back so your existing Daily Biometrics
 flow posts them, keeping all the payroll maths (SSS, PhilHealth, Pag-IBIG,
 BIR brackets, OT and late rates) in one place.
 
@@ -306,7 +306,7 @@ GRANT INSERT, UPDATE, SELECT ON defaultdb.biometric_agent_state TO 'biometric_ag
 
 **Unrelated but worth doing:** `payroll2/includes/db.php:26` has your live
 Aiven password as a literal, and it is committed to git. Rotate it in the
-Aiven console and move it to an environment variable on Render — the code
+Aiven console and move it to an environment variable on Render - the code
 already prefers `getenv('DB_PASS')`, so only the fallback needs emptying.
 
 ---
@@ -314,7 +314,7 @@ already prefers `getenv('DB_PASS')`, so only the fallback needs emptying.
 ## Troubleshooting
 
 Log: `%LOCALAPPDATA%\BiometricAgent\logs\biometric_agent.log`
-(`--windowed` means there is no console — the log is the only output.)
+(`--windowed` means there is no console - the log is the only output.)
 
 | Symptom | Cause | Fix |
 |---|---|---|
@@ -322,11 +322,11 @@ Log: `%LOCALAPPDATA%\BiometricAgent\logs\biometric_agent.log`
 | No COM port ever appears | Driver missing, or export-only port | Run `CH341SER.EXE`; if still nothing, use the file watcher |
 | `device wants a comm key` | Terminal has a comm password set | Clear it in the terminal menu |
 | `api rejected the key (403)` | Key revoked, or typo'd | `--list` to check, re-issue if needed |
-| `api unreachable` | Render cold start / offline | None — it retries automatically |
+| `api unreachable` | Render cold start / offline | None - it retries automatically |
 | Punches land but payroll is empty | Rollup not run, or IDs unmapped | Call `rollup-punches.php`; check `unmatched[]` |
 | Nothing at all in the log | Agent not running | Check Task Manager, re-run `install_service.bat` |
 
-Raise detail with `log_level = DEBUG` in `config.ini` — it is re-read every
+Raise detail with `log_level = DEBUG` in `config.ini` - it is re-read every
 poll, so no restart is needed.
 
 ---
@@ -336,7 +336,7 @@ poll, so no restart is needed.
 ```
 agent/
   biometric_agent.py       the worker (serial + network + file transports)
-  probe_device.py          run this FIRST — identifies your hardware
+  probe_device.py          run this FIRST - identifies your hardware
   config.ini               all settings; lives beside the exe
   requirements.txt
   build.bat                PyInstaller packaging

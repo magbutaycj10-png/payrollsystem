@@ -1,6 +1,6 @@
 <?php
 /*
- * AppCopy — the suite runs the application from a fresh COPY of payroll2/, never from the original:
+ * AppCopy - the suite runs the application from a fresh COPY of payroll2/, never from the original:
  *
  *   • includes/db.php auto-discovers payroll2/ca.pem (the Aiven certificate) and then insists on
  *     SSL, which a local test database cannot offer. The copy leaves every *.pem out.
@@ -32,7 +32,7 @@ final class AppCopy
         return realpath(dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'payroll2');
     }
 
-    /** true when the tree under test carries the 2026-10-07 audit fixes (they define PAYROLL_AUDIT_FIXES) — false only for an older copy */
+    /** true when the tree under test carries the 2026-10-07 audit fixes (they define PAYROLL_AUDIT_FIXES) - false only for an older copy */
     public static function hasFixes(): bool { return defined('PAYROLL_AUDIT_FIXES'); }
 
     public static function root(): string { return self::$root ?: throw new RuntimeException('AppCopy::prepare() not called'); }

@@ -5,7 +5,7 @@
  *
  * Any file is first turned into one flat table by attendance-formats.js. Then:
  *   - a table with a Date column is a DAY-BY-DAY file: its days are added to
- *     the pay period (api/save-daily-attendance.php) — same day again replaces
+ *     the pay period (api/save-daily-attendance.php) - same day again replaces
  *   - anything else is a TOTALS file: one line per employee, which replaces the
  *     pay period's attendance (api/save-attendance.php)
  */
@@ -45,7 +45,7 @@ function esc(str) {
 
 /*
  * Plain number: strips currency symbols, thousands separators and stray text.
- * Money and counts only — never call this on a duration (see toHours).
+ * Money and counts only - never call this on a duration (see toHours).
  */
 function num(v) {
     if (typeof v === 'number') return v;
@@ -55,7 +55,7 @@ function num(v) {
 /*
  * Duration -> decimal hours.
  *
- * Printed timesheets quote worked time as HH:MM — "08:29" is eight hours and
+ * Printed timesheets quote worked time as HH:MM - "08:29" is eight hours and
  * twenty-nine minutes, which num() would have read as 829. Three shapes arrive
  * here and all three have to land on 8.4833:
  *   "08:29"   a CSV exported from a timesheet    -> h + m/60
@@ -84,7 +84,7 @@ function toHours(v) {
     if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) return parseFloat(s.replace(/,/g, ''));
     /* Text without a single digit ("-", "N/A", "ABSENT") is just "no hours" */
     if (!/\d/.test(s)) return 0;
-    /* Digits that are neither a duration nor a decimal: "08:60", "8h30m", "1,5", "8:5:3:1". These are NaN — unreadable —
+    /* Digits that are neither a duration nor a decimal: "08:60", "8h30m", "1,5", "8:5:3:1". These are NaN - unreadable -
        never a made-up number. They used to go through num(), which strips the punctuation: "08:60" became 860 hours. */
     return NaN;
 }
@@ -120,7 +120,7 @@ function toDate(v) {
     const mdY = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
     if (mdY) return mdY[3] + '-' + mdY[1].padStart(2, '0') + '-' + mdY[2].padStart(2, '0');
 
-    /* "March 09, 2026" and friends — let the browser try before giving up */
+    /* "March 09, 2026" and friends - let the browser try before giving up */
     const parsed = new Date(s);
     if (!isNaN(parsed)) return toDate(parsed);
 
@@ -153,7 +153,7 @@ function showStatus(msg, type) {
 }
 
 /* ============================================================
-   Step 1 — pay period
+   Step 1 - pay period
    Every period carries its own schedule. The switch shows only that
    kind of cut-off; the admin's form fills dates and label from the
    schedule and month.
@@ -227,7 +227,7 @@ async function createPeriod() {
         if (det) det.open = false;
         showStatus(`Pay period "${label}" created. Now upload its attendance file below.`, 'success');
     } else if (data.clash) {
-        /* The period in the way may sit under another schedule, hidden from the list — offer it */
+        /* The period in the way may sit under another schedule, hidden from the list - offer it */
         if (confirm(data.error + `\n\nSelect “${data.clash.label}” now?`)) {
             usePeriod(String(data.clash.id));
             const det = document.getElementById('createDetails');
@@ -257,7 +257,7 @@ function setSchedule(type) {
         });
         if (!firstShown) {                     /* say why the list is empty */
             const what = type === 'All' ? 'No pay periods yet' : `No ${type} pay periods yet`;
-            sel.prepend(new Option(`— ${what} — ${UPLOAD_CFG.createHint} —`, ''));
+            sel.prepend(new Option(`- ${what} - ${UPLOAD_CFG.createHint} -`, ''));
             sel.value = '';
         } else {
             const cur = sel.options[sel.selectedIndex];
@@ -270,7 +270,7 @@ function setSchedule(type) {
 
 /* ============================================================
    Device-ID linking
-   A biometric device report has no name — only the terminal's own
+   A biometric device report has no name - only the terminal's own
    user number ("ID:00001"). The person picks the employee once; the
    choice is saved (biometric_employee_map) and pre-selected next time.
    The page supplies window.UPLOAD_EMPLOYEES and window.UPLOAD_BIOMAP.
@@ -299,12 +299,12 @@ function renderLinkBox(hdrs, rows) {
         <p class="panel-section-title">Who is this?</p>
         <p style="font-size:.82rem;color:#64748b;margin:-4px 0 12px;">
             This biometric report has no name, only the device&rsquo;s user number.
-            Pick the employee once &mdash; it is remembered for next time.
+            Pick the employee once - it is remembered for next time.
         </p>
         <div class="map-grid">${ids.map(id => `
             <div class="map-item">
                 <label>Device ID ${esc(id)} <span class="map-req">required</span></label>
-                <select data-device-id="${esc(id)}"><option value="">— choose employee —</option>${options}</select>
+                <select data-device-id="${esc(id)}"><option value="">- choose employee -</option>${options}</select>
             </div>`).join('')}
         </div>`;
     box.querySelectorAll('select[data-device-id]').forEach(sel => {
@@ -322,7 +322,7 @@ function collectLinks() {
     return { map, missing };
 }
 
-/* A row's name — or, for a nameless device row, the linked employee's */
+/* A row's name - or, for a nameless device row, the linked employee's */
 function rowName(row, nameCol, idCol, links) {
     const n = String(row[nameCol] ?? '').trim();
     if (n || idCol < 0) return n;
@@ -332,7 +332,7 @@ function rowName(row, nameCol, idCol, links) {
 }
 
 /* ============================================================
-   Step 2 — the file
+   Step 2 - the file
    ============================================================ */
 const dz = document.getElementById('dropZone');
 dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
@@ -370,7 +370,7 @@ function handleFile(file) {
     const reader = new FileReader();
     reader.onload = function (e) {
         try {
-            /* cellDates keeps time cells as real Dates — toHours reads their clock. */
+            /* cellDates keeps time cells as real Dates - toHours reads their clock. */
             const wb    = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
             const table = readAttendanceWorkbook(wb);   /* attendance-formats.js */
 
@@ -420,22 +420,22 @@ function applyKind(table) {
     const where = { timesheet: 'Timesheet', device: 'Biometric device report', table: 'Spreadsheet' }[fileKind] || 'File';
     const box = document.getElementById('kindNote');
     box.innerHTML = isDaily
-        ? `<div class="up-kind daily"><div><b>Day-by-day file — ${esc(where)}</b>
+        ? `<div class="up-kind daily"><div><b>Day-by-day file - ${esc(where)}</b>
                ${parsedData.length} day record(s) for ${people} employee(s).
                Saving <b>adds these days</b> to the pay period; a day already there is replaced, other days are kept.
                ${fileKind === 'device' ? '<br>Hours past each employee\'s duty day (8 h, or their own) are paid as overtime when saved.' : ''}
                ${table.note ? '<br><span style="opacity:.8">' + esc(table.note) + '</span>' : ''}</div></div>`
-        : `<div class="up-kind ${oneDay ? 'daily' : 'totals'}"><div><b>No Date column — what is this file?</b>
+        : `<div class="up-kind ${oneDay ? 'daily' : 'totals'}"><div><b>No Date column - what is this file?</b>
                ${parsedData.length} line(s).
                <label style="display:block;margin-top:6px;cursor:pointer;">
                  <input type="radio" name="noDateMode" ${oneDay ? 'checked' : ''} onchange="setOneDay(document.getElementById('oneDayDate').value || todayIso())">
                  <b style="display:inline;">One day's attendance</b>, for
                  <input type="date" id="oneDayDate" value="${esc(oneDay || todayIso())}" onchange="setOneDay(this.value)" style="padding:2px 6px;">
-                 — saving <b style="display:inline;">adds this day</b>; days already saved are kept.
+                 - saving <b style="display:inline;">adds this day</b>; days already saved are kept.
                </label>
                <label style="display:block;margin-top:4px;cursor:pointer;">
                  <input type="radio" name="noDateMode" ${oneDay ? '' : 'checked'} onchange="setOneDay('')">
-                 <b style="display:inline;">Totals for the whole pay period</b> — saving <b style="display:inline;">replaces</b>
+                 <b style="display:inline;">Totals for the whole pay period</b> - saving <b style="display:inline;">replaces</b>
                  the period's attendance. A person on several lines has their hours added together.
                </label></div></div>`;
     document.querySelectorAll('[data-daily-only]').forEach(el => { el.hidden = !isDaily; });
@@ -461,7 +461,7 @@ function setOneDay(date) {
 }
 
 function populateMappingDropdowns() {
-    const blank = '<option value="">— not used —</option>';
+    const blank = '<option value="">- not used -</option>';
     const opts  = headers.map((h, i) => `<option value="${i}">${esc(h)}</option>`).join('');
     MAP_IDS.forEach(id => {
         const el = document.getElementById(id);
@@ -580,7 +580,7 @@ function usePeriod(id) {
 }
 
 /* ============================================================
-   Step 3 — save
+   Step 3 - save
    ============================================================ */
 async function processAndSave() {
     const p = selectedPeriod();
@@ -617,16 +617,16 @@ async function saveDaily(p, c, nameCol, idCol, links) {
     const all = parsedData.map(row => ({
         emp_name:       rowName(row, nameCol, idCol, links.map),
         att_date:       isDaily ? toDate(row[c.date]) : oneDay,
-        /* no Hours column: a full duty day — the server knows each employee's (8 h, 10 h ...) */
+        /* no Hours column: a full duty day - the server knows each employee's (8 h, 10 h ...) */
         hours_worked:   c.hours !== null ? toHours(row[c.hours]) : null,
         overtime_hours: toHours(c.overtime !== null ? row[c.overtime] : 0),
         late_hours:     toHours(c.late !== null ? row[c.late] : 0),
-        /* the timesheet's undertime, if it has that column — else the server works it out */
+        /* the timesheet's undertime, if it has that column - else the server works it out */
         undertime_hours: underCol >= 0 && row[underCol] !== '' && row[underCol] != null ? toHours(row[underCol]) : null,
         /* a day the timesheet marks OFF: a day off, not an absence */
         day_off:        remarkCol >= 0 && OFF_REMARKS.includes(normHeader(row[remarkCol])),
     })).filter(r => r.emp_name && r.att_date);
-    /* A cell that could not be read ("08:60") is never sent on as a number — a day sent without hours is paid as a
+    /* A cell that could not be read ("08:60") is never sent on as a number - a day sent without hours is paid as a
        full duty day. Those days are held back and named. */
     const unreadable = all.filter(r => !hoursOk(r.hours_worked, r.overtime_hours, r.late_hours, r.undertime_hours));
     const rows = all.filter(r => hoursOk(r.hours_worked, r.overtime_hours, r.late_hours, r.undertime_hours))
@@ -659,7 +659,7 @@ async function saveDaily(p, c, nameCol, idCol, links) {
     if (outside > 0) notes.push(`${outside} day record(s) outside the pay period were skipped.`);
     Object.entries(data.elsewhere || {}).forEach(([label, n]) =>
         notes.push(`${n} day record(s) are already saved in ${label} and were not counted again.`));
-    if (skipped.length) notes.push(`Not saved — no matching employee: ${skipped.slice(0, 6).join(', ')}${skipped.length > 6 ? ' and ' + (skipped.length - 6) + ' more' : ''}. Check the spelling in Employee Management.`);
+    if (skipped.length) notes.push(`Not saved - no matching employee: ${skipped.slice(0, 6).join(', ')}${skipped.length > 6 ? ' and ' + (skipped.length - 6) + ' more' : ''}. Check the spelling in Employee Management.`);
     const offNote = data.days_off ? ` (${data.days_off} of them day(s) off)` : '';
     showResult(p, `${data.inserted} day record(s) saved to ${p.label}${offNote}. Pay is now computed for ${data.count} employee(s).`, notes);
 }
@@ -774,7 +774,7 @@ function showMismatchModal(mismatches, savedCount) {
 
     document.getElementById('mismatchAlertText').textContent = savedCount > 0
         ? `${savedCount} employee(s) saved, but some names need a look.`
-        : 'Nothing was saved — no name in the file matched an employee.';
+        : 'Nothing was saved - no name in the file matched an employee.';
     const sub = [];
     if (csvOnly) sub.push(`${csvOnly} name(s) in the file match no employee (not saved).`);
     if (outside) sub.push(`${outside} employee(s) are not assigned to you (not saved).`);

@@ -1,6 +1,6 @@
 <?php
 /*
- * 03 — The pay engine against the ledger.
+ * 03 - The pay engine against the ledger.
  *
  * Worked examples first (every figure derived by hand and written out, so an accountant can
  * check them line by line), then the same engine against the ledger on hundreds of generated
@@ -15,7 +15,7 @@ T::suite('03 · Pay engine vs ledger', function () {
 
     /* ================================================================== worked examples */
 
-    T::test('Example A — daily-rate ₱480, April 2026, two cut-offs: every figure derived by hand', function (T $t) {
+    T::test('Example A - daily-rate ₱480, April 2026, two cut-offs: every figure derived by hand', function (T $t) {
         $d1 = Scenario::fullDays('2026-04-01', '2026-04-15');
         $d1['2026-04-07'] = ['h' => '7.00', 'under' => '1'];       // one hour short, as the sheet states
         $d1['2026-04-09'] = ['h' => '8.00', 'ot' => '2', 'under' => '0'];
@@ -34,7 +34,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($b, $r['exp'][1]), 'ledger agrees on cut-off 2');
     });
 
-    T::test('Example B — kinsenas ₱15,000 (₱30,000 a month): absence, undertime, overtime, semi-monthly tax then monthly settlement', function (T $t) {
+    T::test('Example B - kinsenas ₱15,000 (₱30,000 a month): absence, undertime, overtime, semi-monthly tax then monthly settlement', function (T $t) {
         $d1 = Scenario::fullDays('2026-04-01', '2026-04-15');
         unset($d1['2026-04-08']);                                    // unexcused absence (a Wednesday)
         $d1['2026-04-10'] = ['h' => '6.00', 'under' => '2'];         // 2 h undertime
@@ -57,7 +57,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($b, $r['exp'][1]));
     });
 
-    T::test('Example C — monthly ₱75,000, one monthly run: SSS cap, PhilHealth 2.5%, Pag-IBIG cap and the 25% bracket', function (T $t) {
+    T::test('Example C - monthly ₱75,000, one monthly run: SSS cap, PhilHealth 2.5%, Pag-IBIG cap and the 25% bracket', function (T $t) {
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '75000.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
@@ -67,7 +67,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]));
     });
 
-    T::test('Example D — weekly run for a ₱20,000 monthly employee: 12/52 of a month, weekly tax table', function (T $t) {
+    T::test('Example D - weekly run for a ₱20,000 monthly employee: 12/52 of a month, weekly tax table', function (T $t) {
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '20000.00'],
             'runs' => [['start' => '2026-04-06', 'end' => '2026-04-12', 'type' => 'Weekly']],
             'days' => Scenario::fullDays('2026-04-06', '2026-04-12')]);
@@ -76,7 +76,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]));
     });
 
-    T::test('Example E — pay of ₱1,200 a month: Pag-IBIG at 1%, SSS and PhilHealth minimums', function (T $t) {
+    T::test('Example E - pay of ₱1,200 a month: Pag-IBIG at 1%, SSS and PhilHealth minimums', function (T $t) {
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '1200.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
@@ -84,7 +84,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]));
     });
 
-    T::test('Example F — switches: only PhilHealth deducted for a ₱30,000 monthly employee (15% bracket)', function (T $t) {
+    T::test('Example F - switches: only PhilHealth deducted for a ₱30,000 monthly employee (15% bracket)', function (T $t) {
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '30000.00', 'deduct_sss' => 0, 'deduct_pagibig' => 0],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
@@ -93,7 +93,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]));
     });
 
-    T::test('Example G — a 10-hour duty day (₱620): undertime costs rate ÷ 10 an hour; approved leave is paid; pending leave is an unpaid absence', function (T $t) {
+    T::test('Example G - a 10-hour duty day (₱620): undertime costs rate ÷ 10 an hour; approved leave is paid; pending leave is an unpaid absence', function (T $t) {
         $days = Scenario::fullDays('2026-04-01', '2026-04-15');
         foreach ($days as $d => $v) $days[$d] = ['h' => '10.20', 'under' => '0'];
         $days['2026-04-02'] = ['h' => '8.00', 'under' => '2'];             // 2 h short → ₱124
@@ -109,7 +109,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->money('124.00', $row['undertime_deduction'], '2 h × (620 / 10)');
     });
 
-    T::test('Totals-file path: no day records, late hours ARE charged (₱80/h) and overtime paid — gross = basic + OT − late', function (T $t) {
+    T::test('Totals-file path: no day records, late hours ARE charged (₱80/h) and overtime paid - gross = basic + OT − late', function (T $t) {
         $ctx = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
         $emp = payEmployee(['emp_id' => 'QA-T', 'salary_type' => 'daily', 'base_salary' => 500]);
         $p = computePayLine($emp, 120.0, 4.0, 2.5, false, $ctx);
@@ -162,7 +162,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->same([], $bad, "$runs pay runs compared");
         fwrite(STDOUT, sprintf(AppCopy::hasFixes()
             ? "         \033[2m(info) %d of %d generated pay runs carried tax over-withheld earlier in the month; the app returned ₱%s in total as a negative tax (D-02, fixed)\033[0m\n"
-            : "         \033[2m(info) %d of %d generated pay runs carried over-withheld tax the app never returns — ₱%s in total (defect D-02)\033[0m\n",
+            : "         \033[2m(info) %d of %d generated pay runs carried over-withheld tax the app never returns - ₱%s in total (defect D-02)\033[0m\n",
             $overRuns, $runs, number_format($overTotal / 100, 2)));
     });
 
@@ -198,7 +198,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $r = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '7500.00', 'date_hired' => '2026-04-08'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly']], 'days' => $days]);
         $basic = (float)$r['app'][0]['gross_pay'];
-        $t->ok($basic < 7500.00 - 1.0, sprintf('gross ₱%.2f — the full kinsena, although 6 of the 13 duty days were before the hire date', $basic));
+        $t->ok($basic < 7500.00 - 1.0, sprintf('gross ₱%.2f - the full kinsena, although 6 of the 13 duty days were before the hire date', $basic));
         // one defensible rule: treat each pre-hire duty day like an unexcused absence (₱15,000 / 26 per day)
         $t->money(Ledger::fmt(750000 - Ledger::div(6 * 1500000, 26)), $basic, 'pro-rated like absences');
     }, ['defect' => 'D-03']);

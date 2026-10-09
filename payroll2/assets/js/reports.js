@@ -1,13 +1,13 @@
 // assets/js/reports.js
 // Requires window.REPORTS_DATA = { company, period, period_id, rows }
 //
-// Printing is NOT built here any more. Every document — the individual
-// payslip, the batch run and the payroll register — is rendered by
+// Printing is NOT built here any more. Every document - the individual
+// payslip, the batch run and the payroll register - is rendered by
 // print-doc.php from the one shared template in includes/bir-print.php,
 // so all of them come out with the same L&N Pharmacy letterhead, the same
 // employee/company copies and the same footer block.
 
-/* Which copies to issue — read from the picker in the page header. */
+/* Which copies to issue - read from the picker in the page header. */
 function selectedCopies() {
     const el = document.getElementById('copyMode');
     return el ? el.value : 'both';
@@ -18,7 +18,7 @@ function openDoc(params) {
     window.open('print-doc.php?' + qs, '_blank', 'width=980,height=760');
 }
 
-/* One employee — payslip + acknowledgement receipt. */
+/* One employee - payslip + acknowledgement receipt. */
 function printPayslip(payrollId) {
     openDoc({ doc: 'payslip', payroll_id: payrollId, copies: selectedCopies() });
 }
@@ -55,7 +55,7 @@ function exportCSV() {
     a.download = `payroll_${window.REPORTS_DATA.period.replace(/\s/g, '_')}.csv`;
     a.click();
 
-    logPrint(`Payroll CSV Export — ${window.REPORTS_DATA.period}`, 'PDF Export', window.REPORTS_DATA.period_id);
+    logPrint(`Payroll CSV Export - ${window.REPORTS_DATA.period}`, 'PDF Export', window.REPORTS_DATA.period_id);
 }
 
 /* print-doc.php writes its own audit entry server-side; this is only

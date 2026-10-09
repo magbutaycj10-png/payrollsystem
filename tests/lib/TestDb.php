@@ -1,15 +1,15 @@
 <?php
 /*
- * TestDb — a private, throw-away MySQL for the suite.
+ * TestDb - a private, throw-away MySQL for the suite.
  *
  * The app talks to a live cloud MySQL 8 (Aiven, the one DBeaver shows). Tests must never touch it, so the
  * suite starts its own server on a free loopback port with its own data folder (tests/.tmp/mysql-data),
  * loads the schema into a database called "payroll_test", and shuts it down afterwards. Nothing here reads
- * secrets.bat or any DB_* value from the caller's environment — they are all replaced.
+ * secrets.bat or any DB_* value from the caller's environment - they are all replaced.
  *
  * Engine: a real MySQL 8 is preferred, because that is what the live database runs
  * ("C:\Program Files\MySQL\MySQL Server 8.x\bin\mysqld.exe", started with its own data folder and its default
- * strict sql_mode — ONLY_FULL_GROUP_BY included). XAMPP's MariaDB is the fallback; it has to run without
+ * strict sql_mode - ONLY_FULL_GROUP_BY included). XAMPP's MariaDB is the fallback; it has to run without
  * ONLY_FULL_GROUP_BY because MariaDB cannot see that "SELECT pp.label … GROUP BY pp.id" is valid.
  * Looked for in: $PAYROLL_TEST_MYSQLD, MySQL Server 8.x, XAMPP (C:\xampp\mysql\bin), then PATH.
  *
@@ -72,7 +72,7 @@ final class TestDb
         $ext = getenv('PAYROLL_TEST_DB_HOST');
         if ($ext !== false && $ext !== '') {
             if (!in_array($ext, ['127.0.0.1', 'localhost', '::1'], true)) {
-                throw new RuntimeException("PAYROLL_TEST_DB_HOST must be a loopback address (got $ext) — tests DROP and recreate " . self::DB);
+                throw new RuntimeException("PAYROLL_TEST_DB_HOST must be a loopback address (got $ext) - tests DROP and recreate " . self::DB);
             }
             self::$cfg = [
                 'host' => $ext, 'port' => (int)(getenv('PAYROLL_TEST_DB_PORT') ?: 3306),

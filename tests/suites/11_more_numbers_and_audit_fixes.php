@@ -1,8 +1,8 @@
 <?php
 /*
- * 11 — More numbers, and what the audit fixes added.
+ * 11 - More numbers, and what the audit fixes added.
  *
- *   A  high-bracket pay: ₱250,000 and ₱800,000 a month, a ₱1,500 daily rate — every figure worked out by hand from the published tables
+ *   A  high-bracket pay: ₱250,000 and ₱800,000 a month, a ₱1,500 daily rate - every figure worked out by hand from the published tables
  *   B  bonuses and deductions: untaxed, net = gross + bonus − deductions, entries accumulate to the centavo; the ₱90,000 yearly
  *      ceiling for tax-exempt benefits; a deduction may not turn a payslip negative
  *   C  input limits on every door: day upload, totals file, manager's manual entry, Employee Management, Settings, Adjustments
@@ -20,7 +20,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
     /* ================================================================== A · high brackets, by hand */
 
-    T::test('Example H — monthly ₱250,000: SSS credit capped at ₱35,000, PhilHealth and Pag-IBIG capped, tax in the 30% bracket', function (T $t) {
+    T::test('Example H - monthly ₱250,000: SSS credit capped at ₱35,000, PhilHealth and Pag-IBIG capped, tax in the 30% bracket', function (T $t) {
         Fixtures::reset();
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
@@ -34,7 +34,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
                       'withholding_tax' => 5720670, 'net_pay' => 18834330], $row, 'Example H by hand');
     });
 
-    T::test('Example I — monthly ₱800,000: the 35% bracket (over ₱666,667 a month)', function (T $t) {
+    T::test('Example I - monthly ₱800,000: the 35% bracket (over ₱666,667 a month)', function (T $t) {
         Fixtures::reset();
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '800000.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
@@ -47,7 +47,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
                       'withholding_tax' => 22865085, 'net_pay' => 56689915], $row, 'Example I by hand');
     });
 
-    T::test('Example K — daily rate ₱1,500 × 26 days = ₱39,000: PhilHealth on the pay, the 20% bracket', function (T $t) {
+    T::test('Example K - daily rate ₱1,500 × 26 days = ₱39,000: PhilHealth on the pay, the 20% bracket', function (T $t) {
         Fixtures::reset();
         $r = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
@@ -129,7 +129,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::days($p1, $every('2026-03-01', '2026-03-15'));
         Fixtures::days($p2, $every('2026-04-01', '2026-04-15'));
 
-        qa_adjust($p1, [$over], 'Bonus', '85000');           // 85,000 so far this year — under the ceiling, recorded
+        qa_adjust($p1, [$over], 'Bonus', '85000');           // 85,000 so far this year - under the ceiling, recorded
         qa_adjust($p1, [$exact], 'Bonus', '80000');
         qa_adjust($p0, [$prev], 'Bonus', '85000');           // last year's bonus does not count towards 2026
         $t->money('85000.00', Fixtures::payroll($p1)[$over]['bonus'], 'the first ₱85,000 went through');
@@ -222,7 +222,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
             Fixtures::day('Mixed Upload', '2026-04-02', 80, 30, 0, 0), Fixtures::day('Mixed Upload', '2026-04-03', -2),
             Fixtures::day('Mixed Upload', '2026-04-04', 'abc'), Fixtures::day('Mixed Upload', '2026-04-06', 8, 17),
             Fixtures::day('Mixed Upload', '2026-04-08', 4, 17),             // 21 h in all, but 17 h of overtime is over the overtime limit
-            Fixtures::day('Mixed Upload', '2026-04-07', null, 2)]);        // no hours column: a full duty day — fine
+            Fixtures::day('Mixed Upload', '2026-04-07', null, 2)]);        // no hours column: a full duty day - fine
         $t->same(true, $r['success'] ?? null, json_encode($r));
         $t->same(2, $r['inserted'] ?? null, 'the 1st and the 7th were saved');
         $t->same(5, $r['invalid_count'] ?? null, 'five rows refused');
@@ -318,7 +318,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM employees WHERE full_name = 'Monthly Big'")->fetchColumn(), 'a ₱9,000,000 monthly salary is within the limit');
     });
 
-    T::test('Settings: overtime multiplier 1–3, method flat|labor_code, schedule, timing, duty day 1–24 — junk is refused, valid values saved, the rest still saved', function (T $t) {
+    T::test('Settings: overtime multiplier 1–3, method flat|labor_code, schedule, timing, duty day 1–24 - junk is refused, valid values saved, the rest still saved', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         Fixtures::setting('overtime_multiplier', '1.25');
@@ -405,7 +405,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
     /* ================================================================== E · tax refund end to end */
 
-    T::test('over-withheld tax comes back as a negative tax on the month\'s last run — printed on the payslip and in the register', function (T $t) {
+    T::test('over-withheld tax comes back as a negative tax on the month\'s last run - printed on the payslip and in the register', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         // ₱1,000 a day: 13 days in the first half (tax ₱289.95 on the semi-monthly table), one day in the second; the month's
@@ -534,7 +534,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->same(400, $r['status'], 'no days to recompute from: ' . $r['body']);
     });
 
-    T::test('Finalize refuses lines whose contributions no longer settle the month (stale) and asks before locking a negative net — each with a way through', function (T $t) {
+    T::test('Finalize refuses lines whose contributions no longer settle the month (stale) and asks before locking a negative net - each with a way through', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         $e = Fixtures::employee(['full_name' => 'Stale Case', 'base_salary' => '800.00']);
@@ -581,7 +581,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $p])['body'], 'a stale line is announced');
     });
 
-    T::test('a finalized month is called out of date only when an EARLIER cut-off changed after it was finalized — a raise made later is not a reason to "recompute" history', function (T $t) {
+    T::test('a finalized month is called out of date only when an EARLIER cut-off changed after it was finalized - a raise made later is not a reason to "recompute" history', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         $e = Fixtures::employee(['full_name' => 'Raise Case', 'base_salary' => '20000.00', 'salary_type' => 'monthly']);

@@ -1,6 +1,6 @@
 <?php
 /*
- * 08 — The pharmacy's own timesheets, end to end.
+ * 08 - The pharmacy's own timesheets, end to end.
  *
  * Eight kinsenas timesheets (Feb–May 2026, 10–11 employees, daily-rate staff with rotating days off) are read the way the
  * browser reads them, uploaded cut-off by cut-off through the real endpoints, finalized, and checked:
@@ -9,7 +9,7 @@
  *   · the forecast pages against the series these periods make
  *
  * Needs the files in E:\payroll\samp (override with PAYROLL_SAMPLES); skipped when they are not there. The files hold real
- * names and are NOT part of the repository — nothing from them is written into tests/.
+ * names and are NOT part of the repository - nothing from them is written into tests/.
  */
 
 /** the sheet's code for a person: MICHELLE and MICH are one sheet */
@@ -20,7 +20,7 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
     $files = is_dir($dir) ? (glob($dir . DIRECTORY_SEPARATOR . 'TIMESHEET 0*.csv') ?: []) : [];
     sort($files);
     if (count($files) < 2) {
-        T::test('pharmacy sample files', fn() => T::skip("no TIMESHEET *.csv files in $dir — set PAYROLL_SAMPLES to run the real-data suite"));
+        T::test('pharmacy sample files', fn() => T::skip("no TIMESHEET *.csv files in $dir - set PAYROLL_SAMPLES to run the real-data suite"));
         return;
     }
 
@@ -72,7 +72,7 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
     /*
      * Where the app cannot (or must not) agree with the pharmacy's spreadsheet, and why. Anything NOT explained here must match.
      *   strays   a day row whose date cell is not a date (one sheet has 1899-12-31): the browser drops rows outside the pay period,
-     *            so that day is not paid — the sheet still counts it
+     *            so that day is not paid - the sheet still counts it
      *   ot       ROLLY's sheets (from 16 Mar) pay overtime at ₱62.50 an hour although their own OT_PAY_PER_HOUR column says ₱45; the app has one
      *            overtime rate for everybody (Settings) and pays ₱45
      */
@@ -122,11 +122,11 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
                 }
                 $t->checks++;
                 $engine = Ledger::c($row['gross_pay']);
-                if ($engine !== $expected) $diff[] = sprintf('%s: sheet ₱%s%s, system ₱%s — expected ₱%s (%+.2f)', $b['name'], Ledger::fmt(Ledger::c($b['total'])),
+                if ($engine !== $expected) $diff[] = sprintf('%s: sheet ₱%s%s, system ₱%s - expected ₱%s (%+.2f)', $b['name'], Ledger::fmt(Ledger::c($b['total'])),
                     $why ? ' (' . implode('; ', $why) . ')' : '', Ledger::fmt($engine), Ledger::fmt($expected), ($engine - $expected) / 100);
                 elseif ($why) $explained[] = $b['name'] . ': ' . implode('; ', $why);
             }
-            if ($explained) fwrite(STDOUT, "         \033[2m(info) explained difference(s) from the sheet — " . implode(' | ', $explained) . "\033[0m\n");
+            if ($explained) fwrite(STDOUT, "         \033[2m(info) explained difference(s) from the sheet - " . implode(' | ', $explained) . "\033[0m\n");
             $t->same([], $diff, count($p['by']) . ' employees compared');
 
             // lock it, as the admin does, so the next period's rate change cannot reach back

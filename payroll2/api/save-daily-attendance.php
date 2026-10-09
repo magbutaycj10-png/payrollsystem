@@ -13,10 +13,10 @@
  *   emp_name, att_date (YYYY-MM-DD), hours_worked, overtime_hours, late_hours,
  *   undertime_hours (null = work it out), day_off (the timesheet says OFF)
  *   hours_worked null = a full duty day (the file had no hours column)
- * auto_ot: true for a device report — its hours are uncapped, and what goes
+ * auto_ot: true for a device report - its hours are uncapped, and what goes
  * past each employee's own duty day (8 h, 10 h ...) is split into overtime.
  *
- * There is no ID column — the system keeps its own employee IDs, so each
+ * There is no ID column - the system keeps its own employee IDs, so each
  * name is matched against Employee Management. Unknown names are not saved.
  *
  * Used by the admin (whole company) and by managers (their own employees).
@@ -50,10 +50,10 @@ foreach ($db->query("SELECT emp_id, full_name, hours_per_day FROM employees")->f
 $autoOt = !empty($body['auto_ot']);
 
 /* Names in the file that match no registered employee, and names that are
-   someone else's employees (manager uploads) — neither is saved, both reported */
+   someone else's employees (manager uploads) - neither is saved, both reported */
 $unmatched  = [];
 $outOfScope = [];
-$invalid    = [];   /* day records with impossible hours — not saved, and reported (see dayHoursProblem) */
+$invalid    = [];   /* day records with impossible hours - not saved, and reported (see dayHoursProblem) */
 $scopeSet   = $who['scope'] === null ? null : array_flip($who['scope']);
 
 try {
@@ -92,7 +92,7 @@ try {
 
         $dayHours = $empData[$emp_id]['day_hours'];
         $off   = !empty($r['day_off']);
-        /* Impossible hours (80 h in a day, a negative figure, text) are not saved — and not quietly turned into
+        /* Impossible hours (80 h in a day, a negative figure, text) are not saved - and not quietly turned into
            something else either: a day with the hours missing is paid as a full duty day. They are reported. */
         if (!$off) {
             $problem = dayHoursProblem($r['hours_worked'] ?? null, $r['overtime_hours'] ?? 0, $r['late_hours'] ?? 0, $r['undertime_hours'] ?? null);
@@ -126,7 +126,7 @@ try {
      * A day belongs to one pay period only. If an employee's day is already
      * saved in another period that covers that date (overlapping periods, or
      * the file uploaded into the wrong one earlier), it stays there and is
-     * not saved here a second time — otherwise it would be paid twice.
+     * not saved here a second time - otherwise it would be paid twice.
      * Days re-uploaded into THIS period simply replace themselves (uq_daily).
      */
     $elsewhere = [];   /* period label => days not saved because of it */
@@ -177,7 +177,7 @@ try {
      * was registered) move onto the employee's real ID, so they count again.
      * UPDATE IGNORE skips a day the employee already has under their real ID;
      * the DELETE then clears those leftover duplicates. A day the employee
-     * already has in ANOTHER period is not moved either — the same
+     * already has in ANOTHER period is not moved either - the same
      * one-period-per-day rule as the upload itself.
      */
     $old = $db->prepare("SELECT DISTINCT emp_id, emp_name FROM biometric_daily WHERE period_id = ?");
@@ -208,14 +208,14 @@ try {
 
     $message = "$inserted daily record(s) saved. Payroll recomputed for $count employee(s).";
     if ($unmatched) {
-        $message .= ' ' . count($unmatched) . ' name(s) in the file match no employee — those rows were not saved.';
+        $message .= ' ' . count($unmatched) . ' name(s) in the file match no employee - those rows were not saved.';
     }
     if ($elsewhere) {
         $message .= ' ' . array_sum($elsewhere) . ' day record(s) were already saved in '
                   . implode(', ', array_keys($elsewhere)) . ' and were not counted again.';
     }
     if ($outOfScope) {
-        $message .= ' ' . count($outOfScope) . ' employee(s) are not assigned to you — those rows were not saved.';
+        $message .= ' ' . count($outOfScope) . ' employee(s) are not assigned to you - those rows were not saved.';
     }
     if ($invalid) {
         $message .= ' ' . count($invalid) . ' day record(s) were NOT saved because their hours cannot be right.';

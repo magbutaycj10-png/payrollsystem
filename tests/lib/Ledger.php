@@ -1,10 +1,10 @@
 <?php
 /*
- * Ledger — "the accountant's calculator".
+ * Ledger - "the accountant's calculator".
  *
  * An independent re-computation of everything the payroll engine does, written from
  * the statutory rules (SSS Circular 2024-006, PhilHealth 5%, HDMF Circular 460, BIR RR 11-2018
- * Annex E) and the pay rules documented in info/ph_government_deductions.md — NOT from the
+ * Annex E) and the pay rules documented in info/ph_government_deductions.md - NOT from the
  * engine's code. It works in WHOLE CENTAVOS with integer arithmetic only: no floats and
  * no round(), so it is exact and cannot share the engine's rounding behaviour.
  *
@@ -93,7 +93,7 @@ final class Ledger
         return 0;
     }
 
-    /** The annual TRAIN schedule (RA 10963) — the source the monthly tables were built from */
+    /** The annual TRAIN schedule (RA 10963) - the source the monthly tables were built from */
     public static function annualTax(int $annualC): int
     {
         $steps = [[800000000, 220250000, 35], [200000000, 40250000, 30], [80000000, 10250000, 25], [40000000, 2250000, 20], [25000000, 0, 15]];
@@ -141,11 +141,11 @@ final class Ledger
      * $emp   type daily|monthly|kinsenas · base ("480.00") · hours_per_day (null = $cfg['std'])
      *        rest [ISO weekdays] · hired ?date · sss/ph/pi 1|0 (deduct switches)
      * $run   start · end · type Semi-Monthly|Monthly|Weekly
-     * $days  date => [h, ot, late, under (null = work it out), off (bool)]   — hours as decimal text
+     * $days  date => [h, ot, late, under (null = work it out), off (bool)]   - hours as decimal text
      * $leave dates of APPROVED leave
      * $cfg   ot_rate · late_rate · std (standard hours) · timing [sss,philhealth,pagibig => split|second]
      *        per_day (true: late is not charged, the day-by-day rule) · refund (true: over-withholding is returned)
-     *        prehire (true: working days before the hire date are unpaid for a salaried employee — D-03)
+     *        prehire (true: working days before the hire date are unpaid for a salaried employee - D-03)
      *        ot_method flat|labor_code · ot_mult ("1.25"): with labor_code overtime pays hourly rate × ot_mult (D-14)
      * $prev  earlier runs of the same month, centavos: g, basic, sss, ph, pi, tax
      * $coveredTo  absences are only judged up to this date (default: the last day with any record)
@@ -178,7 +178,7 @@ final class Ledger
             $worked[$date] = true;
             if (array_key_exists('under', $d) && $d['under'] !== null && $d['under'] !== '') {
                 $u = min(max(0, self::hh($d['under'])), $dayHh);
-            } else {            // shortfall to the nearest whole hour, ties up — the app's documented fallback
+            } else {            // shortfall to the nearest whole hour, ties up - the app's documented fallback
                 $u = min(self::div(max(0, $dayHh - $h), 100) * 100, $dayHh);
             }
             $underHh += $u;
@@ -188,7 +188,7 @@ final class Ledger
         foreach (self::dates($run['start'], $run['end']) as $date) {
             if (isset($worked[$date])) continue;
             if ($hired && $date < $hired) {
-                // before the hire date: a salaried employee's unworked working day is not paid (D-03) — when the fix is in
+                // before the hire date: a salaried employee's unworked working day is not paid (D-03) - when the fix is in
                 if (!empty($cfg['prehire']) && $type !== 'daily' && !in_array(self::dow($date), $rest, true)) $absent++;
                 continue;
             }
@@ -278,7 +278,7 @@ final class Ledger
 
     /* ============================================================ amount in words */
 
-    /** "ONE THOUSAND TWO HUNDRED THIRTY-FOUR PESOS AND 56/100" — the wording the receipt uses, from integer centavos */
+    /** "ONE THOUSAND TWO HUNDRED THIRTY-FOUR PESOS AND 56/100" - the wording the receipt uses, from integer centavos */
     public static function words(int $cents, bool $singularOne = false): string
     {
         $neg = $cents < 0;

@@ -12,7 +12,7 @@ $msg = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    /* One record — only if it belongs to this manager's employees */
+    /* One record - only if it belongs to this manager's employees */
     $mine = function (int $attId) use ($db, $scopeWhere, $scopeParams): bool {
         $st = $db->prepare("SELECT a.id FROM attendance a JOIN employees e ON e.emp_id = a.emp_id
                              WHERE a.id = ? $scopeWhere");
@@ -80,7 +80,7 @@ $approvedCount = count(array_filter($rows, fn($r) => $r['manager_approved'] == 1
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Timesheets — Manager Portal</title>
+    <title>Timesheets - Manager Portal</title>
     <link rel="stylesheet" href="/assets/css/portal.css">
 </head>
 <body>
@@ -143,7 +143,7 @@ $approvedCount = count(array_filter($rows, fn($r) => $r['manager_approved'] == 1
                             <strong><?= htmlspecialchars($r['emp_name'] ?? $r['emp_id']) ?></strong>
                             <br><small style="color:#9ca3af;"><?= htmlspecialchars($r['emp_id']) ?></small>
                         </td>
-                        <td><?= htmlspecialchars($r['branch'] ?? '—') ?></td>
+                        <td><?= htmlspecialchars($r['branch'] ?? '-') ?></td>
                         <td><?= number_format($r['hours_worked'], 1) ?></td>
                         <td><?= number_format($r['overtime_hours'], 1) ?></td>
                         <td><?= number_format($r['late_hours'], 1) ?></td>
@@ -180,7 +180,7 @@ $approvedCount = count(array_filter($rows, fn($r) => $r['manager_approved'] == 1
                                 </form>
                             </div>
                             <?php else: ?>
-                                <span style="color:#9ca3af;font-size:.8rem;">—</span>
+                                <span style="color:#9ca3af;font-size:.8rem;">-</span>
                             <?php endif; ?>
                         </td>
                     </tr>

@@ -1,7 +1,7 @@
 // assets/js/payroll.js
 // Period state for Payroll Processing. Every action goes through
 // api/update-payroll.php, which writes the finalize / re-open trail to
-// period_audit — the page reloads afterwards so the trail and the
+// period_audit - the page reloads afterwards so the trail and the
 // "Revised" flags on screen come from the database, not from here.
 
 async function periodAction(action, extra) {
@@ -24,7 +24,7 @@ async function unlockPayroll() {
 
     if (data.success) {
         showAlert('Period re-opened (re-open #' + data.reopen_count + '). '
-                + 'Changes made now are recorded as revisions — finalize again when you are done.',
+                + 'Changes made now are recorded as revisions - finalize again when you are done.',
                   'alert-success');
         setTimeout(() => location.reload(), 1400);
     } else {
@@ -70,7 +70,7 @@ async function finalizePayroll() {
         let msg = 'Payroll finalized and period locked. Payslips can now be issued.';
         if (data.cycle > 1) {
             msg = 'Period re-finalized (finalize #' + data.cycle + ') with ' + data.revised
-                + ' revised employee row(s). Reissue those payslips — they replace the earlier copies.';
+                + ' revised employee row(s). Reissue those payslips - they replace the earlier copies.';
         }
         showAlert(msg, 'alert-success');
         setTimeout(() => location.reload(), 1800);
@@ -93,3 +93,22 @@ function showAlert(msg, cls) {
     el.style.display = 'flex';
     setTimeout(() => { el.style.display = 'none'; }, 9000);
 }
+
+/* Find an employee: hides the rows that do not match the ID or name typed (display only) */
+(function () {
+    var box = document.getElementById('payrollFilter');
+    if (!box) return;
+    var rows  = document.querySelectorAll('#payrollTable tbody tr');
+    var count = document.getElementById('payrollCount');
+    var total = rows.length;
+    box.addEventListener('input', function () {
+        var q = box.value.trim().toLowerCase(), shown = 0;
+        rows.forEach(function (tr) {
+            var t  = tr.cells[0].textContent + ' ' + tr.cells[1].textContent;
+            var ok = !q || t.toLowerCase().indexOf(q) !== -1;
+            tr.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        count.textContent = q ? shown + ' of ' + total + ' employee(s)' : total + ' employee(s)';
+    });
+})();

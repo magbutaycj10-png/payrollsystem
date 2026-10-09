@@ -1,6 +1,6 @@
 <?php
 /*
- * adjustments.php — Step 3 of the payroll cycle.
+ * adjustments.php - Step 3 of the payroll cycle.
  *
  * Bonuses and deductions always belong to ONE payroll period (the "month"),
  * and they are only ever accepted while that period is still Open:
@@ -14,7 +14,7 @@
  *             the payroll row was already updated while the period was open.
  *
  * Only employees who actually have a payroll row in the selected period can be
- * adjusted — there is nothing to add a bonus to otherwise.
+ * adjusted - there is nothing to add a bonus to otherwise.
  */
 
 require 'includes/helpers.php';
@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $msg = ['type' => 'error', 'text' => 'Select at least one employee, enter an amount above zero, and choose a reason.'];
 
     } elseif ($amount > MAX_SALARY_PESOS) {
-        $msg = ['type' => 'error', 'text' => 'That amount is more than ₱' . number_format(MAX_SALARY_PESOS, 2) . ' — check for a typing error.'];
+        $msg = ['type' => 'error', 'text' => 'That amount is more than ₱' . number_format(MAX_SALARY_PESOS, 2) . ' - check for a typing error.'];
 
     } else {
         $lines = [];
@@ -94,7 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($overExempt) {
                 $held .= ' NOT applied yet to ' . count($overExempt) . ' employee(s), because the bonus takes their year\'s tax-exempt benefits over the ₱'
                        . number_format(BIR_EXEMPT_BENEFITS, 0) . ' ceiling: ' . implode('; ', $overExempt)
-                       . '. The part above the ceiling is taxable compensation and this system does not withhold tax on a bonus — '
+                       . '. The part above the ceiling is taxable compensation and this system does not withhold tax on a bonus - '
                        . 'record it only if the tax on the excess is being handled separately.';
             }
 
@@ -109,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($negative || $overExempt) {
                 $msg = ['type' => 'error', 'text' => 'Nothing applied.' . $held];
             } else {
-                $msg = ['type' => 'warn', 'text' => 'Nothing applied — none of the selected employees have a payroll record in '
+                $msg = ['type' => 'warn', 'text' => 'Nothing applied - none of the selected employees have a payroll record in '
                     . $curPeriod['period_label'] . '.' . $held];
             }
 
@@ -121,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 /*
  * Roster for the selected period. Driven by the payroll table, not the employee
- * table, so the list is exactly who can be adjusted — and each card can show
+ * table, so the list is exactly who can be adjusted - and each card can show
  * the figures the adjustment will change.
  */
 $roster = [];
@@ -161,7 +161,7 @@ if ($period_id) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bonus &amp; Deductions — Payroll System</title>
+    <title>Bonus &amp; Deductions - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         .emp-grid {
@@ -240,12 +240,12 @@ if ($period_id) {
                 <label style="font-weight:600;font-size:.875rem;">Period (month):</label>
                 <select name="period" class="form-control" style="min-width:230px;" onchange="this.form.submit()">
                     <?php if (empty($periods)): ?>
-                        <option>— no periods yet —</option>
+                        <option>- no periods yet -</option>
                     <?php endif; ?>
                     <?php foreach ($periods as $p): ?>
                     <option value="<?= $p['id'] ?>" <?= (int)$p['id'] === $period_id ? 'selected' : '' ?>>
                         <?= htmlspecialchars($p['period_label']) ?> · <?= htmlspecialchars(periodTypeLabel($p)) ?>
-                        <?= $p['status'] === 'Open' ? '— Open' : '— Finalized' ?>
+                        <?= $p['status'] === 'Open' ? '- Open' : '- Finalized' ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -292,7 +292,7 @@ if ($period_id) {
              recorded from here on is stored as a revision, not a first entry. -->
         <div class="alert alert-info">
             <span>
-                <strong>Correction pass &mdash; <?= htmlspecialchars($curPeriod['period_label']) ?>
+                <strong>Correction pass - <?= htmlspecialchars($curPeriod['period_label']) ?>
                 was finalized <?= (int)$rev['cycle'] ?>&times; and re-opened <?= (int)$rev['reopen_count'] ?>&times;.</strong>
                 Everything you record now is saved with a <em>revision</em> stamp and the employees affected are
                 flagged <strong>Revised</strong> on Payroll Processing, Reports and their own payslip.
@@ -317,7 +317,7 @@ if ($period_id) {
                     <h2>Adjustment Details</h2>
                 </div>
                 <span style="font-size:.85rem;color:#6b7280;">
-                    Applies to <strong><?= htmlspecialchars($curPeriod['period_label'] ?? '—') ?></strong>
+                    Applies to <strong><?= htmlspecialchars($curPeriod['period_label'] ?? '-') ?></strong>
                 </span>
             </div>
             <div class="box-body">
@@ -336,7 +336,7 @@ if ($period_id) {
                     <div class="form-group">
                         <label>Reason *</label>
                         <select name="reason_select" id="reasonSelect" class="form-control" onchange="toggleCustomReason()">
-                            <option value="">— Select a reason —</option>
+                            <option value="">- Select a reason -</option>
                             <optgroup id="bonusReasons" label="Common Bonus Reasons">
                                 <option>Performance Reward</option>
                                 <option>13th Month Pay</option>

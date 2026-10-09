@@ -1,6 +1,6 @@
 <?php
 /*
- * thirteenth-month.php — 13th Month Pay (Presidential Decree 851).
+ * thirteenth-month.php - 13th Month Pay (Presidential Decree 851).
  *
  *   13th-month pay = total BASIC pay earned in the calendar year ÷ 12
  *
@@ -56,10 +56,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pay')
             $total = array_sum(array_intersect_key($lines, array_flip($res['applied_ids'])));
             $notes = '';
             if ($problems)       $notes .= ' Not recorded: ' . implode('; ', $problems) . '.';
-            if ($res['skipped']) $notes .= ' No payroll line in ' . $target['period_label'] . ' for: ' . implode(', ', $res['skipped']) . ' — upload their attendance into that period first.';
+            if ($res['skipped']) $notes .= ' No payroll line in ' . $target['period_label'] . ' for: ' . implode(', ', $res['skipped']) . ' - upload their attendance into that period first.';
             if ($res['over']) {
                 $notes .= ' HELD BACK, because with this payment their ' . $year . ' bonuses pass the ₱' . number_format(BIR_EXEMPT_BENEFITS, 0)
-                        . ' tax-exempt ceiling: ' . implode('; ', $res['over']) . '. The excess is taxable and this system does not withhold on a bonus — '
+                        . ' tax-exempt ceiling: ' . implode('; ', $res['over']) . '. The excess is taxable and this system does not withhold on a bonus - '
                         . 'record it only if the tax on the excess is being handled separately.';
                 $heldForm = ['period_id' => (int)$target['id'], 'ids' => $res['over_ids'], 'amounts' => $lines];
             }
@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pay')
                 $msg = ['type' => $res['over'] ? 'warn' : 'success',
                         'text' => "13th Month Pay $year of ₱" . number_format($total, 2) . ' recorded for ' . $res['applied'] . ' employee(s) in '
                                 . $target['period_label'] . '. It appears as Bonus on their payslips and in Adjustment History.'
-                                . ($res['is_revision'] ? ' This period was finalized before, so the entries are marked as a revision — finalize it again when you are done.' : '')
+                                . ($res['is_revision'] ? ' This period was finalized before, so the entries are marked as a revision - finalize it again when you are done.' : '')
                                 . $notes];
             } else {
                 $msg = ['type' => 'error', 'text' => 'Nothing was recorded.' . $notes];
@@ -116,7 +116,7 @@ $canPay    = (bool)$openPeriods;
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>13th Month Pay — Payroll System</title>
+    <title>13th Month Pay - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         .rule { font-size: .85rem; color: #374151; line-height: 1.55; }
@@ -144,7 +144,7 @@ $canPay    = (bool)$openPeriods;
     <div class="page-header">
         <div>
             <h1>13th Month Pay</h1>
-            <p>Presidential Decree 851 &mdash; one twelfth of the basic pay earned in the calendar year</p>
+            <p>Presidential Decree 851 - one twelfth of the basic pay earned in the calendar year</p>
         </div>
         <div class="no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <form method="GET" style="display:flex;gap:8px;align-items:center;">
@@ -183,10 +183,10 @@ $canPay    = (bool)$openPeriods;
     <div class="box" style="margin-bottom:20px;">
         <div class="box-body rule">
             <b>How it is worked out.</b> 13th-month pay = the <b>basic pay earned in <?= $year ?></b> &divide; 12. &ldquo;Basic pay&rdquo; is the
-            <i>Basic Pay</i> column of the payroll: pay for the days worked and paid leave, with absences and undertime already taken out &mdash;
+            <i>Basic Pay</i> column of the payroll: pay for the days worked and paid leave, with absences and undertime already taken out -
             <b>overtime, bonuses and allowances are not part of it</b>. Someone who worked only part of the year gets a proportional amount
             (fewer months in the total); someone who has left is still listed because it is due on separation. It is due
-            <b>not later than December 24</b> and may be paid in two instalments &mdash; record what you pay now, the balance stays here.
+            <b>not later than December 24</b> and may be paid in two instalments - record what you pay now, the balance stays here.
             13th-month pay and other benefits are <b>tax-exempt up to &#8369;<?= number_format(BIR_EXEMPT_BENEFITS, 0) ?></b> a year per employee together;
             this system does not withhold tax on a bonus, so it stops and asks before a payment would cross that line.
         </div>
@@ -200,7 +200,7 @@ $canPay    = (bool)$openPeriods;
         <div class="alert alert-info"><div>
             <?= (int)$data['open_periods'] ?> of the <?= (int)$data['periods'] ?> pay period(s) of <?= $year ?> are still <b>open</b>, so these figures can still change.
             Payroll in the system runs through <b><?= date('M j, Y', strtotime($data['last_end'])) ?></b><?php if ($data['last_end'] < "$year-12-31"): ?>
-            &mdash; the rest of the year is not in yet, so the 13th month shown is <b>to date</b> and will grow<?php endif; ?>.
+            - the rest of the year is not in yet, so the 13th month shown is <b>to date</b> and will grow<?php endif; ?>.
         </div></div>
     <?php elseif ($data['last_end'] < "$year-12-31"): ?>
         <div class="alert alert-info"><div>Payroll in the system runs through <b><?= date('M j, Y', strtotime($data['last_end'])) ?></b>; the 13th month shown is <b>to date</b>.</div></div>
@@ -211,7 +211,7 @@ $canPay    = (bool)$openPeriods;
             <?php if ($daysLeft < 0): ?>
                 <b>The December 24 deadline has passed</b> and &#8369;<?= number_format($totals['balance'], 2) ?> of <?= $year ?> 13th-month pay is still unpaid.
             <?php else: ?>
-                <b><?= $daysLeft ?> day(s)</b> until the December 24 deadline &mdash; &#8369;<?= number_format($totals['balance'], 2) ?> of 13th-month pay is still to be paid.
+                <b><?= $daysLeft ?> day(s)</b> until the December 24 deadline - &#8369;<?= number_format($totals['balance'], 2) ?> of 13th-month pay is still to be paid.
             <?php endif; ?>
         </div></div>
     <?php endif; ?>
@@ -242,7 +242,7 @@ $canPay    = (bool)$openPeriods;
                             <?php endforeach; ?>
                         </select>
                         <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('balance')">Pay full balance</button>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('half')" title="Half of the 13th month, less what was already paid — the usual mid-year instalment">Pay half (advance)</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('half')" title="Half of the 13th month, less what was already paid - the usual mid-year instalment">Pay half (advance)</button>
                         <button type="submit" class="btn btn-primary" onclick="return confirmPay()">Record 13th Month Pay</button>
                     <?php else: ?>
                         <span class="note">No open pay period: create or unlock one to record the payment.</span>
@@ -272,7 +272,7 @@ $canPay    = (bool)$openPeriods;
                                 <?php if ($r['taxable_excess'] > 0): ?><div class="note" title="Bonuses plus this 13th month pass &#8369;<?= number_format(BIR_EXEMPT_BENEFITS, 0) ?>; the excess is taxable and is not withheld here">taxable excess &#8369;<?= number_format($r['taxable_excess'], 2) ?></div><?php endif; ?>
                             </td>
                             <td><span class="badge badge-<?= $r['status'] === 'Active' ? 'green' : 'yellow' ?>"><?= htmlspecialchars($r['status']) ?></span></td>
-                            <?php foreach ($r['months'] as $v): ?><td class="num mo"><?= $v > 0 ? number_format($v, 2) : '&mdash;' ?></td><?php endforeach; ?>
+                            <?php foreach ($r['months'] as $v): ?><td class="num mo"><?= $v > 0 ? number_format($v, 2) : '-' ?></td><?php endforeach; ?>
                             <td class="num"><?= number_format($r['basic'], 2) ?></td>
                             <td class="num"><strong><?= number_format($r['due'], 2) ?></strong></td>
                             <td class="num"><?= number_format($r['paid'], 2) ?></td>

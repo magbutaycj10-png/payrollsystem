@@ -1,6 +1,6 @@
 <?php
 // api/create-period.php
-// Creates a payroll period. Admin only — managers upload into existing periods.
+// Creates a payroll period. Admin only - managers upload into existing periods.
 //   { label, start, end, type }   type: Monthly | Semi-Monthly | Weekly
 require '../includes/helpers.php';
 session_start();

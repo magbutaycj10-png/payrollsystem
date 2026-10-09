@@ -1,10 +1,10 @@
 <?php
 /*
- * T — a tiny test framework (no Composer needed), tuned for money.
+ * T - a tiny test framework (no Composer needed), tuned for money.
  *
  *   T::suite('name', function () { ... T::test('does x', function (T $t) { $t->money(...); }); });
  *
- * Statuses: PASS, FAIL, SKIP, and — for tests tagged with a defect id —
+ * Statuses: PASS, FAIL, SKIP, and - for tests tagged with a defect id -
  *   DEFECT  the test failed, which is what it is there to prove (known bug, expected red)
  *   FIXED   a defect-tagged test now passes: the bug is gone (in the audit-fixed app: the fix works)
  * By default DEFECT does not fail the run (so a regression elsewhere stays visible);
@@ -75,12 +75,12 @@ final class T
         if ($defect !== null) {
             // On the original application a failing [D-nn] test is the defect it documents. On the audit-fixed one the defect is
             // supposed to be gone, so the same test failing means a fix has come undone: a regression, red like any other failure.
-            if ($status === 'FAIL' && AppCopy::hasFixes()) $msg = "REGRESSION — defect $defect is back\n$msg";
+            if ($status === 'FAIL' && AppCopy::hasFixes()) $msg = "REGRESSION - defect $defect is back\n$msg";
             elseif ($status === 'FAIL') $status = 'DEFECT';
             elseif ($status === 'PASS') {
                 $status = 'FIXED';
                 $msg = AppCopy::hasFixes() ? "defect $defect: fixed in this version (the original application still has it)"
-                                           : "defect $defect no longer reproduces — remove the tag";
+                                           : "defect $defect no longer reproduces - remove the tag";
             }
         }
         $ms = (microtime(true) - $start) * 1000;
@@ -144,7 +144,7 @@ final class T
 
     /**
      * Compare money to the centavo. $expected is integer centavos (Ledger) or a pesos string;
-     * $actual is what the app produced (float/decimal string/int centavos is NOT accepted —
+     * $actual is what the app produced (float/decimal string/int centavos is NOT accepted -
      * pass pesos). Also fails if $actual carries sub-centavo residue: a payslip must not
      * show 0.1 + 0.2 style noise.
      */
@@ -193,7 +193,7 @@ final class T
         $byDefect = [];
         foreach (self::$results as $r) if ($r['defect']) $byDefect[$r['defect']][] = $r;
         if ($byDefect) {
-            echo "\n\033[1mDefect register\033[0m — problems in the application proved by the tests (red until fixed; see tests/AUDIT_FINDINGS.md)\n";
+            echo "\n\033[1mDefect register\033[0m - problems in the application proved by the tests (red until fixed; see tests/AUDIT_FINDINGS.md)\n";
             ksort($byDefect);
             $sevColor = ['High' => '1;31', 'Medium' => '33', 'Low' => '2'];
             foreach ($byDefect as $id => $rs) {

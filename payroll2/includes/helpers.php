@@ -1,11 +1,11 @@
 <?php
-require_once __DIR__ . '/errors.php';   // friendly errors everywhere — load first
+require_once __DIR__ . '/errors.php';   // friendly errors everywhere - load first
 require_once __DIR__ . '/db.php';
 
 /*
  * applySchemaPatches()
  * Creates any tables that may be missing and seeds the admin user
- * on first-ever run.  Safe to call on every request — the static
+ * on first-ever run.  Safe to call on every request - the static
  * guard ensures it only executes once per PHP process.
  */
 function applySchemaPatches(): void {
@@ -16,7 +16,7 @@ function applySchemaPatches(): void {
     $db = getDB();
 
     $patches = [
-        // Attendance audit columns (added in v2 — ALTER is harmless if already present)
+        // Attendance audit columns (added in v2 - ALTER is harmless if already present)
         "ALTER TABLE attendance ADD COLUMN manually_entered_by VARCHAR(150) NULL AFTER upload_date",
         "ALTER TABLE attendance ADD COLUMN manager_approved    TINYINT(1)  DEFAULT 0  AFTER manually_entered_by",
         "ALTER TABLE attendance ADD COLUMN approved_by         VARCHAR(150) NULL       AFTER manager_approved",
@@ -25,7 +25,7 @@ function applySchemaPatches(): void {
         // salary_type column on employees (monthly vs daily wager)
         "ALTER TABLE employees ADD COLUMN salary_type ENUM('monthly','daily') NOT NULL DEFAULT 'monthly' AFTER base_salary",
 
-        // 'kinsenas' — paid twice a month, base_salary stated per kinsena
+        // 'kinsenas' - paid twice a month, base_salary stated per kinsena
         // (half-month) rather than per month. MODIFY widens the enum in place
         // and is harmless once the value is already there.
         "ALTER TABLE employees MODIFY COLUMN salary_type ENUM('monthly','kinsenas','daily') NOT NULL DEFAULT 'monthly'",
@@ -40,7 +40,7 @@ function applySchemaPatches(): void {
         // How a manager's employee set is resolved: whole branch, or a picked list
         "ALTER TABLE users ADD COLUMN scope_type ENUM('branch','custom') NOT NULL DEFAULT 'branch' AFTER branch",
 
-        // Unified auth table — all three roles (admin / manager / earner) live here.
+        // Unified auth table - all three roles (admin / manager / earner) live here.
         // Passwords are stored as bcrypt hashes only.
         "CREATE TABLE IF NOT EXISTS users (
             id            INT          NOT NULL AUTO_INCREMENT,
@@ -87,7 +87,7 @@ function applySchemaPatches(): void {
             created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (id)
         )",
-        // Raw daily biometric attendance records — one row per employee per day
+        // Raw daily biometric attendance records - one row per employee per day
         "CREATE TABLE IF NOT EXISTS biometric_daily (
             id             INT          NOT NULL AUTO_INCREMENT,
             period_id      INT          NOT NULL,
@@ -128,7 +128,7 @@ function applySchemaPatches(): void {
         // Document numbering. document_series holds one counter per document
         // type; document_serials binds an allocated number to the record it was
         // issued for, so a reprint reproduces the same number instead of
-        // burning a new one. Numbers never restart — the series runs straight
+        // burning a new one. Numbers never restart - the series runs straight
         // through every month and every payroll run.
         "CREATE TABLE IF NOT EXISTS document_series (
             series  VARCHAR(20) NOT NULL,
@@ -149,7 +149,7 @@ function applySchemaPatches(): void {
         "ALTER TABLE payroll_periods ADD COLUMN finalized_at   TIMESTAMP NULL DEFAULT NULL",
         "ALTER TABLE payroll_periods ADD COLUMN finalize_count INT NOT NULL DEFAULT 0",
 
-        // One signature per payroll row — makes the ON DUPLICATE KEY UPDATE in
+        // One signature per payroll row - makes the ON DUPLICATE KEY UPDATE in
         // sign-payslip.php actually replace instead of piling up duplicates, so
         // the acknowledgement receipt always prints the current signature.
         "ALTER TABLE payslip_signatures ADD UNIQUE KEY uq_sig_payroll (payroll_id)",
@@ -221,7 +221,7 @@ function applySchemaPatches(): void {
         // as payslips, reports and the pharmacy's timesheets mean it; it used
         // to hold basic pay only. Old rows are converted ONCE: the flag marks
         // a converted row, new rows are written with it set, and only then
-        // does the column default flip to 1 — so the UPDATE can never touch
+        // does the column default flip to 1 - so the UPDATE can never touch
         // a row twice however often this list runs.
         "ALTER TABLE payroll ADD COLUMN gross_incl_ot TINYINT(1) NOT NULL DEFAULT 0",
         "UPDATE payroll SET gross_pay = gross_pay + ot_late_adj, gross_incl_ot = 1 WHERE gross_incl_ot = 0",
@@ -271,7 +271,7 @@ function applySchemaPatches(): void {
             KEY idx_ip (ip, attempted_at)
         ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // The finalize / re-open trail itself — who did what, when, and why.
+        // The finalize / re-open trail itself - who did what, when, and why.
         "CREATE TABLE IF NOT EXISTS period_audit (
             id           INT          NOT NULL AUTO_INCREMENT,
             period_id    INT          NOT NULL,
@@ -286,7 +286,7 @@ function applySchemaPatches(): void {
 
         // The branch list, managed in Settings. employees.branch and
         // users.branch still store the branch NAME rather than an id, so a
-        // rename has to carry across to those columns — settings.php does
+        // rename has to carry across to those columns - settings.php does
         // that inside one transaction.
         //
         // The collation is pinned to match employees/users: those names are
@@ -374,7 +374,7 @@ function applySchemaPatches(): void {
         $st = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = 'schema_version'");
         $st->execute();
         if ($st->fetchColumn() === $version) return;
-    } catch (PDOException $e) { /* fresh install: no settings table yet — run everything */ }
+    } catch (PDOException $e) { /* fresh install: no settings table yet - run everything */ }
 
     foreach ($patches as $sql) {
         try { $db->exec($sql); } catch (PDOException $e) {}
@@ -405,12 +405,12 @@ function applySchemaPatches(): void {
         }
     } catch (PDOException $e) {}
 
-    /* Done — remember this list so the next page load skips it */
+    /* Done - remember this list so the next page load skips it */
     try { setSetting('schema_version', $version); } catch (PDOException $e) {}
 }
 
 /*
- * requireAuth() — admin portal guard.
+ * requireAuth() - admin portal guard.
  * Redirects to index.php if the admin session is missing.
  */
 function requireAuth(): void {
@@ -427,14 +427,14 @@ function requireAuth(): void {
     applySchemaPatches();
 }
 
-/* The password every fresh install starts with — never accepted on the live site */
+/* The password every fresh install starts with - never accepted on the live site */
 const DEFAULT_ADMIN_PASSWORD = 'admin123';
 
 /* Signed-in sessions end after this long without any page being opened */
 const SESSION_IDLE_SECONDS = 8 * 3600;
 
 /*
- * False (and the session is ended) when the user has been idle too long —
+ * False (and the session is ended) when the user has been idle too long -
  * a payroll left open on a shared PC does not stay signed in forever.
  */
 function sessionStillActive(): bool {
@@ -490,7 +490,7 @@ function recordLogin(PDO $db, string $email, bool $ok): void {
 }
 
 /*
- * jsonResponse() — terminate with a JSON payload.
+ * jsonResponse() - terminate with a JSON payload.
  * Used by all API endpoints under api/.
  */
 function jsonResponse(array $data, int $code = 200): void {
@@ -505,7 +505,7 @@ function jsonResponse(array $data, int $code = 200): void {
  * The single place these numbers live: the functions below compute with
  * them and Settings shows them (read-only), so the two can never disagree.
  * When an agency changes a rate, edit it here.
- * Last checked October 2026 — unchanged for 2026 by all four agencies.
+ * Last checked October 2026 - unchanged for 2026 by all four agencies.
  */
 /* Marks this copy of the app as carrying the 2026-10-07 payroll audit fixes (tests/AUDIT_FINDINGS.md). No schema changes. */
 const PAYROLL_AUDIT_FIXES = '2026-10-07';
@@ -513,7 +513,7 @@ const PAYROLL_AUDIT_FIXES = '2026-10-07';
 /* Tax-exempt yearly ceiling for 13th-month pay and other benefits (TRAIN law, Sec. 32(B)(7)(e)) */
 const BIR_EXEMPT_BENEFITS = 90000.0;
 
-/* Sanity limits for what a single day (or a pay period) may hold — a typo must not become pay */
+/* Sanity limits for what a single day (or a pay period) may hold - a typo must not become pay */
 const MAX_DAY_HOURS    = 24.0;    /* worked in one day */
 const MAX_DAY_OVERTIME = 16.0;    /* overtime in one day */
 const MAX_RATE_PESOS   = 100000.0;/* an hourly overtime / late rate, or a daily salary rate */
@@ -558,7 +558,7 @@ function dayHoursProblem($hours, $ot, $late, $under = null): ?string {
     return null;
 }
 
-/* The same for a whole pay period's totals (a totals file): at most 24 h — and MAX_DAY_OVERTIME h of overtime — for every calendar day of the period */
+/* The same for a whole pay period's totals (a totals file): at most 24 h - and MAX_DAY_OVERTIME h of overtime - for every calendar day of the period */
 function periodHoursProblem($hours, $ot, $late, int $days): ?string {
     $days = max(1, $days);
     $v = [];
@@ -643,7 +643,7 @@ function sssCredit(float $compensation): float {
 }
 
 /* SSS employee share: 5% of the salary credit. Compensation is ALL pay
-   earned in the month — basic, overtime, everything (RA 11199, Sec. 8). */
+   earned in the month - basic, overtime, everything (RA 11199, Sec. 8). */
 function sssMonthly(float $compensation): float {
     return round(sssCredit($compensation) * PH_RULES['sss']['ee_rate'], 2);
 }
@@ -667,7 +667,7 @@ function pagibigMonthly(float $monthlyPay): float {
  * BIR withholding tax on TAXABLE compensation for one payroll period,
  * from the Annex E table of that period: 'daily', 'weekly', 'semi', 'monthly'.
  * Taxable = pay minus the employee's own SSS, PhilHealth and Pag-IBIG,
- * which are non-taxable — computePayLine() takes them off before calling this.
+ * which are non-taxable - computePayLine() takes them off before calling this.
  *
  * Worked in WHOLE CENTAVOS: the excess over the bracket is a difference of two
  * floats, and that subtraction leaves ~1e-13 of noise, so a tax of exactly half a
@@ -695,7 +695,7 @@ function birTax(float $taxable, string $table = 'monthly'): float {
  *           month on the month's actual pay
  * Either way the month ends exact: the contribution on the month's real
  * pay, no more, no less. The defaults follow L&N Pharmacy's own
- * timesheets — SSS from the 1st cut-off, PhilHealth and Pag-IBIG on the 2nd.
+ * timesheets - SSS from the 1st cut-off, PhilHealth and Pag-IBIG on the 2nd.
  */
 const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second'];
 
@@ -725,7 +725,7 @@ function contributionPlanText(array $ctx): string {
 }
 
 /*
- * Government contributions for one employee on one pay run — the employee's
+ * Government contributions for one employee on one pay run - the employee's
  * share (deducted from pay) and the company's share (paid on top).
  *
  *   $basic     basic pay of this run (after absences and undertime)
@@ -739,7 +739,7 @@ function contributionPlanText(array $ctx): string {
  *               contract salary (PhilHealth is not prorated)
  *   Pag-IBIG    on basic pay, at most ₱10,000
  * Floors and caps (PhilHealth ₱250, SSS ₱5,000 credit, Pag-IBIG ₱200) are
- * therefore monthly — charged once, never twice — and the month ends exact.
+ * therefore monthly - charged once, never twice - and the month ends exact.
  * Which runs take what follows contributionTiming().
  */
 function contributionBreakdown(array $emp, float $basic, float $earnings, array $ctx): array {
@@ -772,7 +772,7 @@ function contributionBreakdown(array $emp, float $basic, float $earnings, array 
 
     /* The company's share of what is due now. PhilHealth is split equally and
        Pag-IBIG is 2% each (company 2% even when the employee pays 1%); SSS
-       is 10% against the employee's 5% — so each follows the employee share.
+       is 10% against the employee's 5% - so each follows the employee share.
        EC is a flat monthly amount: what is still owed after earlier runs. */
     $pagRatio = $basicM <= $R['pagibig']['low_limit'] ? $R['pagibig']['er_rate'] / $R['pagibig']['rate_low'] : 1.0;
     $ecOf     = fn(float $credit) => $credit >= $R['sss']['ec_from'] ? $R['sss']['ec_high'] : $R['sss']['ec_low'];
@@ -829,7 +829,7 @@ function payEmployee(array $e): array {
 /*
  * Hours to pay from day-by-day records, the way the pharmacy's timesheet
  * pays them: each duty day is one full day (the employee's duty hours,
- * e.g. 8 or 10) minus its undertime — the timesheet's own undertime when it
+ * e.g. 8 or 10) minus its undertime - the timesheet's own undertime when it
  * states one, otherwise the hours short of a full day rounded to the
  * nearest hour (7:35 of 8 -> 0, 7:27 -> 1). A long day without approved
  * overtime is still one day.
@@ -861,7 +861,7 @@ function dayUndertime(array $d, float $dayHours): float {
 }
 
 /*
- * One employee's pay for one payroll run — shared by the day-by-day and
+ * One employee's pay for one payroll run - shared by the day-by-day and
  * totals uploads, manual attendance and leave decisions, so they can never
  * compute differently.
  *
@@ -870,7 +870,7 @@ function dayUndertime(array $d, float $dayHours): float {
  *               per duty day of THEIR duty hours (8 by default, 10 for a
  *               10-hour shift), so undertime costs rate ÷ duty hours an hour.
  *   $perDay     true when $paidHours came from day-by-day records. Lateness is
- *               then not charged separately — coming in late only costs pay if
+ *               then not charged separately - coming in late only costs pay if
  *               it leaves the day short, as undertime (the pharmacy's own
  *               rule). Settings' late rate applies only to totals files, which
  *               carry late hours but no days.
@@ -883,10 +883,10 @@ function dayUndertime(array $d, float $dayHours): float {
  *               cost nothing. A daily-rate employee is simply paid for the
  *               duty hours in $paidHours, so their undertime is already out.
  *
- * Gross pay is everything earned: basic + overtime − late — what the
+ * Gross pay is everything earned: basic + overtime − late - what the
  * pharmacy's timesheet calls GROSS PAY. Then, month-to-date (see
  * contributionBreakdown): SSS, PhilHealth, Pag-IBIG, and withholding tax on
- * gross minus those contributions — this run's BIR table (semi-monthly,
+ * gross minus those contributions - this run's BIR table (semi-monthly,
  * weekly), and on the month's last run the monthly table on the whole
  * month, minus what earlier runs withheld.
  *
@@ -968,7 +968,7 @@ function overtimePay(float $ot, int $payCents, int $payDen, float $dayHours, arr
  *   not the month's last run   the run's own BIR table (semi-monthly, weekly)
  *   the month's last run       the monthly table on the WHOLE month, minus what the earlier runs withheld. If they
  *                              withheld more than the month owes (a big first half, a small second) the difference
- *                              comes back as a NEGATIVE tax — a refund — so the month always ends exact.
+ *                              comes back as a NEGATIVE tax - a refund - so the month always ends exact.
  * $c is contributionBreakdown()'s result for this run.
  */
 function settleWithholdingTax(float $gross, array $c, array $ctx): array {
@@ -999,7 +999,7 @@ function restDayLabel(?string $restDays): string {
     return $list ? implode(', ', array_map(fn($d) => $names[$d], $list)) : 'None';
 }
 
-/* Working days in the month a period starts in — every day except the
+/* Working days in the month a period starts in - every day except the
    given days off (Sunday unless the employee's own schedule says otherwise) */
 function workingDaysInMonth(string $periodStart, array $restDays = [7]): int {
     $first = date('Y-m-01', strtotime($periodStart));
@@ -1049,12 +1049,12 @@ function attendanceCalendar(PDO $db, array $empIds, string $from, string $to): a
 
 /*
  * One day for one employee, from attendanceCalendar():
- *   worked   — has hours that day (a day off worked still counts as worked)
- *   nothired — before the employee's hire date
- *   off      — their weekly day off, or a day the timesheet marks OFF
+ *   worked   - has hours that day (a day off worked still counts as worked)
+ *   nothired - before the employee's hire date
+ *   off      - their weekly day off, or a day the timesheet marks OFF
  *              ($markedOff): never absent, never deducted
- *   leave    — approved leave: not absent, no deduction (paid)
- *   absent   — a working day with no hours and no approved leave
+ *   leave    - approved leave: not absent, no deduction (paid)
+ *   absent   - a working day with no hours and no approved leave
  *              (pending or rejected leave does not excuse it)
  */
 function dayStatus(?array $cal, string $date, bool $worked, bool $markedOff = false): string {
@@ -1068,7 +1068,7 @@ function dayStatus(?array $cal, string $date, bool $worked, bool $markedOff = fa
 
 /*
  * The pay period a page opens on when none is picked: the one whose payroll
- * was computed most recently — what was just uploaded — else the newest one.
+ * was computed most recently - what was just uploaded - else the newest one.
  * (Opening on the newest by date showed an old, unrelated period after an
  * upload into an earlier one.)
  */
@@ -1101,7 +1101,7 @@ function payContext(PDO $db, int $periodId): array {
         $st = $db->prepare("SELECT period_start, period_end, period_type FROM payroll_periods WHERE id = ?");
         $st->execute([$periodId]);
     } catch (PDOException $e) {
-        /* period_type not added yet (pages add it on load) — use the default */
+        /* period_type not added yet (pages add it on load) - use the default */
         $st = $db->prepare("SELECT period_start, period_end, NULL AS period_type FROM payroll_periods WHERE id = ?");
         $st->execute([$periodId]);
     }
@@ -1111,7 +1111,7 @@ function payContext(PDO $db, int $periodId): array {
     /*
      * Contributions and tax are settled per calendar MONTH. What earlier pay
      * runs of this same month already earned, deducted and withheld, per
-     * employee — each cut-off then only takes what is still due.
+     * employee - each cut-off then only takes what is still due.
      * gross_pay holds everything earned (basic + overtime − late), so basic
      * pay is gross_pay − ot_late_adj.
      */
@@ -1125,7 +1125,7 @@ function payContext(PDO $db, int $periodId): array {
               FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
              WHERE pp.id <> ? AND pp.period_start >= ? AND pp.period_end < ?
              GROUP BY p.emp_id");
-        /* only runs that ENDED before this one began — an overlapping period
+        /* only runs that ENDED before this one began - an overlapping period
            (e.g. an old whole-month period over the same days) is not history */
         $st->execute([$periodId, $monthStart, $start]);
         foreach ($st->fetchAll() as $r) {
@@ -1149,7 +1149,7 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
     $end   = $period['period_end'] ?? $start;
     $type  = periodType($period['period_type'] ?? null);
 
-    /* The month's last pay run — where the month is settled in full */
+    /* The month's last pay run - where the month is settled in full */
     $final = $type === 'Monthly'
           || date('Y-m', strtotime($end . ' +1 day')) !== date('Y-m', strtotime($start))
           || ($type === 'Weekly' && date('Y-m', strtotime($end . ' +7 days')) !== date('Y-m', strtotime($start)));
@@ -1180,13 +1180,13 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
  *
  *  Every PH bracket table above (tax, SSS, PhilHealth, Pag-IBIG)
  *  is written against a MONTHLY salary. A payroll run, though,
- *  covers whatever the payroll_period setting says — a whole
+ *  covers whatever the payroll_period setting says - a whole
  *  month, a kinsena (half a month), or a week.
  *
  *  So the computation always works in two steps:
- *    1. monthlyEquivalent() — what this employee earns in a month,
+ *    1. monthlyEquivalent() - what this employee earns in a month,
  *       whichever way their rate happens to be quoted.
- *    2. periodFraction()    — how much of a month this run covers.
+ *    2. periodFraction()    - how much of a month this run covers.
  *  Bracket amounts are looked up on (1) and then scaled by (2).
  * ============================================================= */
 
@@ -1205,9 +1205,9 @@ function periodFraction(?string $periodType = null): float {
 
 /*
  * An employee's full monthly-equivalent salary.
- *   monthly  — base_salary is already a month's pay
- *   kinsenas — base_salary is half a month's pay, so a month is twice it
- *   daily    — base_salary is one day's pay, times the month's working days
+ *   monthly  - base_salary is already a month's pay
+ *   kinsenas - base_salary is half a month's pay, so a month is twice it
+ *   daily    - base_salary is one day's pay, times the month's working days
  */
 function monthlyEquivalent(string $salaryType, float $baseSalary, int $workingDaysInMonth = 26): float {
     return match ($salaryType) {
@@ -1223,7 +1223,7 @@ function monthlyEquivalent(string $salaryType, float $baseSalary, int $workingDa
  * ₱480 day (₱60/h) is below the legal ₱75/h. This lists the active employees the flat rate underpays:
  *   [ ['emp_id', 'full_name', 'legal' => ₱/h the law requires, 'paid' => ₱/h the flat rate pays, 'gap' => ₱/h short], … ]
  * Empty when overtime is paid by the Labor Code method, or when the flat rate is high enough for everyone.
- * (Rest-day, holiday and night-shift premiums are higher still — they are not modelled; see tests/AUDIT_FINDINGS.md D-14.)
+ * (Rest-day, holiday and night-shift premiums are higher still - they are not modelled; see tests/AUDIT_FINDINGS.md D-14.)
  */
 function overtimeShortfalls(PDO $db): array {
     if (getSetting('overtime_method', 'flat') === 'labor_code') return [];
@@ -1256,7 +1256,7 @@ function salaryTypeLabel(string $salaryType): string {
 
 /*
  * A name reduced to a comparable key: lowercase, punctuation dropped, words
- * sorted — so "DELA CRUZ, Juan" and "Juan Dela Cruz" come out the same.
+ * sorted - so "DELA CRUZ, Juan" and "Juan Dela Cruz" come out the same.
  */
 function nameKey(string $name): string {
     $name  = strtolower(trim($name));
@@ -1320,7 +1320,7 @@ function attendanceUploader(): array {
 }
 
 /*
- * Uploads (and manual entries) only go into a period that is still Open —
+ * Uploads (and manual entries) only go into a period that is still Open -
  * for the admin too. Writing into a finalized period would quietly turn its
  * locked payroll back into a draft.
  */
@@ -1340,8 +1340,8 @@ function uploadPeriodGuard(PDO $db, int $periodId, array $who): void {
 
 /*
  * Brings a period's attendance + payroll rows in line with freshly computed
- * ones. Uploads repeat — today's file, then tomorrow's, or the same sheet
- * again with one more line per person — so this must be safe to run any
+ * ones. Uploads repeat - today's file, then tomorrow's, or the same sheet
+ * again with one more line per person - so this must be safe to run any
  * number of times:
  *   - rows are updated IN PLACE (insert or update on period + employee), so a
  *     payroll line keeps its id: its payslip signature, its receipt number
@@ -1360,7 +1360,7 @@ function uploadPeriodGuard(PDO $db, int $periodId, array $who): void {
  * sss, philhealth, pagibig, bonus [12], deductions [13], net [14] (before
  * bonus and deductions), absent days [15], leave days [16], absence
  * deduction [17], undertime hours [18], undertime deduction [19], days off
- * [20] — the last six 0 when left out (a totals file has no days to judge).
+ * [20] - the last six 0 when left out (a totals file has no days to judge).
  */
 function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, array $payRows): void {
     $st = $db->prepare("SELECT finalize_count FROM payroll_periods WHERE id = ?");
@@ -1439,7 +1439,7 @@ function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, a
 
 /*
  * Rebuilds a period's attendance + payroll from every day saved for it in
- * biometric_daily — earlier uploads, today's upload and manual entries alike.
+ * biometric_daily - earlier uploads, today's upload and manual entries alike.
  * This is what lets days accumulate: each save adds or replaces only its own
  * days, then the whole period is summed again. A manager recomputes only
  * their own employees. Returns how many employees got a payroll line.
@@ -1455,7 +1455,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['emp_id']] = payEmployee($er);
     $inScope = fn($id) => $who['scope'] === null || in_array((string)$id, array_map('strval', $who['scope']), true);
 
-    /* Every day saved for the period. Only the period's own dates count —
+    /* Every day saved for the period. Only the period's own dates count -
        rows an old upload left outside them are ignored. */
     $st = $db->prepare("SELECT emp_id, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, day_off
                           FROM biometric_daily WHERE period_id = ? AND att_date BETWEEN ? AND ?");
@@ -1485,8 +1485,8 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     /*
      * Absences. Every day of the period is one of: worked, day off (weekly, or
      * marked OFF on the timesheet), approved leave, before hire, or absent. A
-     * day is only judged once attendance for it has been uploaded — up to the
-     * latest day any record of the employee's branch covers — so days the
+     * day is only judged once attendance for it has been uploaded - up to the
+     * latest day any record of the employee's branch covers - so days the
      * daily uploads have not reached yet are never counted as absent.
      */
     /* Someone on approved leave with no hours at all still gets a line */
@@ -1558,7 +1558,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
 }
 
 /*
- * Approve or reject a leave request — admin and manager alike — then bring
+ * Approve or reject a leave request - admin and manager alike - then bring
  * the payroll in line with it straight away:
  *   Approved  the days are leave: not absent, no deduction (paid)
  *   Rejected  an unworked day is absent: no pay for it
@@ -1582,8 +1582,8 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
         $periods = recomputeEmployeeOpenPeriods($db, $lr['emp_id'], $lr['date_from'], $lr['date_to']);
         if ($periods) {
             $text .= ' Payroll updated for ' . implode(', ', $periods) . ($status === 'Approved'
-                ? ' — the leave days are not counted as absent.'
-                : ' — days not worked count as absent, without pay.');
+                ? ' - the leave days are not counted as absent.'
+                : ' - days not worked count as absent, without pay.');
         }
     } catch (PDOException $e) {
         $text .= ' The payroll could not be updated yet (Reference: ' . logAppError($e) . '); it will be on the next upload.';
@@ -1593,7 +1593,7 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
                          WHERE status <> 'Open' AND period_start <= ? AND period_end >= ?");
     $st->execute([$lr['date_to'], $lr['date_from']]);
     if ($locked = $st->fetchAll(PDO::FETCH_COLUMN)) {
-        $text .= ' ' . implode(', ', $locked) . ' is finalized, so its payroll was not changed — '
+        $text .= ' ' . implode(', ', $locked) . ' is finalized, so its payroll was not changed - '
                . 'unlock it in Payroll Processing and upload its attendance again to apply this decision.';
     }
     return ['type' => 'success', 'text' => $text];
@@ -1663,7 +1663,7 @@ function recomputeMonthFrom(PDO $db, int $periodId, array $who): int {
  *
  * Each run takes SSS / PhilHealth / Pag-IBIG and tax for the month so far, minus what earlier runs already took, so a later
  * run is only right while the earlier ones are unchanged. Open later runs are re-settled automatically; a FINALIZED one is
- * never changed behind the admin's back — so if an earlier cut-off is unlocked and corrected, the finalized one quietly
+ * never changed behind the admin's back - so if an earlier cut-off is unlocked and corrected, the finalized one quietly
  * stops adding up. This finds those lines by working out what the same pay would be settled at against the month as it is
  * NOW (the same arithmetic as computePayLine) and comparing with what is stored. Nothing is stored or changed.
  * Returns emp_id => [column => [stored, now]] for every line that differs.
@@ -1691,7 +1691,7 @@ function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
 /*
  * Should a FINALIZED period be reported as out of date? Only when an earlier cut-off of its own month was changed AFTER it
  * was finalized: still open for correction, or finalized again later. A raise, an employee switch or a Settings change made
- * months afterwards does not make last month's payroll wrong — and "recomputing" it would rewrite history.
+ * months afterwards does not make last month's payroll wrong - and "recomputing" it would rewrite history.
  */
 function earlierRunChangedAfterFinalize(PDO $db, int $periodId): bool {
     $st = $db->prepare("SELECT period_start, finalized_at FROM payroll_periods WHERE id = ?");
@@ -1705,13 +1705,13 @@ function earlierRunChangedAfterFinalize(PDO $db, int $periodId): bool {
     return (int)$st->fetchColumn() > 0;
 }
 
-/* "₱1,234.50", and "−₱289.95" for a negative amount (a tax refund, a negative net pay) — number_format alone prints "₱-289.95" */
+/* "₱1,234.50", and "−₱289.95" for a negative amount (a tax refund, a negative net pay) - number_format alone prints "₱-289.95" */
 function pesoFmt($n, int $decimals = 2): string {
     $n = (float)$n;
     return ($n < 0 ? '−' : '') . '₱' . number_format(abs($n), $decimals);
 }
 
-/* Payroll lines whose net pay is below zero — the statutory minimums or a deduction exceed what was earned.
+/* Payroll lines whose net pay is below zero - the statutory minimums or a deduction exceed what was earned.
    [['emp_id','emp_name','net_pay'], …] */
 function negativeNetLines(PDO $db, int $periodId): array {
     $st = $db->prepare("SELECT emp_id, emp_name, net_pay FROM payroll WHERE period_id = ? AND net_pay < 0 ORDER BY emp_name");
@@ -1724,11 +1724,11 @@ function negativeNetLines(PDO $db, int $periodId): array {
  *
  *     13th-month pay  =  total BASIC pay earned in the calendar year  ÷  12
  *
- * Basic pay is the payroll's own Basic Pay column — gross pay less the overtime / tardiness adjustment — so pay for days worked and
+ * Basic pay is the payroll's own Basic Pay column - gross pay less the overtime / tardiness adjustment - so pay for days worked and
  * paid leave counts, absences and undertime are already out, and overtime, bonuses and allowances are not in (they are not
  * "basic salary" for this purpose). A year's pay is every payroll line of a pay period that STARTS in that year, grouped by month
  * for the computation sheet. Someone who worked only part of the year simply has fewer months in the total (pro-rated); someone
- * who has left is still listed — pay is due on separation. The result is rounded half a centavo UP, in whole centavos.
+ * who has left is still listed - pay is due on separation. The result is rounded half a centavo UP, in whole centavos.
  *
  * "Paid" is every Bonus entry whose reason starts with "13th Month Pay" in a period of that year (those recorded by the 13th Month
  * Pay page and those typed by hand on Bonus & Deductions), so a mid-year advance and the December balance add up.
@@ -1803,10 +1803,10 @@ function thirteenthMonthData(PDO $db, int $year): array {
 }
 
 /*
- * recordAdjustments() — add bonuses or deductions to the payroll lines of ONE open period. The single code path behind the
+ * recordAdjustments() - add bonuses or deductions to the payroll lines of ONE open period. The single code path behind the
  * Adjustments page and the 13th Month Pay page, so both obey the same rules and leave the same trail.
  *
- *   $period  a payroll_periods row (id, period_start, finalize_count) — the caller has checked that it is Open
+ *   $period  a payroll_periods row (id, period_start, finalize_count) - the caller has checked that it is Open
  *   $lines   emp_id => amount (pesos, > 0): one entry per employee
  *   $type    'Bonus' | 'Deduction'
  *
@@ -1814,7 +1814,7 @@ function thirteenthMonthData(PDO $db, int $year): array {
  * half-applied):
  *   · a Deduction that would take net pay below zero (the Labor Code, Art. 113, limits what may be withheld from wages)
  *   · a Bonus that takes the employee's bonuses for the period's calendar year over ₱90,000, the tax-exempt ceiling for
- *     13th-month pay and other benefits — unless $confirmOverExempt says a person decided to record it anyway
+ *     13th-month pay and other benefits - unless $confirmOverExempt says a person decided to record it anyway
  *
  * Returns ['applied', 'applied_ids', 'skipped' (no payroll line), 'negative' / 'over' (texts), 'over_ids', 'cycle', 'is_revision'].
  * A database error rolls everything back and is thrown.
@@ -1906,7 +1906,7 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
 
 /*
  * What the COMPANY adds on top of the pay it hands out, per pay period: its share of SSS (10% of the credit), the Employees'
- * Compensation amount, its half of PhilHealth and its 2% of Pag-IBIG — worked out with the same month-to-date
+ * Compensation amount, its half of PhilHealth and its 2% of Pag-IBIG - worked out with the same month-to-date
  * contributionBreakdown() that payroll.php's "company cost" uses, from the stored payroll lines.
  * Labor cost of a period = Σ gross pay + Σ bonus + these shares (deductions such as loans are the employee's money, not a saving).
  * Returns period_id => ['sss','ec','philhealth','pagibig','total'] in pesos.
@@ -1994,8 +1994,8 @@ function dailyDaysElsewhere(PDO $db, int $periodId, array $keys): array {
  *   $ym     'YYYY-MM'
  *   $scope  null = every employee, otherwise the emp_ids to show
  *   $withPay  also sum the draft/final payroll of the periods inside the month
- * Only days inside their own pay period's dates count — the same rule the
- * payroll uses — so the page and the payroll always agree.
+ * Only days inside their own pay period's dates count - the same rule the
+ * payroll uses - so the page and the payroll always agree.
  */
 function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = true): array {
     $start = $ym . '-01';
@@ -2057,7 +2057,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
 
     /*
      * The days without hours: day off (weekly, or marked OFF on the
-     * timesheet), leave (approved / pending / rejected) or absent — judged
+     * timesheet), leave (approved / pending / rejected) or absent - judged
      * the same way as the payroll, and only up to the latest day the uploads
      * of the employee's branch cover.
      */
@@ -2081,7 +2081,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
             if ($s === 'off')   { $e['marks'][$n] = 'off';   if ($date <= $upTo) $e['off']++; continue; }
             if ($s === 'leave') { $e['marks'][$n] = 'leave'; $e['leave']++; continue; }
             if ($date > $upTo) {
-                /* not uploaded yet — only show a leave still waiting for a decision */
+                /* not uploaded yet - only show a leave still waiting for a decision */
                 $ls = $cal[$id]['leave'][$date]['status'] ?? '';
                 if ($ls === 'Pending') $e['marks'][$n] = 'pending';
                 continue;
@@ -2124,7 +2124,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
 
 /*
  * Days a leave request covers: every calendar day, and the duty days among
- * them (the employee's weekly days off left out) — what payroll pays as leave.
+ * them (the employee's weekly days off left out) - what payroll pays as leave.
  */
 function leaveDays(string $from, string $to, ?string $restDays): array {
     $rest = restDayList($restDays);
@@ -2136,7 +2136,7 @@ function leaveDays(string $from, string $to, ?string $restDays): array {
     return ['calendar' => $cal, 'duty' => $duty];
 }
 
-/* "3 days (2 duty days)" — or just "3 days" when they are the same */
+/* "3 days (2 duty days)" - or just "3 days" when they are the same */
 function leaveDaysLabel(string $from, string $to, ?string $restDays): string {
     ['calendar' => $c, 'duty' => $d] = leaveDays($from, $to, $restDays);
     $txt = $c . ' day' . ($c === 1 ? '' : 's');
@@ -2145,7 +2145,7 @@ function leaveDaysLabel(string $from, string $to, ?string $restDays): string {
 
 /*
  * The pay period "now" is about: the one whose dates hold today, else the
- * latest one by date (never by id — periods are often created out of order).
+ * latest one by date (never by id - periods are often created out of order).
  * $openOnly limits it to periods still open.
  */
 function currentPeriod(PDO $db, bool $openOnly = false): ?array {
@@ -2231,7 +2231,7 @@ function uploadPageScript(PDO $db, ?array $scope): string {
  * upload of a few hundred lines runs past PHP's time limit.
  *
  *   $head  "INSERT INTO t (a,b,c) VALUES"
- *   $tuple "(?,?,?)" — one row's placeholders
+ *   $tuple "(?,?,?)" - one row's placeholders
  *   $tail  optional, e.g. "ON DUPLICATE KEY UPDATE ..."
  */
 function bulkInsert(PDO $db, string $head, string $tuple, array $rows, string $tail = '', int $chunk = 200): void {
@@ -2242,7 +2242,7 @@ function bulkInsert(PDO $db, string $head, string $tuple, array $rows, string $t
 }
 
 /*
- * getSetting() — read one value from the settings table.
+ * getSetting() - read one value from the settings table.
  * Returns $default when the key does not exist.
  */
 function getSetting(string $key, string $default = ''): string {
@@ -2270,9 +2270,9 @@ function settingsCache(array $update = []): array {
 }
 
 /*
- * setSetting() — write one value into the settings table.
+ * setSetting() - write one value into the settings table.
  * Uses INSERT … ON DUPLICATE KEY UPDATE (setting_key is the PK) so a
- * brand-new key — e.g. the company letterhead fields — is created on first
+ * brand-new key - e.g. the company letterhead fields - is created on first
  * save instead of silently doing nothing like a bare UPDATE would.
  */
 function setSetting(string $key, string $value): void {
@@ -2295,7 +2295,7 @@ function signatureCurrent($netSigned, $netNow): bool {
 }
 
 /*
- * Save a payslip signature — only for a finalized period, whose figures can no
+ * Save a payslip signature - only for a finalized period, whose figures can no
  * longer change, and stamped with the net pay it acknowledges.
  * Returns [ok, message].
  */
@@ -2319,7 +2319,7 @@ function savePayslipSignature(PDO $db, array $payrollRow, string $periodLabel, s
 }
 
 /*
- * currentActor() — the human name to stamp on an audit row.
+ * currentActor() - the human name to stamp on an audit row.
  * Works from any portal: admin, manager or employee session.
  */
 function currentActor(): string {
@@ -2332,7 +2332,7 @@ function currentActor(): string {
 }
 
 /*
- * logPeriodAudit() — append one row to the finalize / re-open trail.
+ * logPeriodAudit() - append one row to the finalize / re-open trail.
  *
  * This is the durable record behind every "Revised" indicator in the UI:
  * without it a corrected period looks identical to one that was closed
@@ -2350,13 +2350,13 @@ function logPeriodAudit(int $periodId, string $action, int $cycle = 0, string $n
 }
 
 /*
- * periodRevisionInfo() — everything a page needs to describe one period's
+ * periodRevisionInfo() - everything a page needs to describe one period's
  * revision state in a single query pair.
  *
- *   reopened  — has this period ever been unlocked after a finalize?
- *   cycle     — how many times it has been finalized
- *   revised   — how many payroll rows changed after a finalize
- *   entries   — how many bonus/deduction entries were recorded as corrections
+ *   reopened  - has this period ever been unlocked after a finalize?
+ *   cycle     - how many times it has been finalized
+ *   revised   - how many payroll rows changed after a finalize
+ *   entries   - how many bonus/deduction entries were recorded as corrections
  */
 function periodRevisionInfo(int $periodId): array {
     $out = ['reopened' => false, 'cycle' => 0, 'reopen_count' => 0,
@@ -2384,7 +2384,7 @@ function periodRevisionInfo(int $periodId): array {
                              WHERE period_id = ? AND finalize_cycle > 0');
         $st->execute([$periodId]);
         $out['entries'] = (int)$st->fetchColumn();
-    } catch (PDOException $e) { /* pre-patch database — report "not revised" */ }
+    } catch (PDOException $e) { /* pre-patch database - report "not revised" */ }
 
     return $out;
 }

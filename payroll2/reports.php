@@ -36,7 +36,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Reports & Payslips — Payroll System</title>
+    <title>Reports & Payslips - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <style>
         /* Marks pay that was changed after the period had been finalized */
@@ -81,7 +81,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
                     <?php foreach ($periods as $p): ?>
                     <option value="<?= $p['id'] ?>" <?= $p['id'] == $period_id ? 'selected' : '' ?>>
                         <?= htmlspecialchars($p['period_label']) ?> · <?= htmlspecialchars(periodTypeLabel($p)) ?>
-                        <?= $p['status'] === 'Open' ? '— Open' : '— Finalized' ?>
+                        <?= $p['status'] === 'Open' ? '- Open' : '- Finalized' ?>
                     </option>
                     <?php endforeach; ?>
                 </select>
@@ -106,7 +106,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
             <span>
                 <strong><?= htmlspecialchars($curPeriod['period_label']) ?> is finalized</strong><?php
                 ?><?= !empty($curPeriod['finalized_at']) ? ' on ' . date('M j, Y', strtotime($curPeriod['finalized_at'])) : '' ?>.
-                These figures are locked &mdash; safe to issue and have signed.
+                These figures are locked - safe to issue and have signed.
             </span>
             <a href="sign-payslip.php?period=<?= $period_id ?>">Collect signatures</a>
         </div>
@@ -119,7 +119,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
             <span>
                 <strong>This period was re-opened and corrected after it was first finalized.</strong>
                 <?= (int)$rev['revised'] ?> payslip(s) marked <strong>Revised</strong> below carry figures that
-                replace an earlier copy &mdash; reissue those and collect the signature again.
+                replace an earlier copy - reissue those and collect the signature again.
             </span>
             <a href="history.php?period_id=<?= $period_id ?>">See what changed</a>
         </div>
@@ -179,7 +179,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
                             <?= htmlspecialchars($r['emp_name']) ?>
                             <?php if ($isRev): ?>
                                 <span class="rev-tag"
-                                      title="Pay changed after this period was finalized<?= !empty($r['revised_at']) ? ' — ' . date('M j, Y g:i A', strtotime($r['revised_at'])) : '' ?>">Revised</span>
+                                      title="Pay changed after this period was finalized<?= !empty($r['revised_at']) ? ' - ' . date('M j, Y g:i A', strtotime($r['revised_at'])) : '' ?>">Revised</span>
                             <?php endif; ?>
                         </td>
                         <td>₱<?= number_format($r['gross_pay'] - $r['ot_late_adj'], 2) ?></td>

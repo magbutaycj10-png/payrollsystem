@@ -3,7 +3,7 @@ require 'includes/helpers.php';
 requireAuth();
 
 /*
- * Leave history — the searchable record of every request ever filed.
+ * Leave history - the searchable record of every request ever filed.
  * The working queue lives on leave-requests.php; this page is for looking
  * things up after the fact: by employee, by date range, by outcome.
  */
@@ -66,8 +66,8 @@ foreach ($rows as $lr) {
     $detailMap[$lr['id']] = [
         'emp'       => $lr['emp_name'],
         'emp_id'    => $lr['emp_id'],
-        'branch'    => $lr['branch']   ?: '—',
-        'position'  => $lr['position'] ?: '—',
+        'branch'    => $lr['branch']   ?: '-',
+        'position'  => $lr['position'] ?: '-',
         'type'      => $lr['leave_type'],
         'from'      => date('M d, Y', strtotime($lr['date_from'])),
         'to'        => date('M d, Y', strtotime($lr['date_to'])),
@@ -75,10 +75,10 @@ foreach ($rows as $lr) {
         'days_label' => leaveDaysLabel($lr['date_from'], $lr['date_to'], $lr['rest_days'] ?? null),
         'reason'    => trim((string)$lr['reason']) !== '' ? $lr['reason'] : 'No reason given.',
         'status'    => $lr['status'],
-        'reviewer'  => $lr['reviewed_by'] ?: '—',
-        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '—',
+        'reviewer'  => $lr['reviewed_by'] ?: '-',
+        'note'      => trim((string)$lr['review_note']) !== '' ? $lr['review_note'] : '-',
         'submitted' => date('M d, Y g:i A', strtotime($lr['created_at'])),
-        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '—',
+        'reviewed'  => $lr['reviewed_at'] ? date('M d, Y g:i A', strtotime($lr['reviewed_at'])) : '-',
     ];
 }
 $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'All' || $type !== 'All';
@@ -88,7 +88,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leave History — Payroll System</title>
+    <title>Leave History - Payroll System</title>
     <link rel="stylesheet" href="assets/css/style.css">
     <link rel="stylesheet" href="assets/css/employee.css">
     <style>
@@ -212,7 +212,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
             <div class="card-value"><?= $byStatus['Rejected'] ?></div>
         </div>
         <div class="card card-purple">
-            <div class="card-label" title="Calendar days less each employee's days off — what payroll counts">Leave duty days</div>
+            <div class="card-label" title="Calendar days less each employee's days off - what payroll counts">Leave duty days</div>
             <div class="card-value"><?= $sumDays ?></div>
             <div class="card-sub">Across these requests</div>
         </div>
@@ -222,7 +222,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
         <div class="box-header">
             <h2>Results</h2>
             <?php if (count($rows) >= 500): ?>
-                <span class="badge badge-yellow">Showing the first 500 — narrow the search</span>
+                <span class="badge badge-yellow">Showing the first 500 - narrow the search</span>
             <?php endif; ?>
         </div>
         <div class="table-wrap">
@@ -246,7 +246,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
                             <strong><?= htmlspecialchars($lr['emp_name']) ?></strong>
                             <br><small style="color:#9ca3af;"><?= htmlspecialchars($lr['emp_id']) ?></small>
                         </td>
-                        <td><?= htmlspecialchars($lr['branch'] ?: '—') ?></td>
+                        <td><?= htmlspecialchars($lr['branch'] ?: '-') ?></td>
                         <td><?= htmlspecialchars($lr['leave_type']) ?></td>
                         <td><?= date('M d, Y', strtotime($lr['date_from'])) ?></td>
                         <td><?= date('M d, Y', strtotime($lr['date_to'])) ?></td>
@@ -256,7 +256,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
                                 <?= $lr['status'] ?>
                             </span>
                         </td>
-                        <td style="font-size:.85rem;"><?= htmlspecialchars($lr['reviewed_by'] ?: '—') ?></td>
+                        <td style="font-size:.85rem;"><?= htmlspecialchars($lr['reviewed_by'] ?: '-') ?></td>
                         <td style="font-size:.8rem;color:#6b7280;"><?= date('M d, Y', strtotime($lr['created_at'])) ?></td>
                         <td>
                             <button class="btn btn-ghost btn-sm" onclick="openLeave(<?= (int)$lr['id'] ?>)">Details</button>
@@ -298,7 +298,7 @@ $hasFilters = $q !== '' || $dateFrom !== '' || $dateTo !== '' || $status !== 'Al
         </div>
 
         <p id="lmPendingHint" style="display:none;font-size:.8rem;color:#92400e;background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:10px 12px;margin-top:16px;">
-            Still pending — approve or reject it from
+            Still pending - approve or reject it from
             <a href="leave-requests.php?filter=Pending" style="color:inherit;font-weight:700;">Leave Requests</a>.
         </p>
     </div>
@@ -313,7 +313,7 @@ function openLeave(id) {
     if (!d) return;
 
     document.getElementById('lmTitle').textContent    = d.emp;
-    document.getElementById('lmSub').textContent      = d.type + ' — submitted ' + d.submitted;
+    document.getElementById('lmSub').textContent      = d.type + ' - submitted ' + d.submitted;
     document.getElementById('lmEmpId').textContent    = d.emp_id;
     document.getElementById('lmBranch').textContent   = d.branch;
     document.getElementById('lmPosition').textContent = d.position;
