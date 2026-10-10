@@ -3,10 +3,13 @@
  * Ledger - "the accountant's calculator".
  *
  * An independent re-computation of everything the payroll engine does, written from
- * the statutory rules (SSS Circular 2024-006, PhilHealth 5%, HDMF Circular 460, BIR RR 11-2018
- * Annex E) and the pay rules documented in info/ph_government_deductions.md - NOT from the
- * engine's code. It works in WHOLE CENTAVOS with integer arithmetic only: no floats and
- * no round(), so it is exact and cannot share the engine's rounding behaviour.
+ * the pay rules documented in info/ph_government_deductions.md - NOT from the engine's code.
+ * A pay run takes the employee's own typed MONTHLY amounts (SSS, PhilHealth, Pag-IBIG, tax)
+ * on the cut-off(s) the schedule names. The statutory tables below (SSS Circular 2024-006,
+ * PhilHealth 5%, HDMF Circular 460, BIR RR 11-2018 Annex E) are what suite 01 holds the
+ * reference calculators in helpers.php against. It works in WHOLE CENTAVOS with integer
+ * arithmetic only: no floats and no round(), so it is exact and cannot share the engine's
+ * rounding behaviour.
  *
  * Conventions
  *   money   integer centavos      (₱1,234.56 = 123456)
@@ -135,31 +138,38 @@ final class Ledger
 
     /* ============================================================ pay run */
 
+    /** The schedule Settings starts with: SSS in full on the 1st cut-off, PhilHealth and Pag-IBIG in full on the last, tax in equal shares */
+    public const TIMING = ['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'];
+
     /**
      * One employee's pay for one run, plus the company's shares.
      *
      * $emp   type daily|monthly|kinsenas · base ("480.00") · hours_per_day (null = $cfg['std'])
-     *        rest [ISO weekdays] · hired ?date · sss/ph/pi 1|0 (deduct switches)
+     *        rest [ISO weekdays]   (no hire date: the days that count are the days in $days - see below)
+     *        amt [sss, ph, pi, tax => the employee's MONTHLY amounts, centavos; missing = 0 = none]
      * $run   start · end · type Semi-Monthly|Monthly|Weekly
      * $days  date => [h, ot, late, under (null = work it out), off (bool)]   - hours as decimal text
      * $leave dates of APPROVED leave
-     * $cfg   ot_rate · late_rate · std (standard hours) · timing [sss,philhealth,pagibig => split|second]
+     * $cfg   ot_rate · late_rate · std (standard hours) · timing [sss,philhealth,pagibig,tax => first|split|second]
      *        per_day (true: late is not charged, the day-by-day rule) · refund (true: over-withholding is returned)
-     *        prehire (true: working days before the hire date are unpaid for a salaried employee - D-03)
      *        ot_method flat|labor_code · ot_mult ("1.25"): with labor_code overtime pays hourly rate × ot_mult (D-14)
+     *        runs_before: how many earlier pay runs of this month are in the system (month() fills it in)
      * $prev  earlier runs of the same month, centavos: g, basic, sss, ph, pi, tax
-     * $coveredTo  absences are only judged up to this date (default: the last day with any record)
+     * $coveredTo  the day a daily-rate employee's absences are shown up to (default: the last day with any record).
+     *        A monthly / kinsenas salary has no such limit: the days to compute are the days IN THE FILE, so every working
+     *        day of the run that the file does not account for (hours, OFF, approved leave) is unpaid, uploaded yet or not -
+     *        and the Date Hired never matters.
      */
     public static function run(array $emp, array $run, array $days, array $leave, array $cfg, array $prev = [], ?string $coveredTo = null): array
     {
         $prev += ['g' => 0, 'basic' => 0, 'sss' => 0, 'ph' => 0, 'pi' => 0, 'tax' => 0];
-        $cfg  += ['ot_rate' => '45', 'late_rate' => '80', 'std' => 8, 'per_day' => true, 'refund' => true,
-                  'timing' => ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second']];
+        $cfg  += ['ot_rate' => '45', 'late_rate' => '80', 'std' => 8, 'per_day' => true, 'refund' => true, 'runs_before' => 0,
+                  'timing' => self::TIMING];
+        $cfg['timing'] += self::TIMING;
         $type   = $emp['type'];
         $rateC  = self::c($emp['base']);
         $dayHh  = self::hh($emp['hours_per_day'] ?? $cfg['std']);
         $rest   = $emp['rest'] ?? [7];
-        $hired  = $emp['hired'] ?? null;
         $wd     = self::workingDays($run['start'], $rest);
         $final  = self::isFinal($run['type'], $run['start'], $run['end']);
 
@@ -187,14 +197,11 @@ final class Ledger
         $absent = $leaveN = $off = 0;
         foreach (self::dates($run['start'], $run['end']) as $date) {
             if (isset($worked[$date])) continue;
-            if ($hired && $date < $hired) {
-                // before the hire date: a salaried employee's unworked working day is not paid (D-03) - when the fix is in
-                if (!empty($cfg['prehire']) && $type !== 'daily' && !in_array(self::dow($date), $rest, true)) $absent++;
-                continue;
-            }
             if (!empty($days[$date]['off']) || in_array(self::dow($date), $rest, true)) { if ($date <= $upTo) $off++; continue; }
             if (in_array($date, $leave, true)) { $leaveN++; continue; }
-            if ($date <= $upTo) $absent++;
+            // a working day the file does not account for: unpaid on a salary however far the uploads got (the days to compute are the
+            // days in the file); for a daily rate it is only shown, up to the last uploaded day
+            if ($type !== 'daily' || $date <= $upTo) $absent++;
         }
 
         // ---- basic pay
@@ -223,40 +230,43 @@ final class Ledger
         $lateC = $cfg['per_day'] ? 0 : self::div($lateHh * self::c($cfg['late_rate']), 100);
         $gross = $basic + $otC - $lateC;
 
-        // ---- month-to-date contributions
-        $comp     = $prev['g'] + $gross;
-        $basicM   = $prev['basic'] + $basic;
-        $contract = $type === 'daily' ? 0 : ($type === 'kinsenas' ? 2 * $rateC : $rateC);
-        $phBasis  = ($final && $type !== 'daily') ? max($basicM, $contract) : $basicM;
-        $due = fn(string $k) => $final || $cfg['timing'][$k] === 'split';
-        $on  = ['sss' => ($emp['sss'] ?? 1) == 1, 'ph' => ($emp['ph'] ?? 1) == 1, 'pi' => ($emp['pi'] ?? 1) == 1];
-
-        $sss = ($on['sss'] && $due('sss'))        ? max(0, self::sssEe($comp) - $prev['sss'])              : 0;
-        $ph  = ($on['ph']  && $due('philhealth')) ? max(0, self::philhealthEe($phBasis) - $prev['ph'])     : 0;
-        $pi  = ($on['pi']  && $due('pagibig'))    ? max(0, self::pagibigEe($basicM) - $prev['pi'])         : 0;
+        // ---- the employee's own MONTHLY amounts (typed by the admin; 0 = none), taken per the schedule:
+        //        first   the month's first run takes it all
+        //        split   every run takes its share of the month (1/2 semi-monthly, 12/52 weekly), never more than is owed
+        //        second  nothing until the month's last run
+        //      The month's last run always takes whatever is still owed, so a month comes to exactly the amount typed.
+        //      A contribution never goes below zero; only the last run may hand TAX back (an amount lowered mid-month).
+        $basicM = $prev['basic'] + $basic;
+        $amt    = ($emp['amt'] ?? []) + ['sss' => 0, 'ph' => 0, 'pi' => 0, 'tax' => 0];
+        $share  = ['Semi-Monthly' => [1, 2], 'Weekly' => [12, 52], 'Monthly' => [1, 1]][$run['type']];
+        $timingKey = ['sss' => 'sss', 'ph' => 'philhealth', 'pi' => 'pagibig', 'tax' => 'tax'];
+        $take = function (string $k) use ($amt, $prev, $cfg, $timingKey, $share, $final): int {
+            $owed   = $amt[$k] - $prev[$k];
+            $timing = $cfg['timing'][$timingKey[$k]];
+            if ($final || ($timing === 'first' && $cfg['runs_before'] === 0)) $c = $owed;
+            elseif ($timing === 'split')                                       $c = min(self::div($amt[$k] * $share[0], $share[1]), $owed);
+            else                                                               $c = 0;
+            return ($k === 'tax' && $final && $cfg['refund']) ? $c : max(0, $c);
+        };
+        $sss = $take('sss');
+        $ph  = $take('ph');
+        $pi  = $take('pi');
+        $tax = $take('tax');
         $contrib = $sss + $ph + $pi;
 
-        $ecPrev = $prev['sss'] > 0 ? self::sssEc($prev['g']) : 0;
+        // ---- the company's share, on what this run deducted: SSS twice the employee's, EC ₱10 (₱30 from a ₱750 SSS share, i.e. a
+        //      ₱15,000 credit) once the month takes SSS and the step up when it crosses ₱750, PhilHealth equal, Pag-IBIG 2% (twice at ≤ ₱1,500 pay)
+        $ecAt = fn(int $sssC) => $sssC <= 0 ? 0 : ($sssC >= 75000 ? 3000 : 1000);
         $er = [
             'sss' => 2 * $sss,
-            'ec'  => ($on['sss'] && $due('sss')) ? max(0, self::sssEc($comp) - $ecPrev) : 0,
+            'ec'  => $sss > 0 ? max(0, $ecAt($prev['sss'] + $sss) - $ecAt($prev['sss'])) : 0,
             'ph'  => $ph,
             'pi'  => $basicM <= 150000 ? 2 * $pi : $pi,
         ];
-
-        // ---- withholding tax
-        $taxable = max(0, $gross - $contrib);
-        if ($final) {
-            $monthTaxable = max(0, $prev['g'] - $prev['sss'] - $prev['ph'] - $prev['pi']) + $taxable;
-            $tax = self::tax('monthly', $monthTaxable) - $prev['tax'];
-            if (!$cfg['refund']) $tax = max(0, $tax);
-        } else {
-            $tax = self::tax($run['type'] === 'Weekly' ? 'weekly' : 'semi', $taxable);
-        }
         $net = $gross - $tax - $contrib;
 
         return ['basic' => $basic, 'ot_late' => $otC - $lateC, 'gross' => $gross, 'sss' => $sss, 'ph' => $ph, 'pi' => $pi,
-                'tax' => $tax, 'net' => $net, 'taxable' => $taxable, 'absent' => $absent, 'leave' => $leaveN, 'off' => $off,
+                'tax' => $tax, 'net' => $net, 'absent' => $absent, 'leave' => $leaveN, 'off' => $off,
                 'absent_ded' => $absentDed, 'under_ded' => $underDed, 'under_hh' => $underHh, 'hours_hh' => $hoursHh,
                 'ot_hh' => $otHh, 'late_hh' => $lateHh, 'final' => $final, 'er' => $er, 'working_days' => $wd];
     }
@@ -267,7 +277,7 @@ final class Ledger
         $prev = [];
         $out = [];
         foreach ($runs as $k => $run) {
-            $r = self::run($emp, $run, $days, $leave, $cfg, $prev, $coveredTo[$k] ?? null);
+            $r = self::run($emp, $run, $days, $leave, ['runs_before' => count($out)] + $cfg, $prev, $coveredTo[$k] ?? null);
             $out[$k] = $r;
             $prev = ['g' => ($prev['g'] ?? 0) + $r['gross'], 'basic' => ($prev['basic'] ?? 0) + $r['basic'],
                      'sss' => ($prev['sss'] ?? 0) + $r['sss'], 'ph' => ($prev['ph'] ?? 0) + $r['ph'],

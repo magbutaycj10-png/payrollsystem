@@ -169,7 +169,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
             }
             return $days;
         };
-        $cfg = ['ot_rate' => '45', 'refund' => true, 'prehire' => true, 'timing' => ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second']];
+        $cfg = ['ot_rate' => '45', 'refund' => true, 'timing' => ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second']];
         $expect = array_fill_keys(array_keys($emps), array_fill(1, 12, 0));
         foreach ([1, 2, 3] as $m) {
             $first = sprintf('2026-%02d-01', $m);

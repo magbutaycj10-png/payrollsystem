@@ -65,7 +65,7 @@ if ($curPeriod) {
        change must not tell anyone to "recompute" (and so rewrite) last month's pay. */
     if ($stale && !$isOpen && !earlierRunChangedAfterFinalize($db, $period_id)) $stale = [];
     $schedule = periodTypeLabel($curPeriod);
-    /* How SSS / PhilHealth / Pag-IBIG are taken on this pay run (month-to-date) */
+    /* How the employees' monthly SSS / PhilHealth / Pag-IBIG / tax amounts are taken on this pay run */
     $contribNote = contributionPlanText($ctx);
     /* The month's last cut-off, but nothing earlier this month is in the system */
     $missingEarlier = $ctx['final'] && $ctx['period_type'] !== 'Monthly' && $ctx['earlier_runs'] === 0;
@@ -106,8 +106,9 @@ if ($curPeriod) {
 
 /*
  * Company cost for this pay period. The employee shares are what the payroll
- * rows actually deducted; the company shares come from the same breakdown
- * (contributionBreakdown in helpers.php), so they match the same monthly basis.
+ * rows actually deducted; the company shares are figured on those same
+ * deductions (employerShare in helpers.php). contributionBreakdown supplies
+ * each employee's monthly amounts and when this run takes them.
  */
 $company = null;
 if ($curPeriod && $payrollRows) {
@@ -118,23 +119,22 @@ if ($curPeriod && $payrollRows) {
     $emps = [];
     foreach ($st->fetchAll() as $e) $emps[$e['emp_id']] = payEmployee($e);
 
-    $company = ['rows' => [], 'stale' => false,
+    $company = ['rows' => [], 'stale' => (bool)$stale,
                 'ee' => ['sss' => 0, 'philhealth' => 0, 'pagibig' => 0, 'tax' => 0],
                 'er' => ['sss' => 0, 'ec' => 0, 'philhealth' => 0, 'pagibig' => 0],
                 'earnings' => 0];
     foreach ($payrollRows as $r) {
         $e = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
         /* gross_pay is everything earned (overtime included); basic pay is gross less overtime − late */
-        $b = contributionBreakdown($e, (float)$r['gross_pay'] - (float)$r['ot_late_adj'], (float)$r['gross_pay'], $ctx);
+        $b  = contributionBreakdown($e, (float)$r['gross_pay'] - (float)$r['ot_late_adj'], $ctx);
+        $er = employerShare(['sss' => (float)$r['sss'], 'philhealth' => (float)$r['philhealth'], 'pagibig' => (float)$r['pagibig']],
+                            $b['earlier'], $b['basic']);
         $earn = (float)$r['gross_pay'] + (float)$r['bonus'];
-        foreach (['sss', 'philhealth', 'pagibig'] as $k) {
-            $company['ee'][$k] += (float)$r[$k];
-            if (abs((float)$r[$k] - $b['ee'][$k]) > 0.01) $company['stale'] = true;
-        }
+        foreach (['sss', 'philhealth', 'pagibig'] as $k) $company['ee'][$k] += (float)$r[$k];
         $company['ee']['tax'] += (float)$r['withholding_tax'];
-        foreach ($b['er'] as $k => $v) $company['er'][$k] += $v;
+        foreach ($er as $k => $v) $company['er'][$k] += $v;
         $company['earnings'] += $earn;
-        $company['rows'][] = ['r' => $r, 'b' => $b, 'earn' => $earn, 'cost' => $earn + $b['er_total']];
+        $company['rows'][] = ['r' => $r, 'b' => $b, 'er' => $er, 'earn' => $earn, 'cost' => $earn + array_sum($er)];
     }
     $company['er_total'] = array_sum($company['er']);
     $company['cost']     = $company['earnings'] + $company['er_total'];
@@ -313,7 +313,7 @@ if ($period_id) {
         <div class="alert alert-warn">
             <span>
                 <strong><?= count($stale) ?> line(s) in this period no longer settle the month correctly.</strong>
-                Their SSS / PhilHealth / Pag-IBIG / tax were worked out against earlier cut-offs of the month (or Settings) that have since changed
+                Their SSS / PhilHealth / Pag-IBIG / tax were taken against earlier cut-offs of the month, the Contribution Schedule or the employee's own monthly amounts, which have since changed
                 (<?= htmlspecialchars(implode(', ', array_slice(array_map(fn($id) => $id, array_keys($stale)), 0, 6))) ?><?= count($stale) > 6 ? ', …' : '' ?>).
                 <?= $isOpen ? 'Press <strong>Recompute</strong> to refresh them' : 'Unlock this period, press <strong>Recompute</strong>, then finalize it again' ?>.
             </span>
@@ -326,7 +326,7 @@ if ($period_id) {
             <span>
                 <strong><?= count($negNet) ?> employee(s) have a negative net pay:</strong>
                 <?= htmlspecialchars(implode('; ', array_map(fn($r) => $r['emp_name'] . ' (' . pesoFmt($r['net_pay']) . ')', array_slice($negNet, 0, 6)))) ?><?= count($negNet) > 6 ? '; …' : '' ?>.
-                The statutory minimum contributions (SSS, PhilHealth) or a deduction are larger than what was earned. Check their days, rate and deductions before finalizing.
+                Their monthly SSS, PhilHealth, Pag-IBIG or tax amounts, or a deduction, are larger than what was earned. Check their days, rate, amounts and deductions before finalizing.
             </span>
         </div>
         <?php endif; ?>
@@ -398,7 +398,7 @@ if ($period_id) {
             <table class="data-table" id="payrollTable">
                 <thead>
                     <tr>
-                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unpaid days - absent, or a salaried employee's working days before the hire date (deducted from salaried pay) / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
+                        <th>ID</th><th>Name</th><th title="Days with hours, from day-by-day uploads">Days</th><th title="Unpaid days - absent, or (monthly / kinsenas salary) working days that are not in the uploaded timesheet and are not a day off or approved leave: deducted from salaried pay / approved leave days (paid) / days off (never deducted)">Absent / Leave / Off</th><th>Hours</th><th>OT Hrs</th><th>Late Hrs</th><th title="Hours short of full duty days, and what they cost">UT Hrs</th>
                         <th title="Pay for the days worked, after undertime and absences">Basic Pay</th>
                         <th title="Overtime pay less late deductions">OT − Late</th>
                         <th title="Basic + OT − late - the timesheet's GROSS PAY">Gross Pay</th>
@@ -499,15 +499,15 @@ if ($period_id) {
             <?php if ($missingEarlier): ?>
             <div class="alert alert-info" style="margin-bottom:14px;">
                 <span>The earlier cut-off of <?= date('F Y', strtotime($curPeriod['period_start'])) ?> is not in the system,
-                so this month's contributions are based on this cut-off's pay only. Upload the 1st half too and these
-                figures are recomputed when you upload this cut-off again.</span>
+                so nothing was taken from it and this cut-off takes each employee's whole monthly SSS, PhilHealth, Pag-IBIG and
+                tax amounts. Upload the 1st half too and these figures are recomputed when you upload this cut-off again.</span>
             </div>
             <?php endif; ?>
 
             <?php if ($company['stale']): ?>
             <div class="alert alert-warn" style="margin-bottom:14px;">
-                <span>Settings or an employee's contribution switches changed after this pay run was computed.
-                The company shares below follow the current settings - upload the attendance again to refresh the employee shares too.</span>
+                <span>An employee's monthly amounts or the Contribution Schedule changed after this pay run was computed -
+                see the warning at the top of the page. The company shares below follow what was deducted.</span>
             </div>
             <?php endif; ?>
 
@@ -519,10 +519,10 @@ if ($period_id) {
                     <tbody>
                         <?php
                         $rem = [
-                            ['SSS', 'Regular SSS: employee 5%, company 10% of the salary credit', $company['ee']['sss'], $company['er']['sss']],
+                            ['SSS', "Regular SSS: the employee's amount as typed; company 10% against the employee's 5%", $company['ee']['sss'], $company['er']['sss']],
                             ['SSS - EC', "Employees' Compensation: company only, ₱10 or ₱30 a month", 0, $company['er']['ec']],
-                            ['PhilHealth', '5% of monthly basic pay, split equally', $company['ee']['philhealth'], $company['er']['philhealth']],
-                            ['Pag-IBIG', 'Employee 2%, company 2% of pay up to ₱10,000', $company['ee']['pagibig'], $company['er']['pagibig']],
+                            ['PhilHealth', "The employee's amount as typed; the company pays an equal share", $company['ee']['philhealth'], $company['er']['philhealth']],
+                            ['Pag-IBIG', "The employee's amount as typed; the company pays 2%, matching it", $company['ee']['pagibig'], $company['er']['pagibig']],
                             ['BIR', 'Withholding tax on compensation - employee only', $company['ee']['tax'], 0],
                         ];
                         $tEE = $tER = 0;
@@ -542,51 +542,63 @@ if ($period_id) {
             </div>
 
             <details class="co-more">
-                <summary>Per employee - how each contribution was figured</summary>
+                <summary>Per employee - the monthly amounts and what this pay run took</summary>
                 <p class="co-sub" style="margin:4px 0 10px;">
-                    Contributions are monthly: each is read on the pay earned <b>so far this month</b> - SSS on all pay
-                    (overtime included), PhilHealth and Pag-IBIG on basic pay - minus what earlier cut-offs already took.
-                    This pay run: <?= htmlspecialchars($contribNote) ?>. So minimums such as PhilHealth's ₱250 are charged
-                    once a month, never twice, and each month ends exact.
+                    SSS, PhilHealth, Pag-IBIG and withholding tax are the monthly amounts typed on each employee (Employees &rsaquo; Edit).
+                    This pay run: <?= htmlspecialchars($contribNote) ?>. Whichever cut-off takes them, the month ends at exactly the
+                    amount typed. The company's share is figured on what was deducted.
                 </p>
+                <?php
+                /* under an amount: what the employee is set to pay a month, what came out earlier, and when the rest does
+                   (HTML-ready, like $peso: only numbers and fixed words go in) */
+                $sub = function (array $b, string $k) use ($peso, $ctx): string {
+                    $s = 'monthly ' . $peso($b['month'][$k]);
+                    if ($b['earlier'][$k] > 0) $s .= ' · ' . $peso($b['earlier'][$k]) . ' taken earlier';
+                    if (!$b['due'][$k]) $s .= ' · ' . ($ctx['timing'][$k] === 'first' ? 'taken on the 1st cut-off' : 'waits for the last cut-off');
+                    return $s;
+                };
+                ?>
                 <div class="table-wrap">
                     <table class="data-table co-table">
                         <thead>
                             <tr>
-                                <th>Employee</th><th class="num">Pay this month so far</th>
+                                <th>Employee</th>
                                 <th class="num">SSS<br><span class="co-sub">emp / co. + EC</span></th>
                                 <th class="num">PhilHealth<br><span class="co-sub">emp / co.</span></th>
                                 <th class="num">Pag-IBIG<br><span class="co-sub">emp / co.</span></th>
+                                <th class="num">Withholding tax<br><span class="co-sub">employee only</span></th>
                                 <th class="num">Company total</th><th class="num">Cost to company</th>
                             </tr>
                         </thead>
                         <tbody>
-                        <?php foreach ($company['rows'] as ['r' => $r, 'b' => $b, 'cost' => $cost]): ?>
+                        <?php foreach ($company['rows'] as ['r' => $r, 'b' => $b, 'er' => $er, 'cost' => $cost]): ?>
                             <tr>
                                 <td><strong><?= htmlspecialchars($r['emp_name']) ?></strong><div class="co-sub"><?= htmlspecialchars($r['emp_id']) ?></div></td>
-                                <td class="num"><?= $peso($b['comp']) ?>
-                                    <div class="co-sub">basic <?= $peso($b['basic']) ?><?= $b['earlier']['g'] > 0 ? ' · earlier cut-offs ' . $peso($b['earlier']['g']) : '' ?></div></td>
                                 <td class="num">
                                     <?php if ($b['on']['sss']): ?>
-                                        <?= $peso($r['sss']) ?> / <?= $peso($b['er']['sss']) ?> + <?= $peso($b['er']['ec']) ?>
-                                        <div class="co-sub">credit <?= $peso($b['msc']) ?><?= $b['due']['sss'] ? '' : ' · waits for the last cut-off' ?></div>
-                                    <?php else: ?><span class="co-sub">not deducted</span><?php endif; ?>
+                                        <?= $peso($r['sss']) ?> / <?= $peso($er['sss']) ?> + <?= $peso($er['ec']) ?>
+                                        <div class="co-sub"><?= $sub($b, 'sss') ?></div>
+                                    <?php else: ?><span class="co-sub">none</span><?php endif; ?>
                                 </td>
                                 <td class="num">
                                     <?php if ($b['on']['philhealth']): ?>
-                                        <?= $peso($r['philhealth']) ?> / <?= $peso($b['er']['philhealth']) ?>
-                                        <div class="co-sub"><?= $b['due']['philhealth']
-                                            ? 'month: 2.5% of ' . $peso(max(PH_RULES['philhealth']['floor'], min($b['ph_basis'], PH_RULES['philhealth']['ceiling']))) . ' each'
-                                            : 'waits for the last cut-off' ?><?= $b['earlier']['philhealth'] > 0 ? ' · ' . $peso($b['earlier']['philhealth']) . ' taken earlier' : '' ?></div>
-                                    <?php else: ?><span class="co-sub">not deducted</span><?php endif; ?>
+                                        <?= $peso($r['philhealth']) ?> / <?= $peso($er['philhealth']) ?>
+                                        <div class="co-sub"><?= $sub($b, 'philhealth') ?></div>
+                                    <?php else: ?><span class="co-sub">none</span><?php endif; ?>
                                 </td>
                                 <td class="num">
                                     <?php if ($b['on']['pagibig']): ?>
-                                        <?= $peso($r['pagibig']) ?> / <?= $peso($b['er']['pagibig']) ?>
-                                        <?php if (!$b['due']['pagibig']): ?><div class="co-sub">waits for the last cut-off</div><?php endif; ?>
-                                    <?php else: ?><span class="co-sub">not deducted</span><?php endif; ?>
+                                        <?= $peso($r['pagibig']) ?> / <?= $peso($er['pagibig']) ?>
+                                        <div class="co-sub"><?= $sub($b, 'pagibig') ?></div>
+                                    <?php else: ?><span class="co-sub">none</span><?php endif; ?>
                                 </td>
-                                <td class="num"><?= $peso($b['er_total']) ?></td>
+                                <td class="num">
+                                    <?php if ($b['on']['tax']): ?>
+                                        <?= pesoFmt($r['withholding_tax']) ?>
+                                        <div class="co-sub"><?= $sub($b, 'tax') ?></div>
+                                    <?php else: ?><span class="co-sub">none</span><?php endif; ?>
+                                </td>
+                                <td class="num"><?= $peso(array_sum($er)) ?></td>
                                 <td class="num"><strong><?= $peso($cost) ?></strong></td>
                             </tr>
                         <?php endforeach; ?>

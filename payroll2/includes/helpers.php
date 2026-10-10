@@ -183,6 +183,17 @@ function applySchemaPatches(): void {
         "ALTER TABLE employees ADD COLUMN deduct_philhealth TINYINT(1) NOT NULL DEFAULT 1",
         "ALTER TABLE employees ADD COLUMN deduct_pagibig    TINYINT(1) NOT NULL DEFAULT 1",
 
+        // The employee's own MONTHLY SSS, PhilHealth, Pag-IBIG and withholding-tax
+        // amounts, typed in by the admin when adding or editing the employee.
+        // Payroll deducts exactly these (Settings → Contribution Schedule says on
+        // which cut-off) - nothing is worked out from the month's pay any more.
+        // 0 = this employee has none. The deduct_* switches above are no longer
+        // read: a zero amount is how an employee is left out.
+        "ALTER TABLE employees ADD COLUMN sss_amount        DECIMAL(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE employees ADD COLUMN philhealth_amount DECIMAL(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE employees ADD COLUMN pagibig_amount    DECIMAL(12,2) NOT NULL DEFAULT 0",
+        "ALTER TABLE employees ADD COLUMN tax_amount        DECIMAL(12,2) NOT NULL DEFAULT 0",
+
         // finalize_cycle = the period's finalize_count at the moment the entry
         // was recorded. 0 = recorded during the first, normal pass.
         // >0 = recorded after the period had already been finalized once, i.e.
@@ -501,10 +512,13 @@ function jsonResponse(array $data, int $code = 200): void {
 }
 
 /*
- * ── Official contribution and tax tables ──────────────────────────────
- * The single place these numbers live: the functions below compute with
- * them and Settings shows them (read-only), so the two can never disagree.
- * When an agency changes a rate, edit it here.
+ * ── Official contribution and tax tables (REFERENCE) ──────────────────
+ * What the four agencies prescribe. Payroll does NOT apply them: the SSS,
+ * PhilHealth, Pag-IBIG and withholding-tax amounts are typed per employee
+ * by the admin (employees.sss_amount … tax_amount) and deducted as typed.
+ * The tables stay as the guide Settings shows the admin when working out
+ * those amounts, and as the rates the company's share is figured from
+ * (employerShare). When an agency changes a rate, edit it here.
  * Last checked October 2026 - unchanged for 2026 by all four agencies.
  */
 /* Marks this copy of the app as carrying the 2026-10-07 payroll audit fixes (tests/AUDIT_FINDINGS.md). No schema changes. */
@@ -636,6 +650,12 @@ const PH_RULES = [
     ],
 ];
 
+/*
+ * The calculators below - sssCredit, sssMonthly, philhealthMonthly, pagibigMonthly, birTax - work out what the law
+ * prescribes for a given pay. They are REFERENCE: payroll no longer calls them (amounts are typed per employee), and they
+ * are kept, with the tests that pin them to the published tables, for checking an amount the admin is about to enter.
+ */
+
 /* SSS monthly salary credit: the month's compensation to the nearest ₱500, ₱5,000–₱35,000 */
 function sssCredit(float $compensation): float {
     $r = PH_RULES['sss'];
@@ -667,7 +687,7 @@ function pagibigMonthly(float $monthlyPay): float {
  * BIR withholding tax on TAXABLE compensation for one payroll period,
  * from the Annex E table of that period: 'daily', 'weekly', 'semi', 'monthly'.
  * Taxable = pay minus the employee's own SSS, PhilHealth and Pag-IBIG,
- * which are non-taxable - computePayLine() takes them off before calling this.
+ * which are non-taxable - the caller takes them off before calling this.
  *
  * Worked in WHOLE CENTAVOS: the excess over the bracket is a difference of two
  * floats, and that subtraction leaves ~1e-13 of noise, so a tax of exactly half a
@@ -687,116 +707,159 @@ function birTax(float $taxable, string $table = 'monthly'): float {
 }
 
 /*
- * When each contribution is taken in a month with more than one pay run
- * (Settings → Contribution Schedule):
- *   split   every cut-off takes what is due on the month's pay so far,
- *           and the month's last cut-off settles the rest
- *   second  nothing until the month's last cut-off, which takes the whole
- *           month on the month's actual pay
- * Either way the month ends exact: the contribution on the month's real
- * pay, no more, no less. The defaults follow L&N Pharmacy's own
- * timesheets - SSS from the 1st cut-off, PhilHealth and Pag-IBIG on the 2nd.
+ * SSS, PhilHealth, Pag-IBIG and withholding tax are each a MONTHLY amount typed on the employee. When the month has more
+ * than one pay run, Settings → Contribution Schedule says which run takes it:
+ *   first   the month's first run, in full
+ *   split   every run takes its share of the month (half on a semi-monthly payroll), the last run takes the rest
+ *   second  nothing until the month's last run, which takes it in full
+ * Whatever the schedule, the month's last run settles anything still owed, so the month always ends at exactly the
+ * amount typed. The defaults follow L&N Pharmacy's own timesheets - SSS in full on the 1st cut-off, PhilHealth in full on the 2nd.
  */
-const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second'];
+const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'];
+const CONTRIBUTION_TIMING_CHOICES = ['first', 'split', 'second'];
+const CONTRIBUTION_LABELS         = ['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG', 'tax' => 'Withholding tax'];
+const CONTRIBUTION_TIMING_LABELS  = ['first'  => '1st cut-off of the month, in full',
+                                     'split'  => 'every cut-off, in equal shares',
+                                     'second' => 'last cut-off of the month, in full'];
 
 function contributionTiming(): array {
     $out = [];
     foreach (CONTRIBUTION_TIMING_DEFAULT as $k => $def) {
         $v = getSetting("contribution_timing_$k", '');
-        $out[$k] = in_array($v, ['split', 'second'], true) ? $v : $def;
+        $out[$k] = in_array($v, CONTRIBUTION_TIMING_CHOICES, true) ? $v : $def;
     }
     return $out;
 }
 
-/* One line on the screen: how this pay run takes the contributions */
+/*
+ * How much of an employee's monthly amount this pay run takes, from that amount's schedule:
+ *   rest   everything the month still owes - always on the month's last run, and on the month's first run for a "first" amount
+ *   share  this run's share of the month (a "split" amount), never more than is still owed
+ *   none   nothing - it comes out on another run
+ */
+function contributionTake(string $timing, array $ctx): string {
+    if (!empty($ctx['final'])) return 'rest';
+    if ($timing === 'first') return (int)($ctx['earlier_runs'] ?? 0) === 0 ? 'rest' : 'none';
+    return $timing === 'split' ? 'share' : 'none';
+}
+
+/* One line on the screen: how this pay run takes the employees' monthly amounts */
 function contributionPlanText(array $ctx): string {
-    if ($ctx['period_type'] === 'Monthly') return "the month's contributions are taken in full";
-    $names = ['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG'];
-    $split = $second = [];
-    foreach ($ctx['timing'] as $k => $t) { if ($t === 'split') $split[] = $names[$k]; else $second[] = $names[$k]; }
-    $join = fn($a) => count($a) > 1 ? implode(', ', array_slice($a, 0, -1)) . ' and ' . end($a) : implode('', $a);
+    if ($ctx['period_type'] === 'Monthly') return "the month's contributions and tax are taken in full";
+    $names = ['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG', 'tax' => 'withholding tax'];
+    $join  = fn($a) => count($a) > 1 ? implode(', ', array_slice($a, 0, -1)) . ' and ' . end($a) : implode('', $a);
     if ($ctx['final']) {
-        return "last cut-off of the month: settles " . $join(array_values($names))
-             . " on the month's actual pay, minus what earlier cut-offs took";
+        return "last cut-off of the month: " . $join(array_values($names)) . " are settled in full, minus what earlier cut-offs took";
     }
-    return ($split ? $join($split) . ' taken on the pay so far' : '')
-         . ($split && $second ? '; ' : '')
-         . ($second ? $join($second) . ' wait for the last cut-off' : '');
+    $full = $share = $later = $earlier = [];
+    foreach ($ctx['timing'] as $k => $t) {
+        $take = contributionTake($t, $ctx);
+        if     ($take === 'rest')  $full[]    = $names[$k];
+        elseif ($take === 'share') $share[]   = $names[$k];
+        elseif ($t === 'first')    $earlier[] = $names[$k];
+        else                       $later[]   = $names[$k];
+    }
+    return implode('; ', array_filter([
+        $full    ? $join($full) . ' taken in full' : '',
+        $share   ? $join($share) . ' taken in equal shares across the cut-offs' : '',
+        $earlier ? $join($earlier) . ' already taken on the 1st cut-off' : '',
+        $later   ? $join($later) . ' wait for the last cut-off' : '',
+    ]));
 }
 
 /*
- * Government contributions for one employee on one pay run - the employee's
- * share (deducted from pay) and the company's share (paid on top).
+ * SSS, PhilHealth, Pag-IBIG and withholding tax for one employee on one pay run - what is DEDUCTED from their pay, and the
+ * company's share paid on top.
  *
- *   $basic     basic pay of this run (after absences and undertime)
- *   $earnings  everything earned this run: basic + overtime − late
+ * The amounts are the employee's own, typed by the admin (sss_amount, philhealth_amount, pagibig_amount, tax_amount): each
+ * is a monthly amount, 0 meaning none. Nothing is worked out from pay. Which run takes it is the amount's schedule
+ * (contributionTiming / contributionTake); a run takes what the month still owes, so the month adds up to exactly the
+ * amount typed. If the amount is changed mid-month the last run settles the difference: a contribution never goes below
+ * zero, tax is refunded when the month owes less than was withheld.
  *
- * Contributions are monthly, so each is read on the pay earned so far this
- * calendar MONTH (earlier cut-offs + this one), minus what earlier cut-offs
- * already deducted:
- *   SSS         on all compensation earned (overtime included)
- *   PhilHealth  on basic pay; a salaried employee's last cut-off uses the full
- *               contract salary (PhilHealth is not prorated)
- *   Pag-IBIG    on basic pay, at most ₱10,000
- * Floors and caps (PhilHealth ₱250, SSS ₱5,000 credit, Pag-IBIG ₱200) are
- * therefore monthly - charged once, never twice - and the month ends exact.
- * Which runs take what follows contributionTiming().
+ *   $basic     basic pay of this run (after absences and undertime) - only the company's Pag-IBIG rate reads it
+ *
+ * Returns
+ *   earlier    what earlier runs of the month already deducted (EARLIER_NONE shape)
+ *   month      the employee's monthly amounts: sss, philhealth, pagibig, tax
+ *   on         per amount: the employee has one (> 0)
+ *   take       per amount: 'rest' | 'share' | 'none' on this run (contributionTake)
+ *   due        per amount: this run takes something (take is not 'none')
+ *   ee         SSS, PhilHealth, Pag-IBIG deducted on this run
+ *   tax        withholding tax deducted on this run (negative = a refund)
+ *   er         the company's share of what this run deducted (employerShare)
+ *   basic      basic pay so far this month
+ *   ee_total, er_total
  */
-function contributionBreakdown(array $emp, float $basic, float $earnings, array $ctx): array {
-    $type = $emp['salary_type'] ?? 'monthly';
+function contributionBreakdown(array $emp, float $basic, array $ctx): array {
     $prev = $ctx['earlier'][$emp['emp_id'] ?? ''] ?? EARLIER_NONE;
+    $cents = fn($v): int => (int)round((float)$v * 100);       /* whole centavos: no float noise in a split or a balance */
 
-    $comp     = $prev['g'] + $earnings;      /* SSS: all pay earned this month so far */
-    $basicM   = $prev['basic'] + $basic;     /* PhilHealth, Pag-IBIG: basic pay so far */
-    $contract = $type === 'daily' ? 0.0 : monthlyEquivalent($type, (float)$emp['base_salary'], $ctx['working_days']);
-    $phBasis  = ($ctx['final'] && $type !== 'daily') ? max($basicM, $contract) : $basicM;
+    $month = ['sss'        => max(0.0, (float)($emp['sss_amount']        ?? 0)),
+              'philhealth' => max(0.0, (float)($emp['philhealth_amount'] ?? 0)),
+              'pagibig'    => max(0.0, (float)($emp['pagibig_amount']    ?? 0)),
+              'tax'        => max(0.0, (float)($emp['tax_amount']        ?? 0))];
 
-    $on = ['sss'        => (int)($emp['deduct_sss']        ?? 1) === 1,
-           'philhealth' => (int)($emp['deduct_philhealth'] ?? 1) === 1,
-           'pagibig'    => (int)($emp['deduct_pagibig']    ?? 1) === 1];
-    /* due on this run: always on the month's last run, earlier only when split */
-    $due = [];
-    foreach ($ctx['timing'] as $k => $t) $due[$k] = $ctx['final'] || $t === 'split';
-
-    $R     = PH_RULES;
-    $msc   = sssCredit($comp);
-    $month = [   /* the month's employee shares on what is known so far */
-        'sss'        => sssMonthly($comp),
-        'philhealth' => philhealthMonthly($phBasis),
-        'pagibig'    => pagibigMonthly($basicM),
-    ];
-    $ee = [];
-    foreach ($month as $k => $amt) {
-        $ee[$k] = ($on[$k] && $due[$k]) ? round(max(0.0, $amt - $prev[$k]), 2) : 0.0;
+    $take = $due = $on = $now = [];
+    foreach ($month as $k => $amount) {
+        $take[$k] = contributionTake($ctx['timing'][$k] ?? CONTRIBUTION_TIMING_DEFAULT[$k], $ctx);
+        $due[$k]  = $take[$k] !== 'none';
+        $on[$k]   = $amount > 0;
+        $owed     = $cents($amount) - $cents($prev[$k]);
+        $c        = match ($take[$k]) {
+            'rest'  => $owed,
+            'share' => min((int)round($cents($amount) * $ctx['fraction']), $owed),
+            default => 0,
+        };
+        /* only the month's last run may hand tax back */
+        if ($k !== 'tax' || empty($ctx['final'])) $c = max(0, $c);
+        $now[$k] = $c / 100.0;
     }
+    $tax = $now['tax'];
+    unset($now['tax']);
+    $ee  = $now;
 
-    /* The company's share of what is due now. PhilHealth is split equally and
-       Pag-IBIG is 2% each (company 2% even when the employee pays 1%); SSS
-       is 10% against the employee's 5% - so each follows the employee share.
-       EC is a flat monthly amount: what is still owed after earlier runs. */
-    $pagRatio = $basicM <= $R['pagibig']['low_limit'] ? $R['pagibig']['er_rate'] / $R['pagibig']['rate_low'] : 1.0;
-    $ecOf     = fn(float $credit) => $credit >= $R['sss']['ec_from'] ? $R['sss']['ec_high'] : $R['sss']['ec_low'];
-    $ecPrev   = $prev['sss'] > 0 ? $ecOf(sssCredit($prev['g'])) : 0.0;
-    $er = [
-        'sss'        => round($ee['sss'] * ($R['sss']['er_rate'] / $R['sss']['ee_rate']), 2),
-        'ec'         => ($on['sss'] && $due['sss']) ? round(max(0.0, $ecOf($msc) - $ecPrev), 2) : 0.0,
-        'philhealth' => $ee['philhealth'],
-        'pagibig'    => round($ee['pagibig'] * $pagRatio, 2),
-    ];
+    $basicM = $prev['basic'] + $basic;
+    $er     = employerShare($ee, $prev, $basicM);
 
     return [
-        'comp'      => $comp,         // pay earned so far this month (SSS reads this)
-        'basic'     => $basicM,       // basic pay so far this month (Pag-IBIG reads this)
-        'ph_basis'  => $phBasis,      // what PhilHealth reads
+        'basic'     => $basicM,       // basic pay so far this month (the Pag-IBIG company rate reads this)
         'earlier'   => $prev,         // what earlier cut-offs this month paid / deducted
-        'due'       => $due,
-        'msc'       => $on['sss'] ? $msc : 0.0,
+        'month'     => $month,
         'on'        => $on,
-        'month'     => $month,        // the month's employee shares on the pay so far
+        'take'      => $take,
+        'due'       => $due,
         'ee'        => $ee,
+        'tax'       => $tax,
         'er'        => $er,
         'ee_total'  => round(array_sum($ee), 2),
         'er_total'  => round(array_sum($er), 2),
+    ];
+}
+
+/*
+ * What the COMPANY pays on top of the employee shares one pay run deducted - from the deductions themselves, so the figure
+ * follows what was really taken from pay (an employee's amount changing later does not rewrite earlier months).
+ *   $ee           this run's sss, philhealth, pagibig deductions
+ *   $prev         what earlier runs of the month deducted (EARLIER_NONE shape)
+ *   $basicMonth   basic pay so far this month (the Pag-IBIG rate below ₱1,500)
+ * SSS is the company's 10% against the employee's 5%; PhilHealth is split equally; Pag-IBIG is 2% each (the company still
+ * pays 2% when a pay of ₱1,500 or less leaves the employee at 1%); Employees' Compensation is company-only, a flat ₱10 a
+ * month - ₱30 from a ₱15,000 salary credit, which is an SSS share of ₱750 - owed from the first run that takes SSS, with
+ * the difference added if a later run lifts the month's SSS across ₱750.
+ * Returns sss, ec, philhealth, pagibig in pesos.
+ */
+function employerShare(array $ee, array $prev, float $basicMonth): array {
+    $R        = PH_RULES;
+    $pagRatio = $basicMonth <= $R['pagibig']['low_limit'] ? $R['pagibig']['er_rate'] / $R['pagibig']['rate_low'] : 1.0;
+    $ecOf     = fn(float $sss) => $sss <= 0 ? 0.0
+              : (round($sss / $R['sss']['ee_rate'], 2) >= $R['sss']['ec_from'] ? $R['sss']['ec_high'] : $R['sss']['ec_low']);
+    $sssPrev  = (float)$prev['sss'];
+    return [
+        'sss'        => round($ee['sss'] * ($R['sss']['er_rate'] / $R['sss']['ee_rate']), 2),
+        'ec'         => $ee['sss'] > 0 ? round(max(0.0, $ecOf($sssPrev + $ee['sss']) - $ecOf($sssPrev)), 2) : 0.0,
+        'philhealth' => round((float)$ee['philhealth'], 2),
+        'pagibig'    => round($ee['pagibig'] * $pagRatio, 2),
     ];
 }
 
@@ -818,9 +881,11 @@ function payEmployee(array $e): array {
         'full_name'         => (string)($e['full_name'] ?? ''),
         'base_salary'       => (float)($e['base_salary'] ?? 0),
         'salary_type'       => $e['salary_type'] ?? 'monthly',
-        'deduct_sss'        => (int)($e['deduct_sss']        ?? 1),
-        'deduct_philhealth' => (int)($e['deduct_philhealth'] ?? 1),
-        'deduct_pagibig'    => (int)($e['deduct_pagibig']    ?? 1),
+        /* the monthly amounts the admin typed on the employee; 0 = none */
+        'sss_amount'        => (float)($e['sss_amount']        ?? 0),
+        'philhealth_amount' => (float)($e['philhealth_amount'] ?? 0),
+        'pagibig_amount'    => (float)($e['pagibig_amount']    ?? 0),
+        'tax_amount'        => (float)($e['tax_amount']        ?? 0),
         'hours_per_day'     => isset($e['hours_per_day']) && $e['hours_per_day'] !== null ? (float)$e['hours_per_day'] : null,
         'rest_days'         => $e['rest_days'] ?? '7',
     ];
@@ -884,14 +949,14 @@ function dayUndertime(array $d, float $dayHours): float {
  *               duty hours in $paidHours, so their undertime is already out.
  *
  * Gross pay is everything earned: basic + overtime − late - what the
- * pharmacy's timesheet calls GROSS PAY. Then, month-to-date (see
- * contributionBreakdown): SSS, PhilHealth, Pag-IBIG, and withholding tax on
- * gross minus those contributions - this run's BIR table (semi-monthly,
- * weekly), and on the month's last run the monthly table on the whole
- * month, minus what earlier runs withheld.
+ * pharmacy's timesheet calls GROSS PAY. Then the employee's own monthly
+ * SSS, PhilHealth, Pag-IBIG and withholding-tax amounts, as typed on the
+ * employee, are deducted on the run(s) the Contribution Schedule names (see
+ * contributionBreakdown) - they do not depend on what was earned. Net pay is
+ * gross less those four.
  *
  * Returns gross, basic, ot_late_adj, sss, philhealth, pagibig, tax, net,
- * absent_deduction, undertime_hours, undertime_deduction, taxable.
+ * absent_deduction, undertime_hours, undertime_deduction.
  */
 function computePayLine(array $emp, float $paidHours, float $ot, float $late, bool $perDay, array $ctx, array $abs = []): array {
     $rate      = (float)$emp['base_salary'];
@@ -929,18 +994,16 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
     $otLate = round($otPay - $lateDeduction, 2);
     $gross  = round($basic + $otLate, 2);
 
-    $c = contributionBreakdown($emp, $basic, $gross, $ctx);
+    $c = contributionBreakdown($emp, $basic, $ctx);
     ['sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag] = $c['ee'];
-    $contrib = $sss + $ph + $pag;
+    $tax = $c['tax'];
 
-    [$tax, $taxable] = settleWithholdingTax($gross, $c, $ctx);
-
-    $net = round($gross - ($tax + $contrib), 2);
+    $net = round($gross - ($tax + $sss + $ph + $pag), 2);
 
     return ['gross' => $gross, 'basic' => $basic, 'tax' => $tax, 'ot_late_adj' => $otLate,
             'sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag, 'net' => $net,
             'absent_deduction' => $absentDed, 'undertime_hours' => round($under, 2),
-            'undertime_deduction' => $underDed, 'taxable' => round($taxable, 2)];
+            'undertime_deduction' => $underDed];
 }
 
 /*
@@ -960,28 +1023,6 @@ function overtimePay(float $ot, int $payCents, int $payDen, float $dayHours, arr
     $num  = $hh * $payCents * $mult;
     $den  = $dayH * 100 * max(1, $payDen);
     return intdiv(2 * $num + $den, 2 * $den) / 100;
-}
-
-/*
- * Withholding tax of one pay run: [tax, taxable pay].
- *   taxable pay   gross minus the employee's own SSS / PhilHealth / Pag-IBIG (the law exempts them)
- *   not the month's last run   the run's own BIR table (semi-monthly, weekly)
- *   the month's last run       the monthly table on the WHOLE month, minus what the earlier runs withheld. If they
- *                              withheld more than the month owes (a big first half, a small second) the difference
- *                              comes back as a NEGATIVE tax - a refund - so the month always ends exact.
- * $c is contributionBreakdown()'s result for this run.
- */
-function settleWithholdingTax(float $gross, array $c, array $ctx): array {
-    $contrib = $c['ee']['sss'] + $c['ee']['philhealth'] + $c['ee']['pagibig'];
-    $taxable = max(0.0, $gross - $contrib);
-    if ($ctx['final']) {
-        $p     = $c['earlier'];
-        $month = max(0.0, $p['g'] - $p['sss'] - $p['philhealth'] - $p['pagibig']) + $taxable;
-        $tax   = round(birTax($month, 'monthly') - $p['tax'], 2);
-    } else {
-        $tax   = birTax($taxable, $ctx['tax_table']);
-    }
-    return [$tax, $taxable];
 }
 
 /* employees.rest_days ("6,7") -> [6, 7]; ISO weekdays, 1 = Monday … 7 = Sunday */
@@ -1013,10 +1054,13 @@ function workingDaysInMonth(string $periodStart, array $restDays = [7]): int {
 /*
  * What the schedule says about some employees over a date range:
  *   emp_id => ['rest'   => [ISO weekdays off],
- *              'hired'  => 'YYYY-MM-DD' | null,
  *              'branch' => branch name,
  *              'leave'  => ['YYYY-MM-DD' => ['status' => Approved|Pending|Rejected, 'type' => …]]]
  * Where leave requests overlap, Approved beats Pending beats Rejected.
+ *
+ * Deliberately NOT here: the employee's Date Hired. Which days are paid is decided by the uploaded timesheets and nothing
+ * else (see dayStatus()) - an employee added today can have this month's or a past month's file uploaded and is paid for
+ * the days that file holds, not for the days from a hire date to the end of the period.
  */
 function attendanceCalendar(PDO $db, array $empIds, string $from, string $to): array {
     $empIds = array_values(array_unique(array_map('strval', $empIds)));
@@ -1026,7 +1070,7 @@ function attendanceCalendar(PDO $db, array $empIds, string $from, string $to): a
     $st  = $db->prepare("SELECT * FROM employees WHERE emp_id IN ($in)");
     $st->execute($empIds);
     foreach ($st->fetchAll() as $e) {
-        $cal[$e['emp_id']] = ['rest' => restDayList($e['rest_days'] ?? null), 'hired' => $e['date_hired'] ?: null,
+        $cal[$e['emp_id']] = ['rest' => restDayList($e['rest_days'] ?? null),
                               'branch' => (string)($e['branch'] ?? ''), 'leave' => []];
     }
     $rank = ['Rejected' => 1, 'Pending' => 2, 'Approved' => 3];
@@ -1050,16 +1094,15 @@ function attendanceCalendar(PDO $db, array $empIds, string $from, string $to): a
 /*
  * One day for one employee, from attendanceCalendar():
  *   worked   - has hours that day (a day off worked still counts as worked)
- *   nothired - before the employee's hire date
  *   off      - their weekly day off, or a day the timesheet marks OFF
  *              ($markedOff): never absent, never deducted
  *   leave    - approved leave: not absent, no deduction (paid)
- *   absent   - a working day with no hours and no approved leave
+ *   absent   - a working day with no hours and no approved leave: not in the timesheet, so not paid
  *              (pending or rejected leave does not excuse it)
+ * Nothing depends on when the employee was hired or added: the days that count are the days in the file.
  */
 function dayStatus(?array $cal, string $date, bool $worked, bool $markedOff = false): string {
     if ($worked) return 'worked';
-    if ($cal && $cal['hired'] && $date < $cal['hired']) return 'nothired';
     if ($markedOff) return 'off';
     if (in_array((int)date('N', strtotime($date)), $cal['rest'] ?? [7], true)) return 'off';
     if (($cal['leave'][$date]['status'] ?? '') === 'Approved') return 'leave';
@@ -1166,7 +1209,6 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
         'semi'             => $type === 'Semi-Monthly',
         'half'             => (int)date('j', strtotime($start)) <= 15 ? 1 : 2,
         'timing'           => contributionTiming(),
-        'tax_table'        => $type === 'Weekly' ? 'weekly' : ($type === 'Semi-Monthly' ? 'semi' : 'monthly'),
         'final'            => $final,        /* last pay run of the month */
         'earlier'          => $earlier,      /* emp_id => already earned / deducted / withheld this month */
         'earlier_runs'     => $earlierRuns,  /* earlier pay periods this month in the system */
@@ -1178,16 +1220,17 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
 /* =============================================================
  *  Pay-period arithmetic
  *
- *  Every PH bracket table above (tax, SSS, PhilHealth, Pag-IBIG)
- *  is written against a MONTHLY salary. A payroll run, though,
- *  covers whatever the payroll_period setting says - a whole
- *  month, a kinsena (half a month), or a week.
+ *  An employee's rate is quoted per month, per kinsena or per day,
+ *  and an employee's SSS, PhilHealth, Pag-IBIG and tax amounts are
+ *  MONTHLY. A payroll run, though, covers whatever the payroll_period
+ *  setting says - a whole month, a kinsena (half a month), or a week.
  *
- *  So the computation always works in two steps:
+ *  So the computation works in two steps:
  *    1. monthlyEquivalent() - what this employee earns in a month,
  *       whichever way their rate happens to be quoted.
  *    2. periodFraction()    - how much of a month this run covers.
- *  Bracket amounts are looked up on (1) and then scaled by (2).
+ *  Basic pay is (1) scaled by (2); a monthly amount that the schedule
+ *  splits across the cut-offs is scaled by (2) the same way.
  * ============================================================= */
 
 /*
@@ -1484,10 +1527,18 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
 
     /*
      * Absences. Every day of the period is one of: worked, day off (weekly, or
-     * marked OFF on the timesheet), approved leave, before hire, or absent. A
-     * day is only judged once attendance for it has been uploaded - up to the
-     * latest day any record of the employee's branch covers - so days the
-     * daily uploads have not reached yet are never counted as absent.
+     * marked OFF on the timesheet), approved leave, or absent (not in the file).
+     *
+     * The days to compute are the days IN THE FILE - not the days from a hire
+     * date, not "from the employee's first day to the end of the period". For a
+     * monthly / kinsenas salary a working day is paid only when the timesheet
+     * accounts for it (worked, marked OFF, or approved leave); every other
+     * working day of the period is unpaid, uploaded yet or not. So a new
+     * employee with 3 days in the file is paid 3 days, and this month's
+     * partial file is paid for the days uploaded so far.
+     * A daily-rate employee is simply paid for the hours in the file; their
+     * absences are only SHOWN, and only for days the uploads have reached - up
+     * to the latest day any record of the employee's branch covers.
      */
     /* Someone on approved leave with no hours at all still gets a line */
     $st = $db->prepare("SELECT DISTINCT emp_id FROM leave_requests
@@ -1509,20 +1560,17 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     $payRows = [];
     foreach (array_keys($lines) as $id) {
         $emp    = $emps[$id];
-        $absent = $leave = $off = $prehire = 0;
+        $absent = $leave = $off = 0;
         $upTo   = $judgedTo[$cal[$id]['branch'] ?? ''] ?? '';
+        $salary = $emp['salary_type'] !== 'daily';
         for ($d = $per['period_start']; $d <= $per['period_end']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
             $s = dayStatus($cal[$id] ?? null, $d, isset($worked[$id][$d]), isset($offDay[$id][$d]));
             if ($s === 'leave')                    $leave++;
-            if ($s === 'absent' && $d <= $upTo)    $absent++;
             if ($s === 'off'    && $d <= $upTo)    $off++;
-            /* A salaried employee is not paid for the working days before the hire date
-               (a daily-rate employee never is: they are paid for the days they worked) */
-            if ($s === 'nothired' && $emp['salary_type'] !== 'daily'
-                && !in_array((int)date('N', strtotime($d)), $cal[$id]['rest'] ?? [7], true)) $prehire++;
+            /* A working day the file does not account for is unpaid on a salary (absent_days / absent_deduction, one day's rate each),
+               however far the uploads have got; for a daily rate it is only shown, up to the last uploaded day */
+            if ($s === 'absent' && ($salary || $d <= $upTo)) $absent++;
         }
-        /* …they are unpaid days exactly like absences: same day rate, same column (absent_days / absent_deduction) */
-        $absent += $prehire;
 
         /* Each duty day pays one full day of the employee's duty hours, less
            undertime (payHoursFromDays). Approved leave is paid: a daily-rate
@@ -1661,11 +1709,12 @@ function recomputeMonthFrom(PDO $db, int $periodId, array $who): int {
 /*
  * Does this pay run still settle its month the way the cut-offs BEFORE it now stand?
  *
- * Each run takes SSS / PhilHealth / Pag-IBIG and tax for the month so far, minus what earlier runs already took, so a later
- * run is only right while the earlier ones are unchanged. Open later runs are re-settled automatically; a FINALIZED one is
- * never changed behind the admin's back - so if an earlier cut-off is unlocked and corrected, the finalized one quietly
- * stops adding up. This finds those lines by working out what the same pay would be settled at against the month as it is
- * NOW (the same arithmetic as computePayLine) and comparing with what is stored. Nothing is stored or changed.
+ * Each run takes the employee's monthly SSS / PhilHealth / Pag-IBIG and tax amounts minus what earlier runs already took, so a
+ * later run is only right while the earlier ones are unchanged. Open later runs are re-settled automatically; a FINALIZED one
+ * is never changed behind the admin's back - so if an earlier cut-off is unlocked and corrected, or an employee's amount is
+ * edited, the finalized one quietly stops adding up. This finds those lines by working out what the same line would deduct
+ * against the month and the employee as they are NOW (the same arithmetic as computePayLine) and comparing with what is
+ * stored. Nothing is stored or changed.
  * Returns emp_id => [column => [stored, now]] for every line that differs.
  */
 function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
@@ -1678,9 +1727,8 @@ function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
     foreach ($st->fetchAll() as $r) {
         $emp   = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
         $gross = (float)$r['gross_pay'];
-        $c     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $gross, $ctx);
-        [$tax] = settleWithholdingTax($gross, $c, $ctx);
-        $now = ['sss' => $c['ee']['sss'], 'philhealth' => $c['ee']['philhealth'], 'pagibig' => $c['ee']['pagibig'], 'withholding_tax' => $tax];
+        $c     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $ctx);
+        $now = ['sss' => $c['ee']['sss'], 'philhealth' => $c['ee']['philhealth'], 'pagibig' => $c['ee']['pagibig'], 'withholding_tax' => $c['tax']];
         foreach ($now as $col => $v) {
             if (abs($v - (float)$r[$col]) >= 0.005) $out[$r['emp_id']][$col] = [(float)$r[$col], $v];
         }
@@ -1711,7 +1759,7 @@ function pesoFmt($n, int $decimals = 2): string {
     return ($n < 0 ? '−' : '') . '₱' . number_format(abs($n), $decimals);
 }
 
-/* Payroll lines whose net pay is below zero - the statutory minimums or a deduction exceed what was earned.
+/* Payroll lines whose net pay is below zero - the employee's monthly contribution and tax amounts or a deduction exceed what was earned.
    [['emp_id','emp_name','net_pay'], …] */
 function negativeNetLines(PDO $db, int $periodId): array {
     $st = $db->prepare("SELECT emp_id, emp_name, net_pay FROM payroll WHERE period_id = ? AND net_pay < 0 ORDER BY emp_name");
@@ -1906,46 +1954,37 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
 
 /*
  * What the COMPANY adds on top of the pay it hands out, per pay period: its share of SSS (10% of the credit), the Employees'
- * Compensation amount, its half of PhilHealth and its 2% of Pag-IBIG - worked out with the same month-to-date
- * contributionBreakdown() that payroll.php's "company cost" uses, from the stored payroll lines.
+ * Compensation amount, its half of PhilHealth and its 2% of Pag-IBIG - employerShare() applied to what each stored payroll
+ * line actually deducted, the same figures payroll.php's "company cost" shows.
  * Labor cost of a period = Σ gross pay + Σ bonus + these shares (deductions such as loans are the employee's money, not a saving).
  * Returns period_id => ['sss','ec','philhealth','pagibig','total'] in pesos.
  */
 function employerSharesByPeriod(PDO $db): array {
-    $periods = $db->query("SELECT id, period_start, period_end, period_type FROM payroll_periods ORDER BY period_start, id")->fetchAll();
-    $emps = [];
-    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $e) $emps[$e['emp_id']] = payEmployee($e);
+    $periods = $db->query("SELECT id, period_start, period_end FROM payroll_periods ORDER BY period_start, id")->fetchAll();
     $lines = [];
-    foreach ($db->query("SELECT period_id, emp_id, gross_pay, ot_late_adj, sss, philhealth, pagibig, withholding_tax FROM payroll")->fetchAll() as $r) {
+    foreach ($db->query("SELECT period_id, emp_id, gross_pay, ot_late_adj, sss, philhealth, pagibig FROM payroll")->fetchAll() as $r) {
         $lines[$r['period_id']][] = $r;
     }
     $out = [];
     foreach ($periods as $p) {
         $monthStart = date('Y-m-01', strtotime($p['period_start']));
         $earlier = [];
-        $runs = 0;
         foreach ($periods as $q) {      /* runs of the same month that ended before this one began (as payContext() does) */
             if ((int)$q['id'] === (int)$p['id'] || $q['period_start'] < $monthStart || $q['period_end'] >= $p['period_start']) continue;
-            $runs++;
             foreach ($lines[$q['id']] ?? [] as $r) {
                 $e = &$earlier[$r['emp_id']];
-                $e ??= ['g' => 0.0, 'basic' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0, 'tax' => 0.0];
-                $e['g']     += (float)$r['gross_pay'];
+                $e ??= EARLIER_NONE;
                 $e['basic'] += (float)$r['gross_pay'] - (float)$r['ot_late_adj'];
                 $e['sss']   += (float)$r['sss'];
-                $e['philhealth'] += (float)$r['philhealth'];
-                $e['pagibig']    += (float)$r['pagibig'];
-                $e['tax']   += (float)$r['withholding_tax'];
                 unset($e);
             }
         }
-        $ctx = buildPayContext($p, $earlier, $runs);
         $tot = ['sss' => 0.0, 'ec' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
         foreach ($lines[$p['id']] ?? [] as $r) {
-            $emp   = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
-            $gross = (float)$r['gross_pay'];
-            $b     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $gross, $ctx);
-            foreach ($tot as $k => $_) $tot[$k] += $b['er'][$k];
+            $prev = $earlier[$r['emp_id']] ?? EARLIER_NONE;
+            $b    = employerShare(['sss' => (float)$r['sss'], 'philhealth' => (float)$r['philhealth'], 'pagibig' => (float)$r['pagibig']],
+                                  $prev, $prev['basic'] + (float)$r['gross_pay'] - (float)$r['ot_late_adj']);
+            foreach ($tot as $k => $_) $tot[$k] += $b[$k];
         }
         $row = array_map(fn($v) => round($v, 2), $tot);
         $row['total'] = round(array_sum($row), 2);
@@ -2058,8 +2097,12 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
     /*
      * The days without hours: day off (weekly, or marked OFF on the
      * timesheet), leave (approved / pending / rejected) or absent - judged
-     * the same way as the payroll, and only up to the latest day the uploads
-     * of the employee's branch cover.
+     * the same way as the payroll, but only up to the latest day the uploads
+     * of the employee's branch cover: the days after it are shown as "not
+     * uploaded yet", not as absences. (The payroll of a monthly / kinsenas
+     * salary does not pay those days either - the days to compute are the days
+     * in the file - and counts them in its Absent column until they are
+     * uploaded.)
      */
     $cal      = attendanceCalendar($db, array_keys($emps), $start, $end);
     $judgedTo = [];
@@ -2077,7 +2120,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
         for ($n = 1, $len = (int)date('t', strtotime($start)); $n <= $len; $n++) {
             $date = $ym . '-' . str_pad($n, 2, '0', STR_PAD_LEFT);
             $s = dayStatus($cal[$id] ?? null, $date, ($e['days'][$n]['hours'] ?? 0) > 0, !empty($e['days'][$n]['off']));
-            if ($s === 'worked' || $s === 'nothired') continue;
+            if ($s === 'worked') continue;
             if ($s === 'off')   { $e['marks'][$n] = 'off';   if ($date <= $upTo) $e['off']++; continue; }
             if ($s === 'leave') { $e['marks'][$n] = 'leave'; $e['leave']++; continue; }
             if ($date > $upTo) {

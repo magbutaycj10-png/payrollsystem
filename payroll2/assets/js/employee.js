@@ -22,7 +22,7 @@ function openModal() {
     document.getElementById('f_salary').value       = '0';
     document.getElementById('f_salary_type').value  = 'monthly';
     document.getElementById('empPassHint').textContent = '';
-    ['f_d_sss', 'f_d_ph', 'f_d_pag'].forEach(id => { document.getElementById(id).checked = true; });
+    ['f_sss', 'f_ph', 'f_pag', 'f_tax'].forEach(id => { document.getElementById(id).value = ''; });   /* none until typed */
     setRestDays('7');                                   /* Sunday off unless changed */
     document.getElementById('f_day_hours').value = '';
     updateSalaryLabel();
@@ -49,10 +49,12 @@ function editEmp(e) {
     document.getElementById('f_ename').value             = e.emergency_name     || '';
     document.getElementById('f_ephone').value            = e.emergency_phone    || '';
     document.getElementById('f_erelation').value         = e.emergency_relation || '';
-    /* contribution switches: on unless explicitly turned off */
-    document.getElementById('f_d_sss').checked = String(e.deduct_sss ?? '1') !== '0';
-    document.getElementById('f_d_ph').checked  = String(e.deduct_philhealth ?? '1') !== '0';
-    document.getElementById('f_d_pag').checked = String(e.deduct_pagibig ?? '1') !== '0';
+    /* the employee's monthly amounts: an empty box when there is none (0) */
+    const amt = v => parseFloat(v) > 0 ? parseFloat(v) : '';
+    document.getElementById('f_sss').value = amt(e.sss_amount);
+    document.getElementById('f_ph').value  = amt(e.philhealth_amount);
+    document.getElementById('f_pag').value = amt(e.pagibig_amount);
+    document.getElementById('f_tax').value = amt(e.tax_amount);
     setRestDays(e.rest_days ?? '7');
     document.getElementById('f_day_hours').value = e.hours_per_day ? parseFloat(e.hours_per_day) : '';
     updateSalaryLabel();

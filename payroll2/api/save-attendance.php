@@ -142,7 +142,7 @@ if (!$rows) {
 /* Rates, period share of a month, working days - see computePayLine() in helpers.php */
 $ctx = payContext($db, $period_id);
 
-/* Each employee as the pay computation reads them (rate, type, duty hours, switches) */
+/* Each employee as the pay computation reads them (rate, type, duty hours, monthly contribution and tax amounts) */
 $empData = [];
 foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $empData[$er['emp_id']] = payEmployee($er);
 

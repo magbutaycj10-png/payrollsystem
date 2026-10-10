@@ -2,41 +2,68 @@
 /*
  * 11 - More numbers, and what the audit fixes added.
  *
- *   A  high-bracket pay: ₱250,000 and ₱800,000 a month, a ₱1,500 daily rate - every figure worked out by hand from the published tables
+ *   A  big pay, big typed amounts: ₱250,000 and ₱800,000 a month, a ₱1,500 daily rate - the law's figures for that pay typed on the
+ *      employee, taken to the centavo, every figure worked out by hand
  *   B  bonuses and deductions: untaxed, net = gross + bonus − deductions, entries accumulate to the centavo; the ₱90,000 yearly
  *      ceiling for tax-exempt benefits; a deduction may not turn a payslip negative
- *   C  input limits on every door: day upload, totals file, manager's manual entry, Employee Management, Settings, Adjustments
+ *   C  input limits on every door: day upload, totals file, manager's manual entry, Employee Management (and the four optional
+ *      monthly amounts), Settings, Adjustments
  *   D  the Labor Code overtime method, and the Settings warning while the flat rate underpays
- *   E  a tax refund end to end: payslip, register
+ *   E  a tax refund end to end: an amount lowered after a cut-off was finalized - payslip, register
  *   F  the labor-cost series of the forecast equals the employer shares worked out independently
- *   G  hire-date proration, Recompute, the stale-figures and negative-net guards of Finalize, no schema changes
+ *   G  hire-date proration, Recompute, the stale-figures and negative-net guards of Finalize, the four new columns
  *
  * A and the first three B tests run against either version of the app. Everything else describes behaviour the audit fixes added
  * and is skipped on an older copy of the app that lacks it (--app=<older folder>).
  */
 require_once AppCopy::root() . '/includes/bir-print.php';
 
+/**
+ * The tax-refund story, played through the real pages: ₱1,000 a day, 13 days in the 1st cut-off and one in the 2nd. The employee has a typed
+ * tax of ₱579.90 (the 1st cut-off takes half, ₱289.95) with PhilHealth ₱400 and Pag-IBIG ₱200 for the last cut-off. The 1st cut-off is finalized,
+ * then the admin removes the tax on Employees - so the 2nd cut-off settles the month at ₱0 and hands the ₱289.95 back.
+ * Returns ['emp', 'a' (1st period), 'b' (2nd), 'pa', 'pb' (the payroll lines)].
+ */
+function qa_refund_case(string $name): array
+{
+    $e = Fixtures::employee(['full_name' => $name, 'base_salary' => '1000.00', 'philhealth_amount' => '400.00', 'pagibig_amount' => '200.00', 'tax_amount' => '579.90']);
+    $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+    $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
+    Fixtures::days($a, Fixtures::fullDays($name, '2026-04-01', '2026-04-15'));
+    Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $a]);
+    qa_edit_employee($e, ['tax_amount' => '0']);
+    Fixtures::days($b, [Fixtures::day($name, '2026-04-16', 8, 0, 0, 0)]);
+    return ['emp' => $e, 'a' => $a, 'b' => $b, 'pa' => Fixtures::payroll($a)[$e], 'pb' => Fixtures::payroll($b)[$e]];
+}
+
 T::suite('11 · More numbers & the audit fixes', function () {
 
     /* ================================================================== A · high brackets, by hand */
 
-    T::test('Example H - monthly ₱250,000: SSS credit capped at ₱35,000, PhilHealth and Pag-IBIG capped, tax in the 30% bracket', function (T $t) {
+    T::test('Example H - monthly ₱250,000 with the law\'s figures typed: SSS ₱1,750, PhilHealth ₱2,500, Pag-IBIG ₱200, tax ₱57,206.70 - big amounts are taken to the centavo', function (T $t) {
         Fixtures::reset();
-        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00'],
+        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00',
+                                       'sss_amount' => '1750.00', 'philhealth_amount' => '2500.00', 'pagibig_amount' => '200.00', 'tax_amount' => '57206.70'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
         $row = $r['app'][0];
         $t->same([], Scenario::diff($row, $r['exp'][0]), 'engine = ledger on every figure');
-        // gross 250,000.00 · SSS 5% × 35,000 = 1,750.00 · PhilHealth 2.5% × 100,000 = 2,500.00 · Pag-IBIG 2% × 10,000 = 200.00
-        // taxable 250,000 − 4,450 = 245,550.00 → 33,541.80 + 30% × (245,550 − 166,667) = 33,541.80 + 23,664.90 = 57,206.70
+        // the typed figures are what the tables give for ₱250,000: SSS 5% × 35,000 = 1,750 · PhilHealth 2.5% × 100,000 = 2,500 · Pag-IBIG 2% × 10,000 = 200
+        // · tax on taxable 245,550.00 → 33,541.80 + 30% × (245,550 − 166,667) = 57,206.70 - a monthly payroll takes them all in full
         // net 250,000 − 4,450 − 57,206.70 = 188,343.30
         $t->moneyMap(['gross_pay' => 25000000, 'sss' => 175000, 'philhealth' => 250000, 'pagibig' => 20000,
                       'withholding_tax' => 5720670, 'net_pay' => 18834330], $row, 'Example H by hand');
+        // the reference calculators (what the law prescribes) give those same figures
+        $t->money('1750.00', sssMonthly(250000.0), 'reference SSS');
+        $t->money('2500.00', philhealthMonthly(250000.0), 'reference PhilHealth');
+        $t->money('200.00', pagibigMonthly(250000.0), 'reference Pag-IBIG');
+        $t->money('57206.70', birTax(245550.0, 'monthly'), 'reference tax');
     });
 
-    T::test('Example I - monthly ₱800,000: the 35% bracket (over ₱666,667 a month)', function (T $t) {
+    T::test('Example I - monthly ₱800,000 with a ₱228,650.85 tax typed (the 35% bracket\'s figure): taken to the centavo', function (T $t) {
         Fixtures::reset();
-        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '800000.00'],
+        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '800000.00',
+                                       'sss_amount' => '1750.00', 'philhealth_amount' => '2500.00', 'pagibig_amount' => '200.00', 'tax_amount' => '228650.85'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
         $row = $r['app'][0];
@@ -45,11 +72,13 @@ T::suite('11 · More numbers & the audit fixes', function () {
         // net 800,000 − 4,450 − 228,650.85 = 566,899.15
         $t->moneyMap(['gross_pay' => 80000000, 'sss' => 175000, 'philhealth' => 250000, 'pagibig' => 20000,
                       'withholding_tax' => 22865085, 'net_pay' => 56689915], $row, 'Example I by hand');
+        $t->money('228650.85', birTax(795550.0, 'monthly'), 'reference tax');
     });
 
-    T::test('Example K - daily rate ₱1,500 × 26 days = ₱39,000: PhilHealth on the pay, the 20% bracket', function (T $t) {
+    T::test('Example K - daily rate ₱1,500 × 26 days = ₱39,000 with SSS ₱1,750, PhilHealth ₱975, Pag-IBIG ₱200 and tax ₱2,423.40 typed', function (T $t) {
         Fixtures::reset();
-        $r = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00'],
+        $r = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00',
+                                       'sss_amount' => '1750.00', 'philhealth_amount' => '975.00', 'pagibig_amount' => '200.00', 'tax_amount' => '2423.40'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
         $row = $r['app'][0];
@@ -58,6 +87,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         // taxable 36,075.00 → 1,875.00 + 20% × (36,075 − 33,333) = 1,875.00 + 548.40 = 2,423.40 · net 39,000 − 2,925 − 2,423.40 = 33,651.60
         $t->moneyMap(['gross_pay' => 3900000, 'sss' => 175000, 'philhealth' => 97500, 'pagibig' => 20000,
                       'withholding_tax' => 242340, 'net_pay' => 3365160], $row, 'Example K by hand');
+        $t->money('975.00', philhealthMonthly(39000.0), 'reference PhilHealth on ₱39,000');
+        $t->money('2423.40', birTax(36075.0, 'monthly'), 'reference tax');
     });
 
     /* ================================================================== B · bonuses and deductions */
@@ -158,12 +189,12 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('a deduction may not turn a payslip negative: it is held back and said so; one that fits is applied (same request)', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $small = qa_worker('Small Net', '2026-04-01', '2026-04-15', '500.00');
+        $small = qa_worker('Small Net', '2026-04-01', '2026-04-15', '500.00', ['sss_amount' => '325.00']);
         $big   = qa_worker('Big Net', '2026-04-01', '2026-04-15', '1500.00');
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
         Fixtures::days($pid, array_merge(Fixtures::fullDays('Small Net', '2026-04-01', '2026-04-15'), Fixtures::fullDays('Big Net', '2026-04-01', '2026-04-15')));
         $before = Fixtures::payroll($pid);
-        $t->money('6175.00', $before[$small]['net_pay'], 'the ₱6,500 earner takes home ₱6,175 (SSS ₱325)');
+        $t->money('6175.00', $before[$small]['net_pay'], 'the ₱6,500 earner takes home ₱6,175 (typed SSS ₱325)');
         $r = qa_adjust($pid, [$small, $big], 'Deduction', '7000');
         $after = Fixtures::payroll($pid);
         $t->money($before[$small]['net_pay'], $after[$small]['net_pay'], 'a ₱7,000 deduction would leave −₱825: unchanged');
@@ -318,6 +349,66 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM employees WHERE full_name = 'Monthly Big'")->fetchColumn(), 'a ₱9,000,000 monthly salary is within the limit');
     });
 
+    T::test('Employees: SSS, PhilHealth, Pag-IBIG and tax are optional monthly amounts - blank means none (0.00), typed amounts are saved as typed, negative / absurd / non-numeric ones are refused', function (T $t) {
+        Fixtures::reset();
+        $db  = getDB();
+        $add = fn(string $name, array $x) => Http::page('employee.php', $x + ['action' => 'add', 'full_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'daily', 'base_salary' => '500']);
+        $row = fn(string $name) => $db->query('SELECT * FROM employees WHERE full_name = ' . $db->quote($name))->fetch();
+        $none = ['sss_amount' => '0.00', 'philhealth_amount' => '0.00', 'pagibig_amount' => '0.00', 'tax_amount' => '0.00'];
+
+        $add('Blank Boxes', ['sss_amount' => '', 'philhealth_amount' => '', 'pagibig_amount' => '', 'tax_amount' => '']);
+        $t->ok($row('Blank Boxes') !== false, 'an employee with every amount blank is saved');
+        $t->same($none, array_intersect_key($row('Blank Boxes'), $none), 'blank boxes mean none: 0.00 each');
+        $add('No Boxes At All', []);
+        $t->same($none, array_intersect_key($row('No Boxes At All') ?: [], $none), 'the form fields missing altogether: none');
+        $add('Some Typed', ['sss_amount' => '495.50', 'philhealth_amount' => '', 'pagibig_amount' => '100.25', 'tax_amount' => '0']);
+        $t->same(['sss_amount' => '495.50', 'philhealth_amount' => '0.00', 'pagibig_amount' => '100.25', 'tax_amount' => '0.00'], array_intersect_key($row('Some Typed'), $none), 'only some typed');
+        $add('All Typed', ['sss_amount' => '1750', 'philhealth_amount' => '2500.00', 'pagibig_amount' => '200', 'tax_amount' => '9999999.99']);
+        $t->same(['sss_amount' => '1750.00', 'philhealth_amount' => '2500.00', 'pagibig_amount' => '200.00', 'tax_amount' => '9999999.99'], array_intersect_key($row('All Typed'), $none), 'all typed, saved as typed');
+
+        foreach ([['sss_amount', '-1'], ['philhealth_amount', 'abc'], ['pagibig_amount', '100001'], ['tax_amount', '10000001'], ['sss_amount', '1e9'], ['tax_amount', '12,000']] as [$field, $bad]) {
+            $name = "Bad $field $bad";
+            $r = $add($name, [$field => $bad]);
+            $t->same(false, $row($name), "$field = \"$bad\" was saved");
+            $t->contains('Not saved', $r['body'], "$field = \"$bad\" is refused with a message");
+        }
+        // editing: the amounts change, and a bad one leaves the employee as it was
+        $id = $row('Some Typed')['emp_id'];
+        qa_edit_employee($id, ['sss_amount' => '600', 'tax_amount' => '300.50']);
+        $t->same(['sss_amount' => '600.00', 'pagibig_amount' => '100.25', 'tax_amount' => '300.50'], array_intersect_key(Fixtures::empRow($id), ['sss_amount' => 1, 'pagibig_amount' => 1, 'tax_amount' => 1]), 'edited');
+        qa_edit_employee($id, ['sss_amount' => '-5']);
+        $t->money('600.00', Fixtures::empRow($id)['sss_amount'], 'a refused edit changes nothing');
+        // the modal gets the typed amounts back to edit
+        $page = Http::page('employee.php')['body'];
+        $t->contains('name="sss_amount"', $page, 'the form has the four boxes');
+        $t->contains('name="tax_amount"', $page);
+        $t->contains('Contribution Schedule', $page, 'and says where the schedule is set');
+        $t->notContains('name="deduct_sss"', $page, 'the old tick-boxes are gone');
+        $t->notContains('name="deduct_philhealth"', $page);
+        $t->notContains('name="deduct_pagibig"', $page);
+    });
+
+    T::test('editing an employee\'s amounts recomputes their OPEN payroll straight away - and leaves a finalized cut-off exactly as it was', function (T $t) {
+        Fixtures::reset();
+        $e = qa_worker('Edit Me', '2026-04-01', '2026-04-30', '500.00');
+        $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+        $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
+        Fixtures::days($a, Fixtures::fullDays('Edit Me', '2026-04-01', '2026-04-15'));
+        Fixtures::days($b, Fixtures::fullDays('Edit Me', '2026-04-16', '2026-04-30'));
+        $t->money('0.00', Fixtures::payroll($a)[$e]['sss'], 'nothing typed yet: nothing deducted');
+        $t->same(true, Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $a])['json']['success'] ?? null, 'cut-off 1 is finalized');
+        $locked = Fixtures::payroll($a)[$e];
+
+        $r = qa_edit_employee($e, ['sss_amount' => '400.00', 'philhealth_amount' => '250.00', 'tax_amount' => '300']);
+        $t->contains('Payroll recomputed for Apr 16-30, 2026', $r['body'], 'the page says which payroll it brought up to date');
+        $t->notContains('Apr 1-15, 2026.', $r['body'], 'and that it left the finalized one alone');
+        $t->same($locked, Fixtures::payroll($a)[$e], 'the finalized cut-off 1 is untouched');
+        // cut-off 2 is the month's last: it settles everything that cut-off 1 did not take (SSS 400 and half the tax: cut-off 1 took nothing)
+        $after = Fixtures::payroll($b)[$e];
+        $t->moneyMap(['sss' => '400.00', 'philhealth' => '250.00', 'withholding_tax' => '300.00'], $after, 'cut-off 2 takes the whole month at once');
+        $t->money(Ledger::c($after['gross_pay']) - 95000, $after['net_pay'], 'net pay is gross less 400 + 250 + 300');
+    });
+
     T::test('Settings: overtime multiplier 1–3, method flat|labor_code, schedule, timing, duty day 1–24 - junk is refused, valid values saved, the rest still saved', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
@@ -325,21 +416,32 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::setting('overtime_method', 'flat');
         $get = fn(string $k) => (string)getDB()->query("SELECT setting_value FROM settings WHERE setting_key = '$k'")->fetchColumn();
         $r = Http::page('settings.php', ['overtime_multiplier' => '0.5', 'overtime_method' => 'maybe', 'payroll_period' => 'Fortnightly', 'standard_hours' => '30',
-                                         'contribution_timing_sss' => 'never', 'overtime_rate' => '-45', 'late_rate' => 'abc']);
+                                         'contribution_timing_sss' => 'never', 'contribution_timing_tax' => 'weekly', 'overtime_rate' => '-45', 'late_rate' => 'abc']);
         $t->contains('Not saved', $r['body']);
         $t->same('1.25', $get('overtime_multiplier'), 'multiplier 0.5 is below the legal minimum of 1');
         $t->same('flat', $get('overtime_method'), 'unknown method');
         $t->same('Semi-Monthly', $get('payroll_period'), 'unknown schedule keeps the old one');
         $t->same('8', $get('standard_hours'), '30-hour duty day');
-        $t->same('split', $get('contribution_timing_sss'), 'unknown timing');
+        $t->same('first', $get('contribution_timing_sss'), 'unknown timing keeps the old one');
+        $t->same('split', $get('contribution_timing_tax'), 'unknown tax timing keeps the old one');
         $t->same('45', $get('overtime_rate'), 'negative overtime rate');
         $t->same('80', $get('late_rate'), 'non-numeric late rate');
-        Http::page('settings.php', ['overtime_multiplier' => '1.30', 'overtime_method' => 'labor_code', 'overtime_rate' => '60.50', 'standard_hours' => '10', 'contribution_timing_pagibig' => 'split']);
+        Http::page('settings.php', ['overtime_multiplier' => '1.30', 'overtime_method' => 'labor_code', 'overtime_rate' => '60.50', 'standard_hours' => '10',
+                                    'contribution_timing_pagibig' => 'split', 'contribution_timing_sss' => 'second', 'contribution_timing_tax' => 'first']);
         $t->same('1.30', $get('overtime_multiplier'));
         $t->same('labor_code', $get('overtime_method'));
         $t->same('60.50', $get('overtime_rate'));
         $t->same('10', $get('standard_hours'));
-        $t->same('split', $get('contribution_timing_pagibig'));
+        $t->same('split', $get('contribution_timing_pagibig'), 'split is a valid timing');
+        $t->same('second', $get('contribution_timing_sss'), 'second is a valid timing');
+        $t->same('first', $get('contribution_timing_tax'), 'first is a valid timing, for tax too');
+        $page = Http::page('settings.php')['body'];
+        $t->contains('1st cut-off of the month, in full', $page, 'the schedule offers the 1st cut-off');
+        $t->contains('Every cut-off, in equal shares', $page, 'equal shares');
+        $t->contains('Last cut-off of the month, in full', $page, 'and the last cut-off');
+        $t->contains('name="contribution_timing_tax"', $page, 'withholding tax has its own schedule line');
+        $t->contains('Contribution tables - for reference', $page, 'the statutory tables are labelled as reference only');
+        $t->notContains('applied automatically', $page, 'and no longer claimed to be applied automatically');
     });
 
     /* ================================================================== D · Labor Code overtime */
@@ -405,22 +507,15 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
     /* ================================================================== E · tax refund end to end */
 
-    T::test('over-withheld tax comes back as a negative tax on the month\'s last run - printed on the payslip and in the register', function (T $t) {
+    T::test('tax taken in a finalized cut-off and then removed on Employees comes back as a negative tax on the month\'s last run - printed on the payslip and in the register', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        // ₱1,000 a day: 13 days in the first half (tax ₱289.95 on the semi-monthly table), one day in the second; the month's
-        // taxable pay ₱12,750 is under the ₱20,833 exemption, so the month owes ₱0 and the ₱289.95 goes back.
-        $e = Fixtures::employee(['full_name' => 'Refund Case', 'base_salary' => '1000.00']);
-        $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
-        Fixtures::days($a, Fixtures::fullDays('Refund Case', '2026-04-01', '2026-04-15'));
-        Fixtures::days($b, [Fixtures::day('Refund Case', '2026-04-16', 8, 0, 0, 0)]);
-        $pa = Fixtures::payroll($a)[$e];
-        $pb = Fixtures::payroll($b)[$e];
-        $t->money('289.95', $pa['withholding_tax'], 'first cut-off tax');
-        $t->money('-289.95', $pb['withholding_tax'], 'second cut-off returns it');
+        $c = qa_refund_case('Refund Case');
+        [$e, $a, $b, $pa, $pb] = [$c['emp'], $c['a'], $c['b'], $c['pa'], $c['pb']];
+        $t->money('289.95', $pa['withholding_tax'], 'first cut-off takes half of the typed ₱579.90');
+        $t->money('-289.95', $pb['withholding_tax'], 'second cut-off returns it: the month now owes ₱0');
         $t->money('0.00', Ledger::c($pa['withholding_tax']) + Ledger::c($pb['withholding_tax']), 'the month ends at exactly ₱0 tax');
-        // gross 1,000 − contributions (SSS 50 + PhilHealth 350 + Pag-IBIG 200 = 600) + refund 289.95
+        // gross 1,000 − PhilHealth 400 − Pag-IBIG 200 + refund 289.95
         $t->money('689.95', $pb['net_pay'], 'net pay of the second cut-off');
         $slip = Http::page('print-doc.php', [], ['doc' => 'payslip', 'payroll_id' => $pb['id'], 'auto' => '0'])['body'];
         $t->contains('refund of tax withheld earlier this month', $slip, 'payslip label');
@@ -436,12 +531,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('the signature pages (admin, manager) and the employee portal show the refund as a refund, and render without PHP warnings', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $e = Fixtures::employee(['full_name' => 'Refund Pages', 'base_salary' => '1000.00']);
-        $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
-        Fixtures::days($a, Fixtures::fullDays('Refund Pages', '2026-04-01', '2026-04-15'));
-        Fixtures::days($b, [Fixtures::day('Refund Pages', '2026-04-16', 8, 0, 0, 0)]);
-        $pb = Fixtures::payroll($b)[$e];
+        $c = qa_refund_case('Refund Pages');
+        [$e, $a, $b, $pb] = [$c['emp'], $c['a'], $c['b'], $c['pb']];
         getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type) VALUES ('Mgr', ?, 'x', 'manager', '', 'branch')")->execute(['mgr11p-' . uniqid() . '@test']);
         $mid = (int)getDB()->lastInsertId();
         $pages = [
@@ -462,10 +553,11 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
     /* ================================================================== F · the forecast's labor cost */
 
-    T::test('forecast-data.php: total_employer_share = Σ employer SSS (10%) + EC + PhilHealth + Pag-IBIG per period, total_labor_cost adds gross and bonus', function (T $t) {
+    T::test('forecast-data.php: total_employer_share = Σ employer SSS + EC + PhilHealth + Pag-IBIG per period, figured on what each period deducted; total_labor_cost adds gross and bonus', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $r = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00'],
+        $r = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00', 'sss_amount' => '900.00', 'philhealth_amount' => '750.00', 'pagibig_amount' => '200.00'],
+            'cfg' => ['timing' => ['sss' => 'split']],              // SSS in two ₱450 shares: EC ₱10 on the first, the ₱20 step-up on the second
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly'], ['start' => '2026-04-16', 'end' => '2026-04-30', 'type' => 'Semi-Monthly']],
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
         qa_adjust($r['periods'][1], [$r['emp']], 'Bonus', '2000');
@@ -480,32 +572,228 @@ T::suite('11 · More numbers & the audit fixes', function () {
             $t->money($r['exp'][$k]['gross'] + $bonus + $share, $data[$k]['total_labor_cost'], "period $k: labor cost = gross + bonus + employer share");
         }
         $t->ok($data[1]['total_labor_cost'] > $data[1]['total_net'], 'labor cost is more than the take-home the old forecast used');
+        $t->money('1800.00', Ledger::fmt($r['exp'][0]['er']['sss'] + $r['exp'][1]['er']['sss']), 'the two periods\' employer SSS together are twice the typed ₱900');
+        $t->money('30.00', Ledger::fmt($r['exp'][0]['er']['ec'] + $r['exp'][1]['er']['ec']), 'and the EC comes to ₱30 over the month (₱10 + the ₱20 step-up)');
+        // the employer share is a property of what was DEDUCTED: raising the typed amounts later must not rewrite earlier periods in the forecast
+        $before = array_map(fn($p) => $p['total_employer_share'], $data);
+        getDB()->exec("UPDATE employees SET sss_amount = 1750, philhealth_amount = 2500, pagibig_amount = 200");
+        $after = array_map(fn($p) => $p['total_employer_share'], Http::call('api/forecast-data.php', ['method' => 'GET', 'session' => Http::admin()])['json']['data']);
+        $t->same($before, $after, 'editing an employee\'s amounts afterwards does not change the company share of periods already paid');
+    });
+
+    T::test('Payroll Processing: the schedule line, the remittances and the per-employee table follow what was deducted - each typed amount, what came out earlier, when the rest does', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $r = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00', 'sss_amount' => '675.00', 'philhealth_amount' => '750.00', 'tax_amount' => '600.00'],
+            'runs' => [['start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly'], ['start' => '2026-04-16', 'end' => '2026-04-30', 'type' => 'Semi-Monthly']],
+            'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
+        $p1 = Http::page('payroll.php', [], ['period' => $r['periods'][0]]);
+        $p2 = Http::page('payroll.php', [], ['period' => $r['periods'][1]]);
+        foreach ([1 => $p1, 2 => $p2] as $n => $p) {
+            $t->same(200, $p['status'], "cut-off $n answers");
+            $t->same([], $p['warnings'] ?? [], "cut-off $n raised no PHP warnings");
+            $t->contains('Company Cost &amp; Remittances', $p['body']);
+            $t->notContains('Pay this month so far', $p['body'], 'the old "pay so far" column is gone');
+        }
+        // cut-off 1: SSS in full, half the tax, PhilHealth waits
+        $t->contains('SSS taken in full; withholding tax taken in equal shares', $p1['body'], 'the schedule line says what this run takes');
+        $t->contains('PhilHealth and Pag-IBIG wait for the last cut-off', $p1['body']);
+        $t->contains('&#8369;675.00 / &#8369;1,350.00 + &#8369;10.00', $p1['body'], 'SSS: employee / company + EC');
+        $t->contains('monthly &#8369;750.00 · waits for the last cut-off', $p1['body'], 'PhilHealth is not taken yet');
+        $t->contains('monthly &#8369;600.00', $p1['body'], 'the typed tax');
+        // cut-off 2: the last run settles - SSS was taken earlier, PhilHealth and the rest of the tax come out now
+        $t->contains('last cut-off of the month', $p2['body']);
+        $t->contains('monthly &#8369;675.00 · &#8369;675.00 taken earlier', $p2['body'], 'SSS: all of it was taken on the 1st cut-off');
+        $t->contains('&#8369;750.00 / &#8369;750.00', $p2['body'], 'PhilHealth: employee / company');
+        $t->notContains('credit &#8369;', $p2['body'], 'no more "salary credit" talk: the amounts are typed');
+        // the remittance table counts what the payroll rows deducted
+        $sss = array_sum(array_map(fn($x) => (float)$x['sss'], array_values(Fixtures::payroll($r['periods'][1]))));
+        $t->money('0.00', $sss, 'cut-off 2 deducted no SSS');
     });
 
     /* ================================================================== G · hire date, Recompute, Finalize guards, schema */
 
-    T::test('a salaried employee hired on 9 April is paid ₱19,000 of a ₱26,000 month (7 unpaid working days × ₱1,000); hired on the 1st, or a daily-rate employee, are not affected', function (T $t) {
+    T::test('a salaried employee whose file starts on 9 April is paid ₱19,000 of a ₱26,000 month (7 working days not in the file × ₱1,000); a file with every day, or a daily-rate employee, are not affected', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-04-09'],
+        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-04-09', 'sss_amount' => '900.00'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-04-09', '2026-04-30')]);
         $row = $r['app'][0];
-        $t->same([], Scenario::diff($row, $r['exp'][0]), 'engine = ledger (pre-hire working days unpaid)');
+        $t->same([], Scenario::diff($row, $r['exp'][0]), 'engine = ledger (the days not in the file are unpaid)');
         $t->money('19000.00', $row['gross_pay'], '26,000 − 7 × 1,000');
+        $t->money('900.00', $row['sss'], 'the typed SSS is not pro-rated with the pay: a month\'s amount is a month\'s amount');
         $t->money('7000.00', $row['absent_deduction'], 'shown as the absent deduction');
-        $t->eq(7, (float)$row['absent_days'], 'the 7 working days before the hire date: Apr 1–4 and 6–8');
-        $t->contains('Unpaid days (absent, or before the hire date)', Http::page('print-doc.php', [], ['doc' => 'payslip', 'payroll_id' => $row['id'], 'auto' => '0'])['body'], 'the payslip says why');
+        $t->eq(7, (float)$row['absent_days'], 'the 7 working days that are not in the file: Apr 1–4 and 6–8');
+        $t->contains('Unpaid days (absent, or not in the timesheet)', Http::page('print-doc.php', [], ['doc' => 'payslip', 'payroll_id' => $row['id'], 'auto' => '0'])['body'], 'the payslip says why');
 
         Fixtures::reset();
         $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-04-01'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-04-01', '2026-04-30')]);
-        $t->money('26000.00', $r['app'][0]['gross_pay'], 'hired on the 1st: the full month');
+        $t->money('26000.00', $r['app'][0]['gross_pay'], 'every working day is in the file: the full month');
 
         Fixtures::reset();
         $r = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1000.00', 'date_hired' => '2026-04-09'],
             'runs' => [['start' => '2026-04-01', 'end' => '2026-04-30', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-04-09', '2026-04-30')]);
         $t->money('19000.00', $r['app'][0]['gross_pay'], 'daily rate: paid for the 19 days worked');
-        $t->eq(0, (float)$r['app'][0]['absent_days'], 'no absence is invented for a daily-rate employee');
+        $t->money('0.00', $r['app'][0]['absent_deduction'], 'daily rate: nothing is deducted for the days not in the file - they are simply not paid');
+        $t->eq(7, (float)$r['app'][0]['absent_days'], 'the 7 working days not in the file are SHOWN as absent (no money effect for a daily rate)');
+    });
+
+    /* ---- a new employee, then a file for this month or a past month: the days to compute are the days IN THE FILE - never the days from the Date Hired on */
+
+    T::test('a monthly / kinsenas employee is paid for the days in the file: 3 days uploaded, 3 days paid - whatever the Date Hired says (its first day, the day added, or nothing)', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        // Kinsenas ₱13,000 (₱26,000 a month; April 2026 has 26 working days, so a day is ₱1,000). The 1st-15th cut-off has 13 working days (the 5th and
+        // 12th are Sundays). The file holds three of them: Wed 8th, Thu 9th and Fri 10th. The other ten - the 1st-7th AND the 11th-15th - are not in the
+        // file, so they are not paid. (Counting from the Date Hired on, the 11th-15th would have been paid although nothing was uploaded for them.)
+        $days = Scenario::fullDays('2026-04-08', '2026-04-10');
+        foreach ([['2026-04-08', 'Date Hired = the first day in the file'], ['2026-10-10', 'Date Hired = the day they were added (today)'], [null, 'no Date Hired']] as [$hired, $what]) {
+            $r = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '13000.00', 'date_hired' => $hired],
+                'runs' => [['start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly']], 'days' => $days]);
+            $row = $r['app'][0];
+            $t->same([], Scenario::diff($row, $r['exp'][0]), "$what: engine = ledger");
+            $t->money('3000.00', $row['gross_pay'], "$what: 3 days in the file × ₱1,000");
+            $t->eq(10, (float)$row['absent_days'], "$what: the 10 working days that are not in the file");
+            $t->money('10000.00', $row['absent_deduction'], "$what: 10 × ₱1,000 left out of the kinsena");
+        }
+    });
+
+    T::test('the file of THIS month so far: only the days uploaded are paid, and the rest of the cut-off is paid as it is uploaded - OFF days and approved leave count as days in the file', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        // Kinsenas ₱13,000 (₱26,000 a month; October 2026 has 27 working days, so a day is ₱962.96). The 1st-15th cut-off has 13 working days (the 4th
+        // and 11th are Sundays). Uploaded through the 10th: worked Mon-Sat except the 7th (the sheet says OFF) and the 6th (approved leave, no hours) -
+        // nine working days are accounted for. The 12th-15th are not in the file yet.
+        $e = Fixtures::employee(['full_name' => 'This Month Case', 'salary_type' => 'kinsenas', 'base_salary' => '13000.00', 'date_hired' => '2026-10-10']);
+        $pid = Fixtures::period('Oct 1-15, 2026', '2026-10-01', '2026-10-15');
+        $rows = array_values(array_filter(Fixtures::fullDays('This Month Case', '2026-10-01', '2026-10-10'), fn($x) => !in_array($x['att_date'], ['2026-10-06', '2026-10-07'], true)));
+        $rows[] = Fixtures::day('This Month Case', '2026-10-07', 0, 0, 0, null, true);
+        Fixtures::leave($e, '2026-10-06', '2026-10-06', 'Approved');
+        $up = Fixtures::days($pid, $rows);
+        $t->same(true, $up['success'] ?? null, json_encode($up));
+        $row = Fixtures::payroll($pid)[$e];
+        $t->eq(4, (float)$row['absent_days'], 'the 12th-15th are not in the file');
+        $t->eq(1, (float)$row['leave_days'], 'the approved leave day (6th) is paid');
+        $t->eq(2, (float)$row['days_off'], 'Sunday the 4th and the 7th (OFF); the 11th is after the last uploaded day');
+        $t->money('3851.85', $row['absent_deduction'], '4 × 26,000 ÷ 27');
+        $t->money('9148.15', $row['gross_pay'], '13,000 − 3,851.85: nine of the thirteen working days');
+        // the next day's file adds the 12th-15th: the days accumulate and the cut-off is complete
+        $up = Fixtures::days($pid, Fixtures::fullDays('This Month Case', '2026-10-12', '2026-10-15'));
+        $t->same(true, $up['success'] ?? null, json_encode($up));
+        $row = Fixtures::payroll($pid)[$e];
+        $t->money('13000.00', $row['gross_pay'], 'every working day is in the file: the whole kinsena');
+        $t->eq(0, (float)$row['absent_days'], 'no unpaid day left');
+    });
+
+    T::test('a file for a PAST month, with OFF days and approved leave: nothing the file accounts for is deducted - and the Date Hired (today) changes nothing', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        // Monthly ₱26,000 (26 working days in September 2026, so ₱1,000 a day). Added on 10 Oct 2026 with that day as the Date Hired, then September's
+        // timesheet is uploaded: worked Mon-Sat, two rotating OFF days (9th, 23rd), one approved leave day (14th, no hours), a Sunday worked (6th).
+        $days = Scenario::fullDays('2026-09-01', '2026-09-30');
+        $days['2026-09-09'] = ['off' => true];
+        $days['2026-09-23'] = ['off' => true];
+        unset($days['2026-09-14']);
+        $days['2026-09-06'] = ['h' => '8.00', 'under' => '0'];
+        $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-10-10'],
+            'runs' => [['start' => '2026-09-01', 'end' => '2026-09-30', 'type' => 'Monthly']], 'days' => $days, 'leave' => ['2026-09-14']]);
+        $row = $r['app'][0];
+        $t->same([], Scenario::diff($row, $r['exp'][0]), 'engine = ledger');
+        $t->money('26000.00', $row['gross_pay'], 'the whole month: every working day is in the file, marked OFF, or approved leave');
+        $t->money('0.00', $row['absent_deduction'], 'no unpaid day');
+        $t->eq(0, (float)$row['absent_days'], 'no unpaid day');
+        $t->eq(1, (float)$row['leave_days'], 'the approved leave day is paid leave');
+        $t->eq(5, (float)$row['days_off'], 'the two OFF days the sheet marks + the three Sundays nobody worked');
+        // the month-to-date page judges the same days the same way
+        $m = monthAttendance(getDB(), '2026-09', null, false)['emps'][$r['emp']];
+        $t->same([0, 1, 5], [$m['absent'], $m['leave'], $m['off']], 'This Month\'s Attendance agrees: absent / leave / off');
+    });
+
+    T::test('the Date Hired plays no part in the pay: the same file gives the same payroll line whatever it says - nothing, the first day, the day added, a date after the period', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $days = Scenario::fullDays('2026-09-15', '2026-09-30');
+        $days['2026-09-22'] = ['off' => true];
+        $lines = [];
+        foreach ([null, '2026-09-15', '2026-10-10', '2027-01-01'] as $hired) {
+            $r = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => $hired],
+                'runs' => [['start' => '2026-09-01', 'end' => '2026-09-30', 'type' => 'Monthly']], 'days' => $days, 'leave' => ['2026-09-08']]);
+            $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]), 'Date Hired ' . ($hired ?? 'none') . ': engine = ledger');
+            $row = $r['app'][0];
+            $lines[$hired ?? 'none'] = [$row['gross_pay'], $row['absent_days'], $row['leave_days'], $row['days_off'], $row['absent_deduction'], $row['net_pay']];
+        }
+        $t->same(1, count(array_unique(array_map('json_encode', $lines))), 'one and the same line for every Date Hired: ' . json_encode($lines));
+        // 26,000 − 11 × 1,000: of the 12 working days before the 15th (Sundays left out) one is the approved leave day, the other eleven are not in the file
+        $t->money('15000.00', array_values($lines)[0][0], 'the 14 working days in the file (one marked OFF) + the leave day = 15 days × ₱1,000');
+    });
+
+    T::test('approved leave is a paid day even in a month whose file starts late: September\'s file begins on the 21st, the 8th-9th are approved leave', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $e   = Fixtures::employee(['full_name' => 'Leave Case', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-10-10']);
+        $sep = Fixtures::period('Sep 1-30, 2026', '2026-09-01', '2026-09-30', 'Monthly');
+        Fixtures::leave($e, '2026-09-08', '2026-09-09', 'Approved');
+        Fixtures::days($sep, Fixtures::fullDays('Leave Case', '2026-09-20', '2026-09-30'));            // the 20th and 27th are Sundays: 9 days from the 21st
+        $s = Fixtures::payroll($sep)[$e];
+        // September 1-19 has 17 working days (the 6th and 13th are Sundays): 2 are approved leave (paid), the other 15 are not in the file
+        $t->eq(15, (float)$s['absent_days'], '15 working days that are not in the file');
+        $t->eq(2, (float)$s['leave_days'], 'the 2 approved leave days are paid leave');
+        $t->money('11000.00', $s['gross_pay'], '26,000 − 15 × 1,000 = 11 days: the 9 in the file + the 2 of leave');
+    });
+
+    T::test('the admin\'s own steps: add the employee on the Employees page with today as the Date Hired, then upload last month\'s file and this month\'s so far - both are paid for the days in the file and both finalize', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $db = getDB();
+        $name = 'Added Today Case';
+        $r = Http::page('employee.php', ['action' => 'add', 'full_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '26000',
+                                         'date_hired' => '2026-10-10', 'rest_days' => ['7'], 'sss_amount' => '900']);
+        $t->contains('added', $r['body'], 'the employee is added');
+        $e = (string)$db->query('SELECT emp_id FROM employees WHERE full_name = ' . $db->quote($name))->fetchColumn();
+        $t->ok($e !== '', 'the employee exists');
+
+        // last month: worked Mon-Sat, the sheet marks the 9th OFF, the 14th is approved leave (no hours)
+        $sep  = Fixtures::period('Sep 1-30, 2026', '2026-09-01', '2026-09-30', 'Monthly');
+        $rows = Fixtures::fullDays($name, '2026-09-01', '2026-09-30');
+        $rows = array_values(array_filter($rows, fn($x) => !in_array($x['att_date'], ['2026-09-09', '2026-09-14'], true)));
+        $rows[] = Fixtures::day($name, '2026-09-09', 0, 0, 0, null, true);
+        Fixtures::leave($e, '2026-09-14', '2026-09-14', 'Approved');
+        $up = Fixtures::days($sep, $rows);
+        $t->same(true, $up['success'] ?? null, json_encode($up));
+        $s = Fixtures::payroll($sep)[$e];
+        $t->money('26000.00', $s['gross_pay'], 'September: every working day is in the file, marked OFF, or approved leave - paid in full');
+        $t->eq(0, (float)$s['absent_days'], 'September: no unpaid day');
+        $t->money('900.00', $s['sss'], 'September: the typed SSS');
+        $t->money('25100.00', $s['net_pay'], 'September: net pay');
+
+        // this month so far: the 1st-15th cut-off through today (the 10th), the 7th OFF, the 6th approved leave - the 12th-15th are not in the file yet
+        $oct  = Fixtures::period('Oct 1-15, 2026', '2026-10-01', '2026-10-15');
+        $rows = Fixtures::fullDays($name, '2026-10-01', '2026-10-10');
+        $rows = array_values(array_filter($rows, fn($x) => !in_array($x['att_date'], ['2026-10-06', '2026-10-07'], true)));
+        $rows[] = Fixtures::day($name, '2026-10-07', 0, 0, 0, null, true);
+        Fixtures::leave($e, '2026-10-06', '2026-10-06', 'Approved');
+        $up = Fixtures::days($oct, $rows);
+        $t->same(true, $up['success'] ?? null, json_encode($up));
+        $o = Fixtures::payroll($oct)[$e];
+        $t->eq(4, (float)$o['absent_days'], 'October: the 4 working days (12th-15th) that are not in the file are not paid');
+        $t->money('9148.15', $o['gross_pay'], 'October 1-15 so far: ₱13,000 for the cut-off − 4 × 26,000 ÷ 27');
+        $t->money('900.00', $o['sss'], 'October: SSS in full on the 1st cut-off');
+
+        foreach ([$sep, $oct] as $pid) {
+            $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $pid]);
+            $t->same(true, $f['json']['success'] ?? null, "finalize $pid: " . $f['body']);
+        }
+    });
+
+    T::test('a daily-rate employee added today is paid exactly the hours the file shows, for a past month too (the Date Hired never matters to a daily rate)', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $r = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '500.00', 'date_hired' => '2026-10-10'],
+            'runs' => [['start' => '2026-09-01', 'end' => '2026-09-15', 'type' => 'Semi-Monthly']], 'days' => Scenario::fullDays('2026-09-01', '2026-09-12')]);
+        $t->same([], Scenario::diff($r['app'][0], $r['exp'][0]), 'engine = ledger');
+        $t->money('5500.00', $r['app'][0]['gross_pay'], '11 days worked (1st-5th, 7th-12th) × ₱500');
+        $t->eq(0, (float)$r['app'][0]['absent_days'], 'no absence is invented');
     });
 
     T::test('Recompute rebuilds an open period from its days with the CURRENT Settings; a locked period refuses; a totals-built period says to upload again', function (T $t) {
@@ -537,11 +825,12 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('Finalize refuses lines whose contributions no longer settle the month (stale) and asks before locking a negative net - each with a way through', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $e = Fixtures::employee(['full_name' => 'Stale Case', 'base_salary' => '800.00']);
+        $e = Fixtures::employee(['full_name' => 'Stale Case', 'base_salary' => '800.00', 'sss_amount' => '400.00']);
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
         Fixtures::days($pid, Fixtures::fullDays('Stale Case', '2026-04-01', '2026-04-15'));
-        // an employee switch changed behind the engine's back (the Employee page would have recomputed; this does not)
-        getDB()->prepare("UPDATE employees SET deduct_sss = 0 WHERE emp_id = ?")->execute([$e]);
+        $t->money('400.00', Fixtures::payroll($pid)[$e]['sss'], 'the typed SSS is deducted');
+        // the employee's typed amount changed behind the engine's back (the Employee page would have recomputed; this does not)
+        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE emp_id = ?")->execute([$e]);
         $r = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $pid]);
         $t->same(409, $r['status'], $r['body']);
         $t->same('stale', $r['json']['error'] ?? null);
@@ -554,7 +843,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
         // negative net
         Fixtures::reset();
-        $n = Fixtures::employee(['full_name' => 'Negative Case', 'base_salary' => '480.00']);
+        $n = Fixtures::employee(['full_name' => 'Negative Case', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00']);
         $p2 = Fixtures::period('Apr 1-30, 2026', '2026-04-01', '2026-04-30', 'Monthly');
         Fixtures::days($p2, [Fixtures::day('Negative Case', '2026-04-01', 8, 0, 0, 0)]);
         $t->ok((float)Fixtures::payroll($p2)[$n]['net_pay'] < 0, 'the case is a negative payslip');
@@ -569,7 +858,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('the payroll page warns about stale lines and negative net pay before anyone finalizes', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $n = Fixtures::employee(['full_name' => 'Banner Negative', 'base_salary' => '480.00']);
+        $n = Fixtures::employee(['full_name' => 'Banner Negative', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00']);
         $p = Fixtures::period('Apr 1-30, 2026', '2026-04-01', '2026-04-30', 'Monthly');
         Fixtures::days($p, [Fixtures::day('Banner Negative', '2026-04-01', 8, 0, 0, 0)]);
         $page = Http::page('payroll.php', [], ['period' => $p])['body'];
@@ -577,14 +866,14 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('Banner Negative', $page);
         $t->contains('−₱', $page, 'the negative amount is printed signed');
         $t->contains('Recompute', $page, 'the Recompute button exists on an open period');
-        getDB()->prepare("UPDATE employees SET deduct_pagibig = 0 WHERE emp_id = ?")->execute([$n]);
+        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE emp_id = ?")->execute([$n]);
         $t->contains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $p])['body'], 'a stale line is announced');
     });
 
     T::test('a finalized month is called out of date only when an EARLIER cut-off changed after it was finalized - a raise made later is not a reason to "recompute" history', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $e = Fixtures::employee(['full_name' => 'Raise Case', 'base_salary' => '20000.00', 'salary_type' => 'monthly']);
+        $e = Fixtures::employee(['full_name' => 'Raise Case', 'base_salary' => '20000.00', 'salary_type' => 'monthly', 'sss_amount' => '500.00', 'philhealth_amount' => '300.00']);
         $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
         $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
         Fixtures::days($a, Fixtures::fullDays('Raise Case', '2026-04-01', '2026-04-15'));
@@ -594,8 +883,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $db->exec("UPDATE payroll_periods SET finalized_at = '2026-05-01 10:00:00' WHERE id = $a");
         $db->exec("UPDATE payroll_periods SET finalized_at = '2026-05-01 10:05:00' WHERE id = $b");
 
-        $db->prepare("UPDATE employees SET base_salary = 40000 WHERE emp_id = ?")->execute([$e]);       // a raise, months later
-        $t->ok(settlementDrift($db, $b) !== [], 'by arithmetic alone cut-off 2 would now differ (PhilHealth is read on the contract salary)');
+        $db->prepare("UPDATE employees SET base_salary = 40000, philhealth_amount = 400 WHERE emp_id = ?")->execute([$e]);       // a raise and a higher PhilHealth, months later
+        $t->ok(settlementDrift($db, $b) !== [], 'by arithmetic alone cut-off 2 would now differ (PhilHealth ₱300 was taken, the employee now says ₱400)');
         $t->notContains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $b])['body'], 'but April is history: no warning, no invitation to recompute it');
         $t->same(false, earlierRunChangedAfterFinalize($db, $b), 'nothing earlier in April changed after cut-off 2 was finalized');
 
@@ -608,22 +897,27 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $b])['body'], 'cut-off 2 is flagged');
     });
 
-    T::test('the fixed application changes no database structure: its DDL statements are exactly the original\'s', function (T $t) {
+    T::test('the schema gains exactly four optional columns on employees (sss_amount, philhealth_amount, pagibig_amount, tax_amount: DECIMAL(12,2) NOT NULL DEFAULT 0) - an existing employee starts with none, so nothing is deducted until the admin types it', function (T $t) {
         qa_need_fixes();
-        $orig = dirname(__DIR__, 2) . '/payroll2';
-        $fixed = AppCopy::original();          // the application under test (here: the audit-fixed folder)
-        if (!is_file($orig . '/includes/helpers.php')) T::skip("the original application is not at $orig");
-        $ddl = function (string $root) {
-            $out = [];
-            foreach (['includes/helpers.php', 'includes/schema.php', 'includes/db.php'] as $f) {
-                if (!is_file("$root/$f")) continue;
-                preg_match_all('/\b(?:ALTER\s+TABLE|CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)|DROP\s+(?:TABLE|INDEX|COLUMN)|ADD\s+COLUMN)\b[^"\';]*/i', (string)file_get_contents("$root/$f"), $m);
-                foreach ($m[0] as $s) $out[] = preg_replace('/\s+/', ' ', trim($s));
-            }
-            sort($out);
-            return $out;
-        };
-        $t->same($ddl($orig), $ddl($fixed), 'schema statements');
-        $t->ok(count($ddl($orig)) > 10, 'the scan found the schema statements (' . count($ddl($orig)) . ')');
+        Fixtures::reset();
+        $db = getDB();
+        foreach (['sss_amount', 'philhealth_amount', 'pagibig_amount', 'tax_amount'] as $col) {
+            $c = $db->query("SELECT COLUMN_TYPE AS ct, IS_NULLABLE AS nul, COLUMN_DEFAULT AS def FROM information_schema.COLUMNS
+                              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees' AND COLUMN_NAME = '$col'")->fetch();
+            $t->ok($c !== false, "employees.$col exists");
+            $t->same(['decimal(12,2)', 'NO', '0.00'], [$c['ct'] ?? null, $c['nul'] ?? null, $c['def'] ?? null], "employees.$col is DECIMAL(12,2) NOT NULL DEFAULT 0");
+        }
+        // an employee row written without the new columns (as every row of an older database is) has none, and the engine deducts nothing
+        $db->exec("INSERT INTO employees (emp_id, full_name, base_salary, salary_type, branch) VALUES ('OLD-ROW', 'Old Row', 480, 'daily', 'MAIN')");
+        $row = Fixtures::empRow('OLD-ROW');
+        $t->same(['0.00', '0.00', '0.00', '0.00'], [$row['sss_amount'], $row['philhealth_amount'], $row['pagibig_amount'], $row['tax_amount']], 'an existing employee starts with no amounts');
+        $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+        Fixtures::days($pid, Fixtures::fullDays('Old Row', '2026-04-01', '2026-04-15'));
+        $line = Fixtures::payroll($pid)['OLD-ROW'];
+        $t->moneyMap(['sss' => '0.00', 'philhealth' => '0.00', 'pagibig' => '0.00', 'withholding_tax' => '0.00'], $line, 'nothing deducted');
+        $t->money($line['gross_pay'], $line['net_pay'], 'net pay is gross pay');
+        // the fresh-install file builds the same columns (suite 13 compares the whole schema)
+        $sql = (string)file_get_contents(AppCopy::root() . '/sql/database.sql');
+        foreach (['sss_amount', 'philhealth_amount', 'pagibig_amount', 'tax_amount'] as $col) $t->contains($col, $sql, "sql/database.sql creates $col");
     });
 });

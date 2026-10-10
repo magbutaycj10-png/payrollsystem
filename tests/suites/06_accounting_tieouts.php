@@ -5,9 +5,9 @@
  * Properties that must hold for EVERY payslip and EVERY month, whatever the inputs - checked over a
  * generated population (200 employee-months through the real engine) rather than hand-picked numbers:
  *   · each payslip foots (gross + bonus − deductions = net) and has no negative component
- *   · a month ends exact: the contributions taken over its runs are the contribution on the month's pay
+ *   · a month ends exact: SSS, PhilHealth, Pag-IBIG and tax taken over its runs are exactly the monthly amounts typed on the employee
  *   · the attendance table mirrors the payroll table
- *   · the company's shares (employer SSS/EC/PhilHealth/Pag-IBIG) are what the law says
+ *   · the company's shares (employer SSS/EC/PhilHealth/Pag-IBIG) follow what was deducted, at the rates the law sets
  *   · recomputing is stable, and order-independent
  *   · computePayLine never lets floating-point noise reach a payslip
  *
@@ -20,7 +20,7 @@
 function qa_apply_cfg(array $spec): void
 {
     Fixtures::setting('overtime_rate', $spec['cfg']['ot_rate']);
-    foreach (['sss', 'philhealth', 'pagibig'] as $k) Fixtures::setting("contribution_timing_$k", $spec['cfg']['timing'][$k]);
+    foreach ($spec['cfg']['timing'] as $k => $when) Fixtures::setting("contribution_timing_$k", $when);
 }
 
 T::suite('06 · Accounting tie-outs', function () {
@@ -60,40 +60,18 @@ T::suite('06 · Accounting tie-outs', function () {
                 }
             }
 
-            // 1b ─ the month's TAX ends exact too: what was withheld over the month is the monthly BIR table on the month's taxable pay
-            //      (the original app keeps what it over-withheld - D-02 - so this is checked on the audit-fixed app)
-            $lastRun = $spec['runs'][count($spec['runs']) - 1];
-            if (AppCopy::hasFixes() && Ledger::isFinal($lastRun['type'], $lastRun['start'], $lastRun['end'])) {
-                $prevTaxable = 0; $taxSum = 0; $nRuns = count($c['app']);
-                $g = $contribs = 0;
-                foreach ($c['app'] as $k => $row) {
-                    $taxSum += Ledger::c($row['withholding_tax']);
-                    $contrib = Ledger::c($row['sss']) + Ledger::c($row['philhealth']) + Ledger::c($row['pagibig']);
-                    if ($k < $nRuns - 1) { $g += Ledger::c($row['gross_pay']); $contribs += $contrib; }
-                    else $prevTaxable = max(0, $g - $contribs) + max(0, Ledger::c($row['gross_pay']) - $contrib);
-                }
-                $t->checks++;
-                if ($taxSum !== Ledger::tax('monthly', $prevTaxable)) {
-                    $note('month', "$label withholding tax over the month: should be ₱" . Ledger::fmt(Ledger::tax('monthly', $prevTaxable)) . ' on taxable ₱' . Ledger::fmt($prevTaxable) . ', withheld ₱' . Ledger::fmt($taxSum));
-                }
-            }
-
-            // 2 ─ the month ends exact
+            // 2 ─ the month ends exact: over the month's runs SSS, PhilHealth, Pag-IBIG and tax come to exactly the monthly amounts typed
+            //     on the employee (0 for the ones left blank), whichever cut-off each schedule put them on
             $last = $spec['runs'][count($spec['runs']) - 1];
             if (Ledger::isFinal($last['type'], $last['start'], $last['end'])) {
-                $comp = $basicM = $sss = $ph = $pi = 0;
-                foreach ($c['app'] as $row) {
-                    $comp += Ledger::c($row['gross_pay']);
-                    $basicM += Ledger::c($row['gross_pay']) - Ledger::c($row['ot_late_adj']);
-                    $sss += Ledger::c($row['sss']); $ph += Ledger::c($row['philhealth']); $pi += Ledger::c($row['pagibig']);
-                }
-                $contract = $e['salary_type'] === 'daily' ? 0 : ($e['salary_type'] === 'kinsenas' ? 2 * Ledger::c($e['base_salary']) : Ledger::c($e['base_salary']));
-                $want = ['SSS' => [$e['deduct_sss'] ? Ledger::sssEe($comp) : 0, $sss],
-                         'PhilHealth' => [$e['deduct_philhealth'] ? Ledger::philhealthEe($e['salary_type'] === 'daily' ? $basicM : max($basicM, $contract)) : 0, $ph],
-                         'Pag-IBIG' => [$e['deduct_pagibig'] ? Ledger::pagibigEe($basicM) : 0, $pi]];
-                foreach ($want as $name => [$exp, $act]) {
+                $month = ['SSS' => ['sss', 'sss_amount'], 'PhilHealth' => ['philhealth', 'philhealth_amount'],
+                          'Pag-IBIG' => ['pagibig', 'pagibig_amount'], 'tax' => ['withholding_tax', 'tax_amount']];
+                foreach ($month as $name => [$col, $typed]) {
+                    $act = 0;
+                    foreach ($c['app'] as $row) $act += Ledger::c($row[$col]);
+                    $exp = Ledger::c($e[$typed]);
                     $t->checks++;
-                    if ($exp !== $act) $note('month', "$label $name over the month: should be ₱" . Ledger::fmt($exp) . ' (pay ₱' . Ledger::fmt($comp) . '), taken ₱' . Ledger::fmt($act));
+                    if ($exp !== $act) $note('month', "$label $name over the month: typed ₱" . Ledger::fmt($exp) . ', taken ₱' . Ledger::fmt($act));
                 }
             }
 
@@ -101,7 +79,7 @@ T::suite('06 · Accounting tie-outs', function () {
             qa_apply_cfg($spec);
             foreach ($c['periods'] as $k => $pid) {
                 $row = $c['app'][$k];
-                $b = contributionBreakdown($emp, (float)$row['gross_pay'] - (float)$row['ot_late_adj'], (float)$row['gross_pay'], payContext($db, $pid));
+                $b = contributionBreakdown($emp, (float)$row['gross_pay'] - (float)$row['ot_late_adj'], payContext($db, $pid));
                 foreach ([['sss', 'sss'], ['ec', 'ec'], ['philhealth', 'ph'], ['pagibig', 'pi']] as [$a, $l]) {
                     $t->checks++;
                     if ((int)round($b['er'][$a] * 100) !== $c['exp'][$k]['er'][$l]) $note('er', "$label run $k employer $a: ledger ₱" . Ledger::fmt($c['exp'][$k]['er'][$l]) . ', app ₱' . number_format($b['er'][$a], 2));
@@ -110,6 +88,8 @@ T::suite('06 · Accounting tie-outs', function () {
                     $t->checks++;
                     if ((int)round($b['ee'][$col] * 100) !== Ledger::c($row[$col])) $note('er', "$label run $k: stored $col ₱{$row[$col]} but the same inputs now give ₱" . number_format($b['ee'][$col], 2));
                 }
+                $t->checks++;
+                if ((int)round($b['tax'] * 100) !== Ledger::c($row['withholding_tax'])) $note('er', "$label run $k: stored tax ₱{$row['withholding_tax']} but the same inputs now give ₱" . number_format($b['tax'], 2));
             }
 
             // 4 ─ attendance mirrors payroll (this case's periods)
@@ -150,10 +130,12 @@ T::suite('06 · Accounting tie-outs', function () {
             $period = [['2026-04-01', '2026-04-15', 'Semi-Monthly'], ['2026-04-16', '2026-04-30', 'Semi-Monthly'], ['2026-04-01', '2026-04-30', 'Monthly'], ['2026-04-06', '2026-04-12', 'Weekly']][mt_rand(0, 3)];
             $ctx = buildPayContext(['period_start' => $period[0], 'period_end' => $period[1], 'period_type' => $period[2]],
                 mt_rand(0, 1) ? ['QA' => ['g' => mt_rand(0, 3000000) / 100, 'basic' => mt_rand(0, 3000000) / 100, 'sss' => mt_rand(0, 90000) / 100, 'philhealth' => 0.0, 'pagibig' => 0.0, 'tax' => mt_rand(0, 100000) / 100]] : [], 1);
-            $emp = payEmployee(['emp_id' => 'QA', 'salary_type' => $type, 'base_salary' => mt_rand(30000, 9000000) / 100, 'hours_per_day' => mt_rand(0, 2) ? null : 10]);
+            $emp = payEmployee(['emp_id' => 'QA', 'salary_type' => $type, 'base_salary' => mt_rand(30000, 9000000) / 100, 'hours_per_day' => mt_rand(0, 2) ? null : 10,
+                                'sss_amount' => mt_rand(0, 1) ? mt_rand(0, 175000) / 100 : 0, 'philhealth_amount' => mt_rand(0, 1) ? mt_rand(0, 250000) / 100 : 0,
+                                'pagibig_amount' => mt_rand(0, 1) ? mt_rand(0, 20000) / 100 : 0, 'tax_amount' => mt_rand(0, 1) ? mt_rand(0, 3000000) / 100 : 0]);
             $p = computePayLine($emp, mt_rand(0, 12000) / 100, mt_rand(0, 3000) / 100, mt_rand(0, 500) / 100, (bool)mt_rand(0, 1), $ctx,
                 ['absent' => mt_rand(0, 5), 'undertime' => mt_rand(0, 800) / 100, 'working_days' => mt_rand(22, 30)]);
-            foreach (['gross', 'basic', 'tax', 'ot_late_adj', 'sss', 'philhealth', 'pagibig', 'net', 'absent_deduction', 'undertime_deduction', 'taxable'] as $k) {
+            foreach (['gross', 'basic', 'tax', 'ot_late_adj', 'sss', 'philhealth', 'pagibig', 'net', 'absent_deduction', 'undertime_deduction'] as $k) {
                 $t->checks++;
                 $c = $p[$k] * 100;
                 if (abs($c - round($c)) > 1e-6 * max(1, abs($c)) && count($bad) < 5) $bad[] = "$k = " . var_export($p[$k], true) . " ($type, {$period[2]})";

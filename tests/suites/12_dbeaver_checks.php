@@ -4,10 +4,9 @@
  * can trust what they say about the live one.
  *
  *   · the file parses: every check has an id, a title, an expectation and exactly one statement
- *   · on correctly computed payroll - nine months, every salary type and run shape, bonuses, a finalized period - every
- *     "expect: none" query returns no rows (on the audit-fixed application)
- *   · the same queries run on the ORIGINAL application's payroll flag exactly the two things it gets wrong in this data
- *     (tax over-withheld and not returned, a salaried employee paid for days before the hire date)
+ *   · on correctly computed payroll - nine months, every salary type and run shape, typed amounts, bonuses, a finalized period and an
+ *     amount edited mid-month - every "expect: none" query returns no rows, and so do the four month-by-month "review" queries
+ *     C10-C13 (every month came to exactly the amount typed on the employee)
  *   · for every query, deliberate damage is injected (inside a transaction that is rolled back) and the query must find it
  */
 
@@ -38,34 +37,15 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
         }
         $t->same([], $problems, 'queries that should have been silent');
         $byId = array_column(qa_sql_checks(), null, 'id');
-        $t->same(1, count(qa_sql_run($byId['C04'])), 'C04 lists the May tax refund');
+        foreach (['C10', 'C11', 'C12', 'C13'] as $id) $t->same([], qa_sql_run($byId[$id]), "$id: every month came to exactly the amount typed on the employee");
+        $t->same(1, count(qa_sql_run($byId['C04'])), 'C04 lists the May tax refund (the ₱600 tax lowered to ₱200 after the 1st cut-off took ₱300)');
         $t->same([], qa_sql_run($byId['C51']), 'C51: the June hire is not paid for the days before 9 June (absent days were deducted)');
         $r01 = qa_sql_run($byId['R01']);
         $t->same(9, count($r01), 'R01: nine months');
         foreach ($r01 as $row) $t->money(0, $row['unexplained_difference'], 'R01 ' . $row['month'] . ' foots');
-        // the month report agrees with the figures worked out by hand for July (Example H) - gross 250,000.00, tax 57,206.70, net 188,343.30
+        // the month report agrees with the figures worked out by hand for July: gross 250,000.00 − SSS 1,750 − PhilHealth 2,500 − Pag-IBIG 200 − tax 57,206.70 = net 188,343.30
         $jul = array_values(array_filter($r01, fn($r) => $r['month'] === '2026-07'))[0];
         $t->moneyMap(['gross_pay' => 25000000, 'withholding_tax' => 5720670, 'net_pay' => 18834330], $jul, 'R01 July');
-    });
-
-    T::test('on the ORIGINAL application\'s payroll the queries find exactly its two known mistakes: over-withheld tax (D-02) and pay for days before the hire date (D-03)', function (T $t) {
-        if (AppCopy::hasFixes()) T::skip('this is what the original application does - the fixed one is checked above');
-        qa_sql_dataset();
-        $byId = array_column(qa_sql_checks(), null, 'id');
-        $problems = [];
-        foreach (qa_sql_checks() as $c) {
-            $rows = qa_sql_run($c);
-            $t->checks++;
-            if ($c['expect'] === 'none' && $rows && $c['id'] !== 'C13') $problems[] = $c['id'] . ': ' . json_encode($rows[0], JSON_UNESCAPED_UNICODE);
-        }
-        $t->same([], $problems, 'apart from the tax query, nothing should be flagged on correctly computed pay');
-        $tax = qa_sql_run($byId['C13']);
-        $t->same(1, count($tax), 'one employee-month has the wrong tax: ' . json_encode($tax));
-        $t->same('2026-05', $tax[0]['month'] ?? null, 'May - the first cut-off took ₱289.95 and the month owes nothing');
-        $t->money('289.95', $tax[0]['over_withheld'] ?? 0, 'over-withheld, never returned');
-        $hire = qa_sql_run($byId['C51']);
-        $t->same(1, count($hire), 'C51 finds the June hire paid in full: ' . json_encode($hire));
-        $t->money('26000.00', $hire[0]['gross_pay'] ?? 0, 'paid the whole month although hired on the 9th');
     });
 
     T::test('each query finds the damage injected for it (every injection is rolled back)', function (T $t) {
@@ -97,6 +77,9 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
             'C23' => ["INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES ('Overlap', '2026-03-10', '2026-03-20', 'Semi-Monthly', 'Open')"],
             'C30' => ["UPDATE employees SET base_salary = -500 WHERE emp_id = '$feb'"],
             'C31' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('overtime_rate', '-45') ON DUPLICATE KEY UPDATE setting_value = '-45'"],
+            'C31 timing' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('contribution_timing_tax', 'weekly') ON DUPLICATE KEY UPDATE setting_value = 'weekly'"],
+            'C30 amount' => ["UPDATE employees SET sss_amount = 999999 WHERE emp_id = '$mar'"],
+            'C30 negative' => ["UPDATE employees SET tax_amount = -5 WHERE emp_id = '$mar'"],
             'C40' => ["UPDATE payroll SET bonus = bonus + 5 WHERE id = {$line($mar)}"],
             'C41' => ["INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), '$mar', 'x', 'Bonus', 0, 'x', NULL)"],
             'C42' => ["UPDATE payroll SET bonus = 95000 WHERE id = {$line($mar)}"],
@@ -107,17 +90,18 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
         ];
         foreach ($damage as $id => $sqls) {
             if (!$sqls) continue;                                                     // C50: checked below (nothing to damage)
+            $cid = strtok($id, ' ');                                                  // "C30 amount" is a second way to damage check C30
             $t->checks++;
-            $before = count(qa_sql_run($byId[$id]));
+            $before = count(qa_sql_run($byId[$cid]));
             $db->beginTransaction();
             try {
                 foreach ($sqls as $s) $db->exec($s);
-                $after = qa_sql_run($byId[$id]);
+                $after = qa_sql_run($byId[$cid]);
             } finally {
                 $db->rollBack();
             }
             $t->ok(count($after) > $before, "$id did not notice the damage (rows before $before, after " . count($after) . ')');
-            $t->same($before, count(qa_sql_run($byId[$id])), "$id: the injected damage was rolled back");
+            $t->same($before, count(qa_sql_run($byId[$cid])), "$id: the injected damage was rolled back");
         }
         // a Labor Code overtime method silences the compliance query
         $db->beginTransaction();

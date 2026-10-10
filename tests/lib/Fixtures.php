@@ -5,11 +5,12 @@
  */
 final class Fixtures
 {
-    /** the pharmacy's settings (₱45 overtime hour, kinsenas calendar, contribution timing as in Settings) */
+    /** the pharmacy's settings (₱45 overtime hour, kinsenas calendar, contribution schedule as in Settings) */
     public const DEFAULT_SETTINGS = [
         'overtime_rate' => '45', 'overtime_method' => 'flat', 'overtime_multiplier' => '1.25',
         'late_rate' => '80', 'standard_hours' => '8', 'payroll_period' => 'Semi-Monthly',
-        'contribution_timing_sss' => 'split', 'contribution_timing_philhealth' => 'second', 'contribution_timing_pagibig' => 'second',
+        'contribution_timing_sss' => 'first', 'contribution_timing_philhealth' => 'second', 'contribution_timing_pagibig' => 'second',
+        'contribution_timing_tax' => 'split',
         'bir_registered_name' => 'QA TEST PHARMACY', 'bir_signatory_name' => 'QA Signatory',
     ];
 
@@ -25,17 +26,21 @@ final class Fixtures
 
     public static function setting(string $k, $v): void { setSetting($k, (string)$v); }
 
-    /** insert an employee; returns the emp_id */
+    /**
+     * insert an employee; returns the emp_id. sss_amount / philhealth_amount / pagibig_amount / tax_amount are the
+     * employee's MONTHLY amounts as the admin types them on Employees (default 0.00 = none).
+     */
     public static function employee(array $e): string
     {
         static $n = 0;
         $e += ['emp_id' => 'EMP-' . str_pad((string)(++$n), 3, '0', STR_PAD_LEFT), 'full_name' => 'Test Employee ' . $n, 'position' => 'Staff',
                'branch' => 'MAIN', 'base_salary' => '480.00', 'salary_type' => 'daily', 'date_hired' => null, 'rest_days' => '7',
-               'hours_per_day' => null, 'deduct_sss' => 1, 'deduct_philhealth' => 1, 'deduct_pagibig' => 1, 'status' => 'Active'];
+               'hours_per_day' => null, 'sss_amount' => '0.00', 'philhealth_amount' => '0.00', 'pagibig_amount' => '0.00', 'tax_amount' => '0.00',
+               'status' => 'Active'];
         self::db()->prepare("INSERT INTO employees (emp_id, full_name, position, branch, base_salary, salary_type, date_hired, rest_days,
-                             hours_per_day, deduct_sss, deduct_philhealth, deduct_pagibig, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                             hours_per_day, sss_amount, philhealth_amount, pagibig_amount, tax_amount, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
             ->execute([$e['emp_id'], $e['full_name'], $e['position'], $e['branch'], $e['base_salary'], $e['salary_type'], $e['date_hired'],
-                       $e['rest_days'], $e['hours_per_day'], $e['deduct_sss'], $e['deduct_philhealth'], $e['deduct_pagibig'], $e['status']]);
+                       $e['rest_days'], $e['hours_per_day'], $e['sss_amount'], $e['philhealth_amount'], $e['pagibig_amount'], $e['tax_amount'], $e['status']]);
         return $e['emp_id'];
     }
 
@@ -94,8 +99,9 @@ final class Fixtures
     public static function ledgerEmp(array $e): array
     {
         return ['type' => $e['salary_type'], 'base' => $e['base_salary'], 'hours_per_day' => $e['hours_per_day'],
-                'rest' => $e['rest_days'] === '' ? [] : array_map('intval', explode(',', $e['rest_days'])), 'hired' => $e['date_hired'],
-                'sss' => (int)$e['deduct_sss'], 'ph' => (int)$e['deduct_philhealth'], 'pi' => (int)$e['deduct_pagibig']];
+                'rest' => $e['rest_days'] === '' ? [] : array_map('intval', explode(',', $e['rest_days'])),
+                'amt' => ['sss' => Ledger::c($e['sss_amount']), 'ph' => Ledger::c($e['philhealth_amount']),
+                          'pi' => Ledger::c($e['pagibig_amount']), 'tax' => Ledger::c($e['tax_amount'])]];
     }
 
     public static function empRow(string $empId): array

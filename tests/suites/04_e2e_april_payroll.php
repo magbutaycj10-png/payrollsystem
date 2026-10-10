@@ -27,9 +27,9 @@ function qa_expected(array $emp, array $payloadByRun, array $runs, array $upto):
         $leave->execute([$id]);
         $dates = [];
         foreach ($leave->fetchAll() as $l) $dates = array_merge($dates, Ledger::dates($l['date_from'], $l['date_to']));
-        $cfg = ['ot_rate' => getSetting('overtime_rate', '45'), 'refund' => AppCopy::hasFixes(), 'prehire' => AppCopy::hasFixes(),
-                'timing' => ['sss' => getSetting('contribution_timing_sss', 'split'), 'philhealth' => getSetting('contribution_timing_philhealth', 'second'),
-                             'pagibig' => getSetting('contribution_timing_pagibig', 'second')]];
+        $cfg = ['ot_rate' => getSetting('overtime_rate', '45'), 'refund' => AppCopy::hasFixes(),
+                'timing' => ['sss' => getSetting('contribution_timing_sss', 'first'), 'philhealth' => getSetting('contribution_timing_philhealth', 'second'),
+                             'pagibig' => getSetting('contribution_timing_pagibig', 'second'), 'tax' => getSetting('contribution_timing_tax', 'split')]];
         $out[$name] = Ledger::month(Fixtures::ledgerEmp(Fixtures::empRow($id)), $runs, $days, $dates, $cfg, $upto);
     }
     return $out;
@@ -41,11 +41,13 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
 
     $runsDef = [['start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly'],
                 ['start' => '2026-04-16', 'end' => '2026-04-30', 'type' => 'Semi-Monthly']];
-    $people = ['ALMA REYES'  => ['salary_type' => 'daily',    'base_salary' => '480.00'],
-               'BEN SANTOS'  => ['salary_type' => 'daily',    'base_salary' => '620.00', 'hours_per_day' => '10.00'],
+    // the monthly SSS / PhilHealth / Pag-IBIG / tax each person has typed on Employees - CORA has none, as most of the pharmacy has none
+    $people = ['ALMA REYES'  => ['salary_type' => 'daily',    'base_salary' => '480.00', 'sss_amount' => '300.00'],
+               'BEN SANTOS'  => ['salary_type' => 'daily',    'base_salary' => '620.00', 'hours_per_day' => '10.00', 'sss_amount' => '450.00', 'philhealth_amount' => '250.00'],
                'CORA DIZON'  => ['salary_type' => 'kinsenas', 'base_salary' => '7500.00'],
-               'DANTE LIM'   => ['salary_type' => 'monthly',  'base_salary' => '30000.00'],
-               'ELENA CRUZ'  => ['salary_type' => 'daily',    'base_salary' => '350.00']];
+               'DANTE LIM'   => ['salary_type' => 'monthly',  'base_salary' => '30000.00', 'sss_amount' => '1350.00', 'philhealth_amount' => '750.00',
+                                 'pagibig_amount' => '200.00', 'tax_amount' => '1500.00'],
+               'ELENA CRUZ'  => ['salary_type' => 'daily',    'base_salary' => '350.00', 'pagibig_amount' => '100.00']];
     $S->sheet = qa_sheet();
 
     /** compare stored payroll with the ledger for the runs uploaded so far */
@@ -67,7 +69,7 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $S->exp = $exp;
     };
 
-    T::test('set up: five employees (daily, 10-hour day, kinsenas, monthly), approved + rejected leave, two kinsenas periods', function (T $t) use ($S, $people, $runsDef) {
+    T::test('set up: five employees (daily, 10-hour day, kinsenas, monthly) with their own typed amounts - or none - approved + rejected leave, two kinsenas periods', function (T $t) use ($S, $people, $runsDef) {
         $S->emp = [];
         foreach ($people as $name => $e) $S->emp[$name] = Fixtures::employee($e + ['full_name' => $name, 'branch' => 'MAIN']);
         Fixtures::leave($S->emp['ELENA CRUZ'], '2026-04-13', '2026-04-14', 'Approved');
@@ -113,7 +115,7 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
 
     T::test('cut-off 1 by hand: ALMA - 13 duty days, 1 h undertime, 1 h overtime', function (T $t) use ($S) {
         $a = Fixtures::payroll($S->periods[0])[$S->emp['ALMA REYES']];
-        // 480 × (13 × 8 − 1) / 8 = 6,180.00 + 1 h OT × 45 = 6,225.00 ; SSS credit 6,000 → 300.00 ; below the ₱10,417 semi-monthly exemption
+        // 480 × (13 × 8 − 1) / 8 = 6,180.00 + 1 h OT × 45 = 6,225.00 ; her typed SSS ₱300.00 comes out in full on the 1st cut-off ; nothing else typed
         $t->moneyMap(['gross_pay' => '6225.00', 'ot_late_adj' => '45.00', 'sss' => '300.00', 'philhealth' => '0.00', 'pagibig' => '0.00',
                       'withholding_tax' => '0.00', 'net_pay' => '5925.00'], $a);
     });
@@ -130,27 +132,30 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         }
     });
 
-    T::test('month totals: each employee\'s SSS / PhilHealth / Pag-IBIG over both cut-offs equals the contribution on the month\'s pay', function (T $t) use ($S) {
+    T::test('month totals: each employee\'s SSS / PhilHealth / Pag-IBIG / tax over both cut-offs is exactly what was typed on the employee - SSS on the 1st cut-off, PhilHealth and Pag-IBIG on the 2nd, tax in two shares', function (T $t) use ($S) {
         foreach ($S->emp as $name => $id) {
             $a = Fixtures::payroll($S->periods[0])[$id];
             $b = Fixtures::payroll($S->periods[1])[$id];
-            $comp = Ledger::c($a['gross_pay']) + Ledger::c($b['gross_pay']);
-            $basic = $comp - Ledger::c($a['ot_late_adj']) - Ledger::c($b['ot_late_adj']);
             $e = Fixtures::empRow($id);
-            $contract = $e['salary_type'] === 'daily' ? 0 : ($e['salary_type'] === 'kinsenas' ? 2 * Ledger::c($e['base_salary']) : Ledger::c($e['base_salary']));
-            $t->money(Ledger::sssEe($comp), (Ledger::c($a['sss']) + Ledger::c($b['sss'])) / 100, "$name SSS for the month (pay ₱" . Ledger::fmt($comp) . ')');
-            $t->money(Ledger::philhealthEe(max($basic, $contract)), (Ledger::c($a['philhealth']) + Ledger::c($b['philhealth'])) / 100, "$name PhilHealth for the month");
-            $t->money(Ledger::pagibigEe($basic), (Ledger::c($a['pagibig']) + Ledger::c($b['pagibig'])) / 100, "$name Pag-IBIG for the month");
+            foreach (['sss' => 'sss_amount', 'philhealth' => 'philhealth_amount', 'pagibig' => 'pagibig_amount', 'withholding_tax' => 'tax_amount'] as $col => $typed) {
+                $t->money($e[$typed], Ledger::fmt(Ledger::c($a[$col]) + Ledger::c($b[$col])), "$name $col for the month = the typed ₱{$e[$typed]}");
+            }
+            $t->money($e['sss_amount'], $a['sss'], "$name: SSS in full on the 1st cut-off");
+            $t->money('0.00', $b['sss'], "$name: no more SSS on the 2nd cut-off");
             $t->money('0.00', $a['philhealth'], "$name: PhilHealth waits for the last cut-off");
             $t->money('0.00', $a['pagibig'], "$name: Pag-IBIG waits for the last cut-off");
-            $taxable = $comp - (Ledger::c($a['sss']) + Ledger::c($b['sss']) + Ledger::c($a['philhealth']) + Ledger::c($b['philhealth']) + Ledger::c($a['pagibig']) + Ledger::c($b['pagibig']));
-            $taxWithheld = Ledger::c($a['withholding_tax']) + Ledger::c($b['withholding_tax']);
-            // the month's tax must not fall short of the monthly table; (over-withholding is a known defect, D-02)
-            $t->ok($taxWithheld >= Ledger::tax('monthly', $taxable), "$name withheld ₱" . Ledger::fmt($taxWithheld) . ' for taxable ₱' . Ledger::fmt($taxable));
+            $t->money(Ledger::fmt(Ledger::div(Ledger::c($e['tax_amount']), 2)), $a['withholding_tax'], "$name: half the tax on the 1st cut-off");
         }
-        // DANTE's month: gross 30,000 + 3 h OT ₱135 → tax 15% on (30,135 − 1,500 − 753.38 …) - checked in the ledger above; spot-check that tax exists
+        // CORA typed nothing: nothing is deducted from her, ever
+        $c = $S->emp['CORA DIZON'];
+        foreach ([0, 1] as $k) {
+            $row = Fixtures::payroll($S->periods[$k])[$c];
+            $t->money('0.00', Ledger::fmt(Ledger::c($row['sss']) + Ledger::c($row['philhealth']) + Ledger::c($row['pagibig']) + Ledger::c($row['withholding_tax'])), "CORA, cut-off " . ($k + 1) . ": no deductions");
+            $t->money($row['gross_pay'], $row['net_pay'], "CORA, cut-off " . ($k + 1) . ": net = gross");
+        }
+        // DANTE typed a tax: a ₱30,000 monthly employee does pay withholding tax
         $d = Fixtures::payroll($S->periods[1])[$S->emp['DANTE LIM']];
-        $t->ok((float)$d['withholding_tax'] > 0, 'a ₱30,000 monthly employee does pay withholding tax');
+        $t->money('750.00', $d['withholding_tax'], 'DANTE: the other half of his ₱1,500');
     });
 
     T::test('uploading the same file again changes nothing (idempotent) and keeps the payroll row ids', function (T $t) use ($S, $verify) {
@@ -334,12 +339,12 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
 
     T::test('totals file (api/save-attendance.php): late hours ARE charged here, and it will not silently wipe saved days', function (T $t) {
         Fixtures::reset();
-        $emp = Fixtures::employee(['full_name' => 'TOTALS PERSON', 'base_salary' => '500.00', 'salary_type' => 'daily']);
+        $emp = Fixtures::employee(['full_name' => 'TOTALS PERSON', 'base_salary' => '500.00', 'salary_type' => 'daily', 'sss_amount' => '375.00']);
         $pid = Fixtures::period('Totals 1-15', '2026-04-01', '2026-04-15');
         $r = Http::api('save-attendance.php', ['period_id' => $pid, 'rows' => [['emp_name' => 'TOTALS PERSON', 'hours_worked' => 120, 'overtime_hours' => 4, 'late_hours' => 2.5]]]);
         $t->same(true, $r['json']['success'] ?? null, $r['body']);
         $row = Fixtures::payroll($pid)[$emp];
-        // 500 × 120/8 = 7,500 + 4 h × 45 − 2.5 h × 80 = 7,480.00 ; SSS credit 7,500 → 375.00 ; taxable 7,105 under the exemption
+        // 500 × 120/8 = 7,500 + 4 h × 45 − 2.5 h × 80 = 7,480.00 ; the typed SSS ₱375.00 in full on the 1st cut-off
         $t->moneyMap(['gross_pay' => '7480.00', 'ot_late_adj' => '-20.00', 'sss' => '375.00', 'withholding_tax' => '0.00', 'net_pay' => '7105.00'], $row);
         Fixtures::days($pid, [Fixtures::day('TOTALS PERSON', '2026-04-02', 8)]);
         $r = Http::api('save-attendance.php', ['period_id' => $pid, 'rows' => [['emp_name' => 'TOTALS PERSON', 'hours_worked' => 120, 'overtime_hours' => 0, 'late_hours' => 0]]]);

@@ -432,7 +432,7 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     $less  = fn($amt) => (float)$amt > 0 ? ' - ' . birPeso($amt) . ' less in Basic Pay' : '';
     $parts = [];
     if ((float)($r['absent_days'] ?? 0) > 0)
-        $parts[] = 'Unpaid days (absent, or before the hire date): <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
+        $parts[] = 'Unpaid days (absent, or not in the timesheet): <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
     if ((float)($r['undertime_hours'] ?? 0) > 0)
         $parts[] = 'Undertime: <b>' . $num($r['undertime_hours']) . ' h</b>' . $less($r['undertime_deduction'] ?? 0);
     if ((float)($r['leave_days'] ?? 0) > 0)

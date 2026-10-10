@@ -2,9 +2,11 @@
 /*
  * Mutations - a self-check of the test suite itself: does it FAIL when the application is wrong?
  *
- *   run-tests.bat --mutation-check                  the current application: M01–M20 (M19 reworded) plus M21–M45,
- *                                                   bugs that can only exist in the code the audit and the 13th month added
- *   run-tests.bat --mutation-check --app=<folder>   another copy; an older one gets only M01–M20
+ *   run-tests.bat --mutation-check                  the current application: M01–M09, M12–M16 and M19–M20 on the original engine and
+ *                                                   tables, plus M10–M11, M17–M18 and M21–M56, bugs that can only exist in the code the
+ *                                                   audit, the 13th month and the typed monthly amounts (M46–M56) added
+ *   run-tests.bat --mutation-check --app=<folder>   another copy; an older one gets only the mutants marked for it (the older copies
+ *                                                   compute contributions from pay, so the ledger no longer matches them in other respects)
  *
  * Each mutation edits one line of the COPY of the app that the run uses (never the source tree) - a changed rate,
  * a dropped term, floor instead of round - and the named suite must then report a failure. "SURVIVED" means the suite
@@ -22,27 +24,27 @@ final class Mutations
             'M03' => ['Pag-IBIG maximum fund salary ₱10,000 → ₱5,000',       $h, "'max_comp'  => 10000.0,", "'max_comp'  => 5000.0,", '01'],
             'M04' => ['BIR monthly table: prescribed tax typo (33,541.80 → 33,541.00)', $h, '[166667.0, 33541.80, 0.30]', '[166667.0, 33541.00, 0.30]', '01'],
             'M05' => ['SSS credit: round to the nearest ₱500 → floor',        $h, "round(\$compensation / \$r['msc_step']) * \$r['msc_step']", "floor(\$compensation / \$r['msc_step']) * \$r['msc_step']", '01'],
-            'M06' => ['EC threshold: credit ≥ ₱15,000 → > ₱15,000',           $h, "\$credit >= \$R['sss']['ec_from']", "\$credit > \$R['sss']['ec_from']", '03'],
+            'M06' => ['EC threshold: SSS share ≥ ₱750 (credit ₱15,000) → > ₱750', $h, ">= \$R['sss']['ec_from'] ? \$R['sss']['ec_high']", "> \$R['sss']['ec_from'] ? \$R['sss']['ec_high']", '03', 'fixed'],
             'M07' => ['Daily pay divides by 8 instead of the duty day',       $h, "\$basic   = round(\$rate * \$paidHours / \$dayHours, 2);", "\$basic   = round(\$rate * \$paidHours / 8, 2);", '03'],
             'M08' => ['Month-end detection: a run that ends the month is not "last"', $h, "|| date('Y-m', strtotime(\$end . ' +1 day')) !== date('Y-m', strtotime(\$start))", '|| false', '03'],
             'M09' => ['Absent-day deduction truncated instead of rounded',     $h, "\$absentDed = round((float)(\$abs['absent'] ?? 0) * \$dayRate, 2);", "\$absentDed = floor((float)(\$abs['absent'] ?? 0) * \$dayRate * 100) / 100;", '03'],
-            'M10' => ['Net pay off by one centavo',                            $h, "\$net = round(\$gross - (\$tax + \$contrib), 2);", "\$net = round(\$gross - (\$tax + \$contrib) + 0.01, 2);", '03'],
-            'M11' => ['PhilHealth ignores the salaried contract salary',       $h, "\$phBasis  = (\$ctx['final'] && \$type !== 'daily') ? max(\$basicM, \$contract) : \$basicM;", "\$phBasis  = \$basicM;", '03'],
-            'M12' => ['Adjustments forget the bonus in net pay',               'adjustments.php', "\$net = ((float)\$row['gross_pay'] + \$bonus)", "\$net = ((float)\$row['gross_pay'])", '04'],
+            'M10' => ['Net pay off by one centavo',                            $h, "\$net = round(\$gross - (\$tax + \$sss + \$ph + \$pag), 2);", "\$net = round(\$gross - (\$tax + \$sss + \$ph + \$pag) + 0.01, 2);", '03', 'fixed'],
+            'M11' => ['"First cut-off" amounts wait for the last cut-off (SSS in full on the 1st)', $h, "return (int)(\$ctx['earlier_runs'] ?? 0) === 0 ? 'rest' : 'none';", "return 'none';", '03', 'fixed'],
+            'M12' => ['Adjustments forget the bonus in net pay',               $h, "\$net = ((float)\$row['gross_pay'] + \$bonus)", "\$net = ((float)\$row['gross_pay'])", '04', 'fixed'],   // recordAdjustments() lives in helpers.php since the 2026-10-07 refactor
             'M13' => ['Payslip prints gross where net pay belongs',            'includes/bir-print.php', "<div class=\"val\">' . birPeso(\$r['net_pay']) . '</div>", "<div class=\"val\">' . birPeso(\$r['gross_pay']) . '</div>", '04'],
             'M14' => ['Weekly period = a quarter month instead of 12/52',      $h, "'Weekly'       => 12.0 / 52.0,", "'Weekly'       => 0.25,", '03'],
             'M15' => ['Re-upload overwrites net pay and loses bonus/deductions', $h, "net_pay = \$newNet,", "net_pay = VALUES(net_pay),", '04'],
             'M16' => ['Undertime rounded down instead of to the nearest hour', $h, "round(max(0.0, \$dayHours - (float)\$d['hours_worked']))", "floor(max(0.0, \$dayHours - (float)\$d['hours_worked']))", '02'],
-            'M17' => ['SSS "split" timing ignored (nothing until the last run)', $h, "\$due[\$k] = \$ctx['final'] || \$t === 'split';", "\$due[\$k] = \$ctx['final'];", '03'],
-            'M18' => ['Contributions not deducted before tax (tax on gross)',  $h, "\$taxable = max(0.0, \$gross - \$contrib);", "\$taxable = max(0.0, \$gross);", '03'],
+            'M17' => ['"Split" timing ignored (nothing until the last run)',     $h, "return \$timing === 'split' ? 'share' : 'none';", "return 'none';", '03', 'fixed'],
+            'M18' => ['A "split" share ignores the period (always half a month, even for a week)', $h, "(int)round(\$cents(\$amount) * \$ctx['fraction'])", "(int)round(\$cents(\$amount) * 0.5)", '03', 'fixed'],
             'M19' => ['Late hours charged even with day-by-day records',       $h, "\$lateDeduction = \$perDay ? 0.0 : \$late * \$ctx['late_rate'];", "\$lateDeduction = \$late * \$ctx['late_rate'];", '03', 'original'],
             'M19f' => ['Late hours charged even with day-by-day records',      $h, "\$lateDeduction = \$perDay ? 0.0 : round(\$late * \$ctx['late_rate'], 2);", "\$lateDeduction = round(\$late * \$ctx['late_rate'], 2);", '03', 'fixed'],
             'M20' => ['Employer SSS share 10% → 12%',                          $h, "'er_rate'  => 0.10,", "'er_rate'  => 0.12,", '03'],
 
             // ---- bugs that can only exist in the code the audit added
             'M21' => ['BIR tax: half a centavo rounds down again (D-01)',        $h, "intdiv(\$excess + 50, 100)", "intdiv(\$excess, 100)", '01', 'fixed'],
-            'M22' => ['Month-end tax true-up cannot return tax any more (D-02)', $h, "\$tax   = round(birTax(\$month, 'monthly') - \$p['tax'], 2);", "\$tax   = max(0.0, round(birTax(\$month, 'monthly') - \$p['tax'], 2));", '03', 'fixed'],
-            'M23' => ['Working days before the hire date are paid again (D-03)', $h, "\$absent += \$prehire;", "\$absent += 0;", '11', 'fixed'],
+            'M22' => ['Month-end tax true-up cannot return tax any more (D-02)', $h, "if (\$k !== 'tax' || empty(\$ctx['final'])) \$c = max(0, \$c);", "\$c = max(0, \$c);", '03', 'fixed'],
+            'M23' => ['A salaried employee is paid for working days the uploads have not reached (the days to compute are not the days in the file)', $h, "if (\$s === 'absent' && (\$salary || \$d <= \$upTo)) \$absent++;", "if (\$s === 'absent' && \$d <= \$upTo) \$absent++;", '11', 'fixed'],
             'M24' => ['Labor Code overtime ignores the multiplier setting (D-14)', $h, "\$mult = (int)round((\$ctx['ot_multiplier'] ?? 1.25) * 100);", "\$mult = 125;", '03', 'fixed'],
             'M25' => ['Bonus ceiling: ₱90,000 → effectively none (recordAdjustments)', $h, "\$ytd > BIR_EXEMPT_BENEFITS + 0.004", "\$ytd > BIR_EXEMPT_BENEFITS * 1000", '11', 'fixed'],
             'M26' => ['A deduction may take net pay below zero again (D-10)',    $h, "\$type === 'Deduction' && round(\$net, 2) < 0", "\$type === 'Deduction' && round(\$net, 2) < -1e12", '11', 'fixed'],
@@ -67,6 +69,22 @@ final class Mutations
             'M43' => ['Home page: a Locked period is not "finalized" (D-19)',    'home.php', "\$periodLocked = in_array(\$latestPeriod['status'] ?? '', ['Locked', 'Finalized'], true);", "\$periodLocked = (\$latestPeriod['status'] ?? '') === 'Finalized';", '13', 'fixed'],
             'M44' => ['database.sql: a column differs from the tested schema',   'sql/database.sql', "hours_per_day     DECIMAL(4,2) NULL DEFAULT NULL,", "hours_per_day     DECIMAL(4,1) NULL DEFAULT NULL,", '13', 'fixed'],
             'M45' => ['The audit trail of a correction states the wrong total',   $h, "\"\$type totalling PHP \" . number_format(\$total, 2)", "\"\$type totalling PHP \" . number_format(\$total + 1, 2)", '13', 'fixed'],
+
+            // ---- SSS / PhilHealth / Pag-IBIG / tax as the employee's own typed monthly amounts (2026-10-10)
+            'M46' => ['The month\'s last cut-off no longer settles what is still owed',  $h, "if (!empty(\$ctx['final'])) return 'rest';", "if (false) return 'rest';", '03', 'fixed'],
+            'M47' => ['A contribution may go below zero when its amount is lowered mid-month', $h, "if (\$k !== 'tax' || empty(\$ctx['final'])) \$c = max(0, \$c);", "if (false) \$c = max(0, \$c);", '03', 'fixed'],
+            'M48' => ['Typed amounts are worked in whole pesos instead of centavos',     $h, "(int)round((float)\$v * 100);       /* whole centavos", "(int)round((float)\$v) * 100;       /* whole centavos", '03', 'fixed'],
+            'M49' => ['Company Pag-IBIG share equals the employee\'s even at 1% pay',    $h, "\$pagRatio = \$basicMonth <= \$R['pagibig']['low_limit'] ? \$R['pagibig']['er_rate'] / \$R['pagibig']['rate_low'] : 1.0;", "\$pagRatio = 1.0;", '03', 'fixed'],
+            'M50' => ['EC: the step up to ₱30 is not added when SSS is taken in shares', $h, "\$ecOf(\$sssPrev + \$ee['sss']) - \$ecOf(\$sssPrev)", "\$ecOf(\$ee['sss'])", '03', 'fixed'],
+            'M51' => ['The engine ignores the SSS amount typed on the employee',         $h, "'sss_amount'        => (float)(\$e['sss_amount']        ?? 0),", "'sss_amount'        => 0.0,", '03', 'fixed'],
+            'M52' => ['Employees accepts a ₱10,000,000 Pag-IBIG (the amount limits are gone)', 'employee.php', "\$k === 'tax' ? MAX_SALARY_PESOS : MAX_RATE_PESOS", "MAX_SALARY_PESOS", '11', 'fixed'],
+            'M53' => ['Editing an employee\'s amounts does not recompute the open payroll', 'employee.php', "if ((float)(\$prev[\"{\$k}_amount\"] ?? 0) !== \$v) \$changed = true;", "if (false) \$changed = true;", '11', 'fixed'],
+            'M54' => ['Settings accept any word as a contribution timing',              'settings.php', "fn(\$v) => in_array(trim(\$v), CONTRIBUTION_TIMING_CHOICES, true) ? null", "fn(\$v) => true ? null", '11', 'fixed'],
+            'M55' => ['The default SSS schedule is not "1st cut-off, in full" any more', $h, "const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'first',", "const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'split',", '02', 'fixed'],
+            'M56' => ['Finalize cannot see that a later cut-off\'s tax is stale',        $h, "'withholding_tax' => \$c['tax']];", "'withholding_tax' => (float)\$r['withholding_tax']];", '09', 'fixed'],
+
+            // ---- the days to compute are the days in the uploaded file (2026-10-10)
+            'M57' => ['A day the timesheet marks OFF is deducted as absent',  $h, "    if (\$markedOff) return 'off';", "    if (\$markedOff) return 'absent';", '11', 'fixed'],
         ];
         // an entry without a sixth element applies to both versions of the application
         return array_map(fn($m) => $m + [5 => 'both'], $all);

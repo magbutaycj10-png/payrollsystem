@@ -54,14 +54,14 @@ T::suite('02 · Hours & calendar primitives', function () {
 
     /* ================================================================== day status */
 
-    T::test('dayStatus: worked beats everything; before hire; marked OFF; weekly rest; approved leave; absent', function (T $t) {
-        $cal = ['rest' => [7], 'hired' => '2026-04-06', 'branch' => 'MAIN',
+    T::test('dayStatus: worked beats everything; marked OFF; weekly rest; approved leave; absent - and no hire date anywhere', function (T $t) {
+        $cal = ['rest' => [7], 'branch' => 'MAIN',
                 'leave' => ['2026-04-08' => ['status' => 'Approved', 'type' => 'Vacation'],
                             '2026-04-09' => ['status' => 'Pending',  'type' => 'Vacation'],
                             '2026-04-10' => ['status' => 'Rejected', 'type' => 'Vacation'],
                             '2026-04-12' => ['status' => 'Approved', 'type' => 'Vacation']]];
-        $t->same('nothired', dayStatus($cal, '2026-04-03', false), 'before the hire date');
-        $t->same('worked',   dayStatus($cal, '2026-04-03', true), 'a day worked is a day worked, even before the recorded hire date');
+        $t->same('absent',   dayStatus($cal, '2026-04-03', false), 'a working day the file does not show is absent - the days from a hire date do not come into it');
+        $t->same('worked',   dayStatus($cal, '2026-04-03', true), 'a day worked is a day worked');
         $t->same('worked',   dayStatus($cal, '2026-04-12', true), 'working your rest day counts as worked');
         $t->same('off',      dayStatus($cal, '2026-04-07', false, true), 'timesheet says OFF');
         $t->same('off',      dayStatus($cal, '2026-04-12', false), 'Sunday is the rest day…');
@@ -143,10 +143,9 @@ T::suite('02 · Hours & calendar primitives', function () {
         }
     });
 
-    T::test('period context: fraction of a month, tax table, half of the month, working days, standard hours', function (T $t) {
+    T::test('period context: fraction of a month, half of the month, working days, standard hours', function (T $t) {
         $a = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
         $t->eq(0.5, $a['fraction']);
-        $t->same('semi', $a['tax_table']);
         $t->same(1, $a['half']);
         $t->same(26, $a['working_days']);
         $t->eq(8.0, $a['standard']);
@@ -154,10 +153,8 @@ T::suite('02 · Hours & calendar primitives', function () {
         $t->same(2, $b['half']);
         $w = buildPayContext(['period_start' => '2026-04-06', 'period_end' => '2026-04-12', 'period_type' => 'Weekly']);
         $t->eq(12 / 52, $w['fraction'], 'a week is 12/52 of a month');
-        $t->same('weekly', $w['tax_table']);
         $m = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-30', 'period_type' => 'Monthly']);
         $t->eq(1.0, $m['fraction']);
-        $t->same('monthly', $m['tax_table']);
         // a period with no stored type falls back to the Settings default (Semi-Monthly here)
         $d = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => null]);
         $t->same('Semi-Monthly', $d['period_type']);
@@ -170,11 +167,26 @@ T::suite('02 · Hours & calendar primitives', function () {
         $t->eq(30000.0, monthlyEquivalent('rubbish', 30000.0, 26), 'unknown type is treated as monthly');
     });
 
-    T::test('contribution timing falls back to the defaults for blank or unknown settings', function (T $t) {
+    T::test('contribution timing falls back to the defaults for blank or unknown settings; first, split and second are all accepted', function (T $t) {
         Fixtures::setting('contribution_timing_sss', 'bogus');
         Fixtures::setting('contribution_timing_philhealth', '');
         Fixtures::setting('contribution_timing_pagibig', 'split');
-        $t->same(['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'split'], contributionTiming());
+        Fixtures::setting('contribution_timing_tax', 'first');
+        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'split', 'tax' => 'first'], contributionTiming());
+        foreach (['sss', 'philhealth', 'pagibig', 'tax'] as $k) Fixtures::setting("contribution_timing_$k", '');
+        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'], contributionTiming(),
+                 'the defaults follow the pharmacy\'s sheets: SSS 1st cut-off, PhilHealth and Pag-IBIG the 2nd, tax in shares');
         Fixtures::reset();
+    });
+
+    T::test('which pay run takes what: the month\'s last run always settles; "first" waits for no one; "split" takes a share; "second" waits', function (T $t) {
+        $semi1 = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
+        $semi2 = buildPayContext(['period_start' => '2026-04-16', 'period_end' => '2026-04-30', 'period_type' => 'Semi-Monthly'], [], 1);
+        $mon   = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-30', 'period_type' => 'Monthly']);
+        $week2 = buildPayContext(['period_start' => '2026-04-08', 'period_end' => '2026-04-14', 'period_type' => 'Weekly'], [], 1);
+        $t->same(['rest', 'share', 'none'], [contributionTake('first', $semi1), contributionTake('split', $semi1), contributionTake('second', $semi1)], '1st cut-off');
+        $t->same(['rest', 'rest', 'rest'],  [contributionTake('first', $semi2), contributionTake('split', $semi2), contributionTake('second', $semi2)], 'last cut-off');
+        $t->same(['rest', 'rest', 'rest'],  [contributionTake('first', $mon),   contributionTake('split', $mon),   contributionTake('second', $mon)],   'a monthly run takes everything');
+        $t->same(['none', 'share', 'none'], [contributionTake('first', $week2), contributionTake('split', $week2), contributionTake('second', $week2)], 'a middle week: "first" was taken in week 1');
     });
 });

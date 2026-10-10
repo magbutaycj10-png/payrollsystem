@@ -67,7 +67,7 @@ try {
             }
         }
 
-        /* Net pay below zero (the statutory minimums or a deduction exceed what was earned) is not locked in unnoticed */
+        /* Net pay below zero (the monthly contribution and tax amounts or a deduction exceed what was earned) is not locked in unnoticed */
         if (empty($body['allow_negative'])) {
             $neg = negativeNetLines($db, $period_id);
             if ($neg) {

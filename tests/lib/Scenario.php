@@ -13,22 +13,26 @@ final class Scenario
     private static int $seq = 0;
 
     /**
-     * $spec: emp[] (employees columns), runs[] (start, end, type), days (date => [h, ot, late, under, off]),
+     * $spec: emp[] (employees columns - sss_amount, philhealth_amount, pagibig_amount, tax_amount are the monthly amounts typed
+     *        on Employees), runs[] (start, end, type), days (date => [h, ot, late, under, off]),
      *        leave[] approved dates, pending[] / rejected[] dates, cfg (ot_rate, timing…), setup (callable)
+     *        between: [run index => callable ($empId, $periodIds)] - runs after that run is computed and before the next one (an admin
+     *        finalizing a cut-off, then editing the employee mid-month). The ledger cannot follow an edit, so 'exp' is only meaningful without it.
      * @return array{emp:string, periods:int[], app:array, exp:array}
      */
     public static function play(array $spec): array
     {
         $db = getDB();
         $n = ++self::$seq;
-        $cfg = ($spec['cfg'] ?? []) + ['ot_rate' => '45', 'timing' => ['sss' => 'split', 'philhealth' => 'second', 'pagibig' => 'second']];
+        $cfg = ($spec['cfg'] ?? []) + ['ot_rate' => '45'];
+        $cfg['timing'] = ($cfg['timing'] ?? []) + Ledger::TIMING;          // when each monthly amount is taken: first | split | second
 
         Fixtures::setting('overtime_rate', $cfg['ot_rate']);
         Fixtures::setting('overtime_method', $cfg['ot_method'] ?? 'flat');          // ignored by the original application
         Fixtures::setting('overtime_multiplier', $cfg['ot_mult'] ?? '1.25');
         Fixtures::setting('late_rate', $cfg['late_rate'] ?? '80');
         Fixtures::setting('standard_hours', (string)($cfg['std'] ?? 8));
-        foreach (['sss', 'philhealth', 'pagibig'] as $k) Fixtures::setting("contribution_timing_$k", $cfg['timing'][$k]);
+        foreach ($cfg['timing'] as $k => $when) Fixtures::setting("contribution_timing_$k", $when);
 
         $empId = Fixtures::employee(($spec['emp'] ?? []) + ['emp_id' => sprintf('QA-%05d', $n), 'full_name' => "QA Employee $n", 'branch' => "B$n"]);
         $emp = Fixtures::empRow($empId);
@@ -63,16 +67,16 @@ final class Scenario
         foreach ($periods as $i => $pid) {
             recomputePeriodFromDaily($db, $pid, ['role' => 'admin', 'scope' => null]);
             $app[$i] = Fixtures::payroll($pid)[$empId] ?? null;
+            if (isset($spec['between'][$i])) ($spec['between'][$i])($empId, $periods);
         }
 
         // ---- the ledger
-        // 'exp' follows the application under test: the ORIGINAL does not return tax over-withheld earlier in the month and
-        // pays a salaried employee for working days before the hire date (defects D-02, D-03); the version with the audit
-        // fixes does neither. 'exp_refund' is always what the month SHOULD come to (refund on, hire-date proration on).
+        // 'exp' follows the application under test: the ORIGINAL does not return tax over-withheld earlier in the month (defect D-02);
+        // the version with the audit fixes does. 'exp_refund' is always what the month SHOULD come to (refund on).
         $fixed = AppCopy::hasFixes();
         $emp2 = Fixtures::ledgerEmp($emp);
-        $exp = Ledger::month($emp2, $runs, $spec['days'], $spec['leave'] ?? [], $cfg + ['refund' => $fixed, 'prehire' => $fixed]);
-        $expRefund = Ledger::month($emp2, $runs, $spec['days'], $spec['leave'] ?? [], $cfg + ['refund' => true, 'prehire' => true]);
+        $exp = Ledger::month($emp2, $runs, $spec['days'], $spec['leave'] ?? [], $cfg + ['refund' => $fixed]);
+        $expRefund = Ledger::month($emp2, $runs, $spec['days'], $spec['leave'] ?? [], $cfg + ['refund' => true]);
         return ['emp' => $empId, 'periods' => $periods, 'app' => $app, 'exp' => $exp, 'exp_refund' => $expRefund, 'runs' => $runs];
     }
 

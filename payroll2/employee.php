@@ -30,10 +30,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            ? $_POST['salary_type'] : 'monthly';
         $hired           = $_POST['date_hired']            ?: null;
         $portal_password = trim($_POST['portal_password']  ?? '');
-        /* Government contributions deducted for this employee (all on by default) */
-        $dSss = isset($_POST['deduct_sss']) ? 1 : 0;
-        $dPh  = isset($_POST['deduct_philhealth']) ? 1 : 0;
-        $dPag = isset($_POST['deduct_pagibig']) ? 1 : 0;
         /* Weekly day(s) off, ISO weekdays: never counted absent, never deducted */
         $restDays = implode(',', restDayList(implode(',', (array)($_POST['rest_days'] ?? []))));
         /* Hours in this employee's duty day; blank = the Settings standard */
@@ -46,13 +42,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $formProblem = pesoProblem('Salary', $_POST['base_salary'] ?? '', $salary_type === 'daily' ? MAX_RATE_PESOS : MAX_SALARY_PESOS);
         if ($formProblem === null && $dayHoursRaw !== '' && $dayHours === null) $formProblem = 'Duty-day hours must be a number from 1 to 24 (or blank for the standard day)';
 
+        /* The monthly SSS, PhilHealth, Pag-IBIG and withholding-tax amounts the admin types in. All optional: a blank box
+           means this employee has none, and 0 is what is saved. Payroll deducts exactly these. */
+        $amounts = [];
+        foreach (CONTRIBUTION_LABELS as $k => $label) {
+            $raw = trim((string)($_POST["{$k}_amount"] ?? ''));
+            $raw = $raw === '' ? '0' : $raw;
+            $formProblem ??= pesoProblem("$label (per month)", $raw, $k === 'tax' ? MAX_SALARY_PESOS : MAX_RATE_PESOS);
+            $amounts[$k] = (float)$raw;
+        }
+
         if ($formProblem !== null) {
             $msg = ['type' => 'error', 'text' => "Not saved - $formProblem."];
         } elseif ($action === 'add') {
             $emp_id = nextEmpId($db);
             try {
-                $db->prepare("INSERT INTO employees (emp_id,full_name,position,branch,email,base_salary,salary_type,date_hired,deduct_sss,deduct_philhealth,deduct_pagibig,rest_days,hours_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
-                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired, $dSss, $dPh, $dPag, $restDays, $dayHours]);
+                $db->prepare("INSERT INTO employees (emp_id,full_name,position,branch,email,base_salary,salary_type,date_hired,sss_amount,philhealth_amount,pagibig_amount,tax_amount,rest_days,hours_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours]);
                 $msg = ['type' => 'success', 'text' => "Employee $name added (ID: $emp_id)."];
             } catch (PDOException $e) {
                 $msg = ['type' => 'error', 'text' => 'The employee was not added. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
@@ -63,20 +70,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $prev = $db->prepare("SELECT * FROM employees WHERE id = ?");
                 $prev->execute([$id]);
                 $prev = $prev->fetch() ?: [];
-                $db->prepare("UPDATE employees SET emp_id=?,full_name=?,position=?,branch=?,email=?,base_salary=?,salary_type=?,date_hired=?,deduct_sss=?,deduct_philhealth=?,deduct_pagibig=?,rest_days=?,hours_per_day=? WHERE id=?")
-                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired, $dSss, $dPh, $dPag, $restDays, $dayHours, $id]);
+                $db->prepare("UPDATE employees SET emp_id=?,full_name=?,position=?,branch=?,email=?,base_salary=?,salary_type=?,date_hired=?,sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,rest_days=?,hours_per_day=? WHERE id=?")
+                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours, $id]);
                 $msg = ['type' => 'success', 'text' => "Employee $name updated."];
                 /* Anything the pay computation reads - rate, salary type, day off,
-                   duty hours, hire date, contribution switches - changes this
-                   employee's open payroll: bring it in line now */
+                   duty hours, the monthly contribution and tax amounts - changes
+                   this employee's open payroll: bring it in line now. (The Date
+                   Hired is only a record: no pay depends on it.) */
                 $changed = (float)($prev['base_salary'] ?? 0) !== (float)$salary
                         || ($prev['salary_type'] ?? '') !== $salary_type
                         || ($prev['rest_days'] ?? '7') !== $restDays
-                        || ($prev['date_hired'] ?? null) !== $hired
-                        || (float)($prev['hours_per_day'] ?? 0) !== (float)($dayHours ?? 0)
-                        || (int)($prev['deduct_sss'] ?? 1) !== $dSss
-                        || (int)($prev['deduct_philhealth'] ?? 1) !== $dPh
-                        || (int)($prev['deduct_pagibig'] ?? 1) !== $dPag;
+                        || (float)($prev['hours_per_day'] ?? 0) !== (float)($dayHours ?? 0);
+                foreach ($amounts as $k => $v) {
+                    if ((float)($prev["{$k}_amount"] ?? 0) !== $v) $changed = true;
+                }
                 if ($changed) {
                     $redone = recomputeEmployeeOpenPeriods($db, $emp_id, '1000-01-01', '9999-12-31');
                     if ($redone) $msg['text'] .= ' Payroll recomputed for ' . implode(', ', $redone) . '.';
@@ -195,6 +203,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $next_emp_id = nextEmpId($db);
 
+/* Where Settings' Contribution Schedule currently sends each monthly amount (the note under the amount boxes) */
+$scheduleNow = [];
+foreach (contributionTiming() as $k => $t) $scheduleNow[] = CONTRIBUTION_LABELS[$k] . ': ' . CONTRIBUTION_TIMING_LABELS[$t];
+
 /* The branch list maintained in Settings, plus any name already sitting on an
    employee row that predates it - an existing assignment must stay selectable
    or editing that employee would silently clear their branch. */
@@ -273,13 +285,15 @@ $total     = count($employees);
                 <thead>
                     <tr>
                         <th>Emp ID</th><th>Name</th><th>Position</th><th>Branch</th>
-                        <th>Email</th><th>Base Salary</th><th>Type</th><th>Hired</th><th>Status</th><th>Portal Access</th><th>Actions</th>
+                        <th>Email</th><th>Base Salary</th><th>Type</th>
+                        <th title="The employee's own monthly amounts, deducted from pay as typed">SSS / PhilHealth / Pag-IBIG / Tax (monthly)</th>
+                        <th>Hired</th><th>Status</th><th>Portal Access</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php if (empty($employees)): ?>
                     <tr>
-                        <td colspan="10" style="text-align:center;color:#9ca3af;padding:30px;">No employees found. Add one above.</td>
+                        <td colspan="12" style="text-align:center;color:#9ca3af;padding:30px;">No employees found. Add one above.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($employees as $e): ?>
@@ -299,6 +313,16 @@ $total     = count($employees);
                             <?php if (!empty($e['hours_per_day'])): ?>
                                 <br><small style="color:#6b7280;white-space:nowrap;" title="Hours per duty day"><?= rtrim(rtrim(number_format($e['hours_per_day'], 1), '0'), '.') ?>-hour day</small>
                             <?php endif; ?>
+                        </td>
+                        <td style="white-space:nowrap;font-size:.82rem;">
+                            <?php $held = false;
+                            foreach (CONTRIBUTION_LABELS as $k => $label):
+                                $amt = (float)($e["{$k}_amount"] ?? 0);
+                                if ($amt <= 0) continue;
+                                $held = true; ?>
+                                <div><span style="color:#6b7280;"><?= htmlspecialchars($k === 'tax' ? 'Tax' : $label) ?></span> ₱<?= number_format($amt, 2) ?></div>
+                            <?php endforeach; ?>
+                            <?php if (!$held): ?><span style="color:#9ca3af;">None</span><?php endif; ?>
                         </td>
                         <td><?= $e['date_hired'] ? date('M d, Y', strtotime($e['date_hired'])) : '-' ?></td>
                         <td>
@@ -398,7 +422,7 @@ $total     = count($employees);
                     <input type="number" name="base_salary" id="f_salary" class="form-control" value="0" step="0.01" min="0">
                 </div>
                 <div class="form-group">
-                    <label>Date Hired</label>
+                    <label>Date Hired <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
                     <input type="date" name="date_hired" id="f_hired" class="form-control">
                 </div>
                 <div class="form-group">
@@ -408,6 +432,11 @@ $total     = count($employees);
                     <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">For a longer shift, e.g. 10 - a daily rate then covers 10 hours and undertime costs rate ÷ 10 an hour.</span>
                 </div>
             </div>
+            <p style="font-size:.78rem;color:#9ca3af;margin:12px 0 0;">
+                <strong>Pay is worked out from the days in the uploaded timesheet</strong>, not from the Date Hired: an employee added today can have
+                this month's, or any earlier month's, file uploaded and is paid for the days that file holds. On a monthly or kinsenas salary, a working
+                day that is not in the file (and is not a day off or approved leave) is not paid. The Date Hired is only a record.
+            </p>
 
             <!-- Day-off schedule -->
             <div style="border-top:1px solid #e5e7eb;margin:18px 0 0;padding-top:16px;">
@@ -425,19 +454,38 @@ $total     = count($employees);
                 </div>
             </div>
 
-            <!-- Government contributions -->
+            <!-- Government contributions and withholding tax: the employee's own monthly amounts -->
             <div style="border-top:1px solid #e5e7eb;margin:18px 0 0;padding-top:16px;">
-                <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px;">Government Contributions</p>
+                <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px;">Contributions &amp; Withholding Tax
+                    <span style="font-weight:400;color:#9ca3af;">(₱ per month - all optional)</span></p>
                 <p style="font-size:.78rem;color:#9ca3af;margin-bottom:10px;">
-                    Deducted from this employee's pay, with the company's share added on top. Required by law for
-                    regular employees - untick only if it is paid some other way (for example the employee is
-                    not yet registered, or it is remitted outside this system).
+                    Type what is to be deducted from this employee's pay each month. Leave a box blank - or 0 - when the
+                    employee has none: some do not. The amounts are deducted exactly as typed; nothing is worked out from the pay.
+                    The company's share is figured on top of the contributions.
                 </p>
-                <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:.88rem;">
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" name="deduct_sss" id="f_d_sss" value="1" checked> SSS</label>
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" name="deduct_philhealth" id="f_d_ph" value="1" checked> PhilHealth</label>
-                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" name="deduct_pagibig" id="f_d_pag" value="1" checked> Pag-IBIG</label>
+                <div class="form-grid" style="grid-template-columns:1fr 1fr;">
+                    <div class="form-group">
+                        <label>SSS</label>
+                        <input type="number" name="sss_amount" id="f_sss" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>PhilHealth</label>
+                        <input type="number" name="philhealth_amount" id="f_ph" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Pag-IBIG</label>
+                        <input type="number" name="pagibig_amount" id="f_pag" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Withholding Tax</label>
+                        <input type="number" name="tax_amount" id="f_tax" class="form-control" step="0.01" min="0" max="<?= (int)MAX_SALARY_PESOS ?>" placeholder="0.00">
+                    </div>
                 </div>
+                <p style="font-size:.76rem;color:#9ca3af;margin-top:4px;">
+                    A monthly payroll takes them in full. On a semi-monthly or weekly payroll it follows
+                    <a href="settings.php#contribSchedule" style="color:#6b7280;">Settings &rsaquo; Contribution Schedule</a>
+                    - now: <?= htmlspecialchars(implode(' · ', $scheduleNow)) ?>.
+                </p>
             </div>
 
             <!-- Portal credentials section -->

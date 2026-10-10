@@ -31,6 +31,12 @@ CREATE TABLE IF NOT EXISTS employees (
   deduct_pagibig    TINYINT(1) NOT NULL DEFAULT 1,
   rest_days         VARCHAR(20) NOT NULL DEFAULT '7',
   hours_per_day     DECIMAL(4,2) NULL DEFAULT NULL,
+  -- The employee's own MONTHLY amounts, typed by the admin and deducted as typed (0 = none). The deduct_* columns above
+  -- are no longer read: a zero amount is how an employee is left out of SSS, PhilHealth, Pag-IBIG or withholding tax.
+  sss_amount        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  philhealth_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  pagibig_amount    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  tax_amount        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   PRIMARY KEY (id),
   UNIQUE KEY uq_emp_id (emp_id)
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

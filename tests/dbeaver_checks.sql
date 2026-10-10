@@ -35,7 +35,7 @@ SELECT p.id AS payroll_id, pp.period_label, p.emp_id, p.emp_name, p.gross_pay, p
  WHERE p.net_pay <> ROUND(p.gross_pay + p.bonus - (p.withholding_tax + p.sss + p.philhealth + p.pagibig + p.other_deductions), 2)
  ORDER BY pp.period_start, p.emp_name;
 
--- @check C02 | Negative net pay: the statutory minimums (SSS 250, PhilHealth 250) or a deduction are larger than what was earned | expect: review
+-- @check C02 | Negative net pay: the employee's monthly SSS / PhilHealth / Pag-IBIG / tax amounts or a deduction are larger than what was earned | expect: review
 SELECT p.id AS payroll_id, pp.period_label, pp.status AS period_status, p.emp_id, p.emp_name, p.gross_pay, p.sss, p.philhealth, p.pagibig,
        p.withholding_tax, p.other_deductions, p.net_pay
   FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
@@ -72,82 +72,67 @@ SELECT pp.id AS period_id, pp.period_label, pp.status AS period_status, p.status
  ORDER BY pp.period_start;
 
 -- =====================================================================================================================
---  2. THE MONTH, EMPLOYEE BY EMPLOYEE: contributions and tax must come to exactly what the month's pay requires
+--  2. THE MONTH, EMPLOYEE BY EMPLOYEE: each month must come to exactly the monthly amounts typed on the employee
+--     (Employees > Edit: SSS, PhilHealth, Pag-IBIG, withholding tax). Nothing is worked out from pay, so there is no
+--     table to check against - only whether the month took what the employee's record says. An amount edited AFTER a
+--     month was paid legitimately shows that month here, which is why these are "review".
 -- =====================================================================================================================
 
--- @check C10 | SSS: the month's deduction is not 5% of the salary credit of the month's pay (credit = pay to the nearest 500, between 5,000 and 35,000) | expect: none
+-- @check C10 | SSS: the month's deduction is not the employee's monthly SSS amount (an amount edited since that month shows here too) | expect: review
 WITH m AS (
   SELECT p.emp_id, MAX(p.emp_name) AS emp_name, DATE_FORMAT(pp.period_start, '%Y-%m') AS ym,
-         SUM(p.gross_pay) AS gross, SUM(p.sss) AS sss, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
+         SUM(p.sss) AS deducted, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
     FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
    GROUP BY p.emp_id, DATE_FORMAT(pp.period_start, '%Y-%m')
 )
-SELECT m.ym AS month, m.emp_id, m.emp_name, m.gross AS month_pay, e.deduct_sss AS sss_switch_on, m.sss AS deducted,
-       IF(e.deduct_sss = 1, ROUND(0.05 * LEAST(35000, GREATEST(5000, ROUND(m.gross / 500, 0) * 500)), 2), 0) AS should_be
+SELECT m.ym AS month, m.emp_id, m.emp_name, e.sss_amount AS monthly_amount, m.deducted
   FROM m JOIN employees e ON e.emp_id = m.emp_id
  WHERE (DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 1 DAY), '%Y-%m') <> m.ym
         OR (m.ptype = 'Weekly' AND DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 7 DAY), '%Y-%m') <> m.ym))
-   AND m.sss <> IF(e.deduct_sss = 1, ROUND(0.05 * LEAST(35000, GREATEST(5000, ROUND(m.gross / 500, 0) * 500)), 2), 0)
+   AND m.deducted <> e.sss_amount
  ORDER BY m.ym, m.emp_name;
 
--- @check C11 | PhilHealth: the month's deduction is not 2.5% of basic pay (between 10,000 and 100,000, a salaried employee at least the contract salary) | expect: none
+-- @check C11 | PhilHealth: the month's deduction is not the employee's monthly PhilHealth amount (an amount edited since that month shows here too) | expect: review
 WITH m AS (
   SELECT p.emp_id, MAX(p.emp_name) AS emp_name, DATE_FORMAT(pp.period_start, '%Y-%m') AS ym,
-         SUM(p.gross_pay - p.ot_late_adj) AS basic, SUM(p.philhealth) AS ph, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
+         SUM(p.philhealth) AS deducted, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
     FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
    GROUP BY p.emp_id, DATE_FORMAT(pp.period_start, '%Y-%m')
 )
-SELECT m.ym AS month, m.emp_id, m.emp_name, m.basic AS month_basic_pay, e.salary_type, e.base_salary, e.deduct_philhealth AS switch_on, m.ph AS deducted,
-       IF(e.deduct_philhealth = 1, ROUND(0.025 * LEAST(100000, GREATEST(10000,
-          IF(e.salary_type = 'daily', m.basic, GREATEST(m.basic, IF(e.salary_type = 'kinsenas', 2 * e.base_salary, e.base_salary))))), 2), 0) AS should_be
+SELECT m.ym AS month, m.emp_id, m.emp_name, e.philhealth_amount AS monthly_amount, m.deducted
   FROM m JOIN employees e ON e.emp_id = m.emp_id
  WHERE (DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 1 DAY), '%Y-%m') <> m.ym
         OR (m.ptype = 'Weekly' AND DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 7 DAY), '%Y-%m') <> m.ym))
-   AND m.ph <> IF(e.deduct_philhealth = 1, ROUND(0.025 * LEAST(100000, GREATEST(10000,
-          IF(e.salary_type = 'daily', m.basic, GREATEST(m.basic, IF(e.salary_type = 'kinsenas', 2 * e.base_salary, e.base_salary))))), 2), 0)
+   AND m.deducted <> e.philhealth_amount
  ORDER BY m.ym, m.emp_name;
 
--- @check C12 | Pag-IBIG: the month's deduction is not 1% of basic pay up to 1,500 / 2% above, on at most 10,000 | expect: none
+-- @check C12 | Pag-IBIG: the month's deduction is not the employee's monthly Pag-IBIG amount (an amount edited since that month shows here too) | expect: review
 WITH m AS (
   SELECT p.emp_id, MAX(p.emp_name) AS emp_name, DATE_FORMAT(pp.period_start, '%Y-%m') AS ym,
-         SUM(p.gross_pay - p.ot_late_adj) AS basic, SUM(p.pagibig) AS pi, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
+         SUM(p.pagibig) AS deducted, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
     FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
    GROUP BY p.emp_id, DATE_FORMAT(pp.period_start, '%Y-%m')
 )
-SELECT m.ym AS month, m.emp_id, m.emp_name, m.basic AS month_basic_pay, e.deduct_pagibig AS switch_on, m.pi AS deducted,
-       IF(e.deduct_pagibig = 1, ROUND(LEAST(m.basic, 10000) * IF(m.basic <= 1500, 0.01, 0.02), 2), 0) AS should_be
+SELECT m.ym AS month, m.emp_id, m.emp_name, e.pagibig_amount AS monthly_amount, m.deducted
   FROM m JOIN employees e ON e.emp_id = m.emp_id
  WHERE (DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 1 DAY), '%Y-%m') <> m.ym
         OR (m.ptype = 'Weekly' AND DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 7 DAY), '%Y-%m') <> m.ym))
-   AND m.pi <> IF(e.deduct_pagibig = 1, ROUND(LEAST(m.basic, 10000) * IF(m.basic <= 1500, 0.01, 0.02), 2), 0)
+   AND m.deducted <> e.pagibig_amount
  ORDER BY m.ym, m.emp_name;
 
--- @check C13 | Withholding tax: the month's tax is not the BIR monthly table (RR 11-2018 Annex E) on the month's taxable pay - a positive "over_withheld" is tax that should have been returned | expect: none
--- (Months in which some run has pay below its own contributions are left out: the application settles those run by run.)
+-- @check C13 | Withholding tax: the month's tax is not the employee's monthly tax amount (an amount edited since that month shows here too; a negative total is a refund) | expect: review
 WITH m AS (
   SELECT p.emp_id, MAX(p.emp_name) AS emp_name, DATE_FORMAT(pp.period_start, '%Y-%m') AS ym,
-         SUM(p.gross_pay - p.sss - p.philhealth - p.pagibig) AS taxable,
-         MIN(p.gross_pay - p.sss - p.philhealth - p.pagibig) AS worst_run,
-         SUM(p.withholding_tax) AS tax, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
+         SUM(p.withholding_tax) AS deducted, MAX(pp.period_end) AS last_end, MAX(pp.period_type) AS ptype
     FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
    GROUP BY p.emp_id, DATE_FORMAT(pp.period_start, '%Y-%m')
-), t AS (
-  SELECT m.*, ROUND(CASE
-            WHEN m.taxable <= 20833  THEN 0
-            WHEN m.taxable <= 33333  THEN (m.taxable - 20833) * 0.15
-            WHEN m.taxable <= 66667  THEN 1875.00 + (m.taxable - 33333) * 0.20
-            WHEN m.taxable <= 166667 THEN 8541.80 + (m.taxable - 66667) * 0.25
-            WHEN m.taxable <= 666667 THEN 33541.80 + (m.taxable - 166667) * 0.30
-            ELSE 183541.80 + (m.taxable - 666667) * 0.35 END, 2) AS should_be
-    FROM m
 )
-SELECT t.ym AS month, t.emp_id, t.emp_name, t.taxable AS month_taxable_pay, t.tax AS withheld, t.should_be, ROUND(t.tax - t.should_be, 2) AS over_withheld
-  FROM t
- WHERE t.worst_run >= 0
-   AND (DATE_FORMAT(DATE_ADD(t.last_end, INTERVAL 1 DAY), '%Y-%m') <> t.ym
-        OR (t.ptype = 'Weekly' AND DATE_FORMAT(DATE_ADD(t.last_end, INTERVAL 7 DAY), '%Y-%m') <> t.ym))
-   AND t.tax <> t.should_be
- ORDER BY t.ym, t.emp_name;
+SELECT m.ym AS month, m.emp_id, m.emp_name, e.tax_amount AS monthly_amount, m.deducted
+  FROM m JOIN employees e ON e.emp_id = m.emp_id
+ WHERE (DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 1 DAY), '%Y-%m') <> m.ym
+        OR (m.ptype = 'Weekly' AND DATE_FORMAT(DATE_ADD(m.last_end, INTERVAL 7 DAY), '%Y-%m') <> m.ym))
+   AND m.deducted <> e.tax_amount
+ ORDER BY m.ym, m.emp_name;
 
 -- =====================================================================================================================
 --  3. WHAT WENT IN: attendance, employees, settings
@@ -183,11 +168,14 @@ SELECT a.id AS period_a, a.period_label AS label_a, a.period_start AS start_a, a
   FROM payroll_periods a JOIN payroll_periods b ON a.id < b.id AND a.period_start <= b.period_end AND b.period_start <= a.period_end
  ORDER BY a.period_start;
 
--- @check C30 | Employee set-up that cannot be right: negative or absurd pay, or a duty day outside 1-24 hours | expect: none
-SELECT e.emp_id, e.full_name, e.salary_type, e.base_salary, e.hours_per_day, e.date_hired, e.status
+-- @check C30 | Employee set-up that cannot be right: negative or absurd pay, a negative or absurd monthly SSS / PhilHealth / Pag-IBIG / tax amount, or a duty day outside 1-24 hours | expect: none
+SELECT e.emp_id, e.full_name, e.salary_type, e.base_salary, e.hours_per_day, e.date_hired, e.status,
+       e.sss_amount, e.philhealth_amount, e.pagibig_amount, e.tax_amount
   FROM employees e
  WHERE e.base_salary < 0 OR e.base_salary > 10000000 OR (e.salary_type = 'daily' AND e.base_salary > 100000)
     OR e.hours_per_day < 1 OR e.hours_per_day > 24
+    OR e.sss_amount < 0 OR e.sss_amount > 100000 OR e.philhealth_amount < 0 OR e.philhealth_amount > 100000
+    OR e.pagibig_amount < 0 OR e.pagibig_amount > 100000 OR e.tax_amount < 0 OR e.tax_amount > 10000000
  ORDER BY e.emp_id;
 
 -- @check C31 | Settings that are not usable values (rates, duty day, schedule, contribution timing, overtime method / multiplier) | expect: none
@@ -202,8 +190,8 @@ UNION ALL
 SELECT setting_key, setting_value, 'must be Monthly, Semi-Monthly or Weekly' FROM settings
  WHERE setting_key = 'payroll_period' AND setting_value NOT IN ('Monthly', 'Semi-Monthly', 'Weekly')
 UNION ALL
-SELECT setting_key, setting_value, 'must be split or second' FROM settings
- WHERE setting_key LIKE 'contribution_timing_%' AND setting_value NOT IN ('split', 'second')
+SELECT setting_key, setting_value, 'must be first, split or second' FROM settings
+ WHERE setting_key LIKE 'contribution_timing_%' AND setting_value NOT IN ('first', 'split', 'second')
 UNION ALL
 SELECT setting_key, setting_value, 'must be flat or labor_code' FROM settings
  WHERE setting_key = 'overtime_method' AND setting_value NOT IN ('flat', 'labor_code')
@@ -259,7 +247,7 @@ SELECT e.emp_id, e.full_name, e.salary_type, e.base_salary, COALESCE(e.hours_per
        > COALESCE((SELECT CAST(s.setting_value AS DECIMAL(12,2)) FROM settings s WHERE s.setting_key = 'overtime_rate'), 150) + 0.004
  ORDER BY e.full_name;
 
--- @check C51 | Salaried employees paid with no unpaid day although they were hired AFTER the period began (days before the hire date are not worked, so not payable) | expect: review
+-- @check C51 | Salaried employees whose Date Hired is inside the period yet who were paid with no unpaid day: the timesheet shows them working before that date. The Date Hired does not affect the pay (the days in the file do) - check it is right | expect: review
 SELECT p.id AS payroll_id, pp.period_label, pp.period_start, pp.period_end, p.emp_id, p.emp_name, e.salary_type, e.date_hired,
        p.gross_pay, p.absent_days, p.absent_deduction
   FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.emp_id = p.emp_id
@@ -267,7 +255,7 @@ SELECT p.id AS payroll_id, pp.period_label, pp.period_start, pp.period_end, p.em
    AND e.date_hired <= pp.period_end AND p.absent_days = 0
  ORDER BY pp.period_start, p.emp_name;
 
--- @check C52 | Pay for a period that ended before the employee's hire date | expect: none
+-- @check C52 | Pay for a period that ended before the employee's Date Hired: the timesheets show them working, so they were paid for the days in the file (the Date Hired does not affect the pay) - check it is not simply the day they were added in the system | expect: review
 SELECT p.id AS payroll_id, pp.period_label, p.emp_id, p.emp_name, e.date_hired, pp.period_end, p.gross_pay
   FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.emp_id = p.emp_id
  WHERE e.date_hired IS NOT NULL AND e.date_hired > pp.period_end AND p.gross_pay > 0

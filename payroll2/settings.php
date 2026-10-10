@@ -105,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
     $keys = [
         'overtime_rate', 'late_rate', 'payroll_period',
         'overtime_method', 'overtime_multiplier',
-        'contribution_timing_sss', 'contribution_timing_philhealth', 'contribution_timing_pagibig',
+        'contribution_timing_sss', 'contribution_timing_philhealth', 'contribution_timing_pagibig', 'contribution_timing_tax',
         // Company details - printed on every payslip, receipt and report
         'bir_registered_name', 'bir_business_style', 'bir_address', 'bir_tin',
         'bir_system_name', 'bir_signatory_name', 'bir_signatory_position',
@@ -122,8 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
         'overtime_method'     => fn($v) => in_array(trim($v), ['flat', 'labor_code'], true) ? null : 'Overtime method must be "flat" or "labor_code"',
         'payroll_period'      => fn($v) => in_array(trim($v), ['Monthly', 'Semi-Monthly', 'Weekly'], true) ? null : 'Payroll period must be Monthly, Semi-Monthly or Weekly',
     ];
-    foreach (['sss', 'philhealth', 'pagibig'] as $c) {
-        $check["contribution_timing_$c"] = fn($v) => in_array(trim($v), ['split', 'second'], true) ? null : 'Contribution timing must be "split" or "second"';
+    foreach (array_keys(CONTRIBUTION_LABELS) as $c) {
+        $check["contribution_timing_$c"] = fn($v) => in_array(trim($v), CONTRIBUTION_TIMING_CHOICES, true) ? null : 'Contribution timing must be "first", "split" or "second"';
     }
     // setSetting() inserts the key when it does not exist yet, so the company
     // fields save on first use instead of a bare UPDATE matching no row.
@@ -275,28 +275,29 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                             schedule, so changing this does not alter existing periods.
                         </span>
                     </div>
-                    <div class="form-group" style="grid-column:1/-1;">
+                    <div class="form-group" id="contribSchedule" style="grid-column:1/-1;">
                         <label>Contribution Schedule <span style="font-weight:400;color:#9ca3af;">(semi-monthly and weekly payrolls)</span></label>
                         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;">
                             <?php
                             $timing = contributionTiming();
-                            foreach (['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG'] as $k => $lbl): ?>
+                            foreach (CONTRIBUTION_LABELS as $k => $lbl): ?>
                             <label style="font-weight:600;font-size:.84rem;display:flex;flex-direction:column;gap:4px;">
-                                <?= $lbl ?>
+                                <?= htmlspecialchars($lbl) ?>
                                 <select name="contribution_timing_<?= $k ?>" class="form-control">
-                                    <option value="split"  <?= $timing[$k] === 'split'  ? 'selected' : '' ?>>Every cut-off, on the pay so far</option>
-                                    <option value="second" <?= $timing[$k] === 'second' ? 'selected' : '' ?>>Last cut-off of the month, in full</option>
+                                    <?php foreach (CONTRIBUTION_TIMING_LABELS as $val => $text): ?>
+                                    <option value="<?= $val ?>" <?= $timing[$k] === $val ? 'selected' : '' ?>><?= htmlspecialchars(ucfirst($text)) ?></option>
+                                    <?php endforeach; ?>
                                 </select>
                             </label>
                             <?php endforeach; ?>
                         </div>
                         <span style="font-size:.78rem;color:#9ca3af;margin-top:6px;display:block;">
-                            Each contribution is monthly. "Every cut-off" takes what is due on the month's pay so far and
-                            the last cut-off settles the rest; "Last cut-off" waits and takes the whole month at once on the
-                            month's actual pay. Either way the month ends exact and minimums like PhilHealth's ₱250 are
-                            charged once a month. The pharmacy's own timesheets take SSS from the 1st cut-off and
-                            PhilHealth on the 2nd. Withholding tax: each cut-off on its BIR table, the month's last
-                            cut-off settles the month.
+                            SSS, PhilHealth, Pag-IBIG and withholding tax are the monthly amounts typed on each employee
+                            (Employees &rsaquo; Add / Edit). A monthly payroll takes them in full. With more than one cut-off a
+                            month, this says which one takes each: the 1st cut-off in full, a share of the month at every
+                            cut-off (half each on a semi-monthly payroll), or the last cut-off in full. Whichever you pick, the
+                            last cut-off settles whatever is still owed, so the month always comes to exactly the amount typed.
+                            The pharmacy's own timesheets take SSS in full on the 1st cut-off and PhilHealth in full on the 2nd.
                         </span>
                     </div>
                 </div>
@@ -419,8 +420,8 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                 </div>
 
                 <?php
-                /* Read-only: the official tables the calculation uses (PH_RULES in
-                   includes/helpers.php). Rates set by law are not edited here. */
+                /* Read-only reference: what the law prescribes (PH_RULES in includes/helpers.php), as a guide for the
+                   amounts typed on each employee. Payroll does not apply it. Rates set by law are not edited here. */
                 $R   = PH_RULES;
                 $pct = fn($x) => rtrim(rtrim(number_format($x * 100, 2), '0'), '.') . '%';
                 $php = fn($x) => '₱' . number_format($x, $x == floor($x) ? 0 : 2);
@@ -444,15 +445,14 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                      $R['pagibig']['since'], $R['pagibig']['source']],
                     [$R['bir']['name'],
                      'TRAIN graduated tables on taxable pay (gross pay minus the employee\'s SSS, PhilHealth and Pag-IBIG): '
-                     . 'none up to ₱10,417 a semi-monthly cut-off or ₱20,833 a month, then 15%, 20%, 25%, 30% and 35% brackets. '
-                     . 'Each cut-off uses its own table; the month\'s last cut-off settles the month on the monthly table.',
+                     . 'none up to ₱10,417 a semi-monthly cut-off or ₱20,833 a month, then 15%, 20%, 25%, 30% and 35% brackets.',
                      $R['bir']['since'], $R['bir']['source']],
                 ];
                 ?>
                 <div style="margin-top:22px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
                     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#f8fafc;border-bottom:1px solid #e5e7eb;">
-                        <strong style="font-size:.92rem;">Contribution tables in use</strong>
-                        <span style="font-size:.78rem;color:#6b7280;">Set by law - applied automatically, not edited here</span>
+                        <strong style="font-size:.92rem;">Contribution tables - for reference</strong>
+                        <span style="font-size:.78rem;color:#6b7280;">Set by law - a guide for the amounts you type on each employee, not applied to payroll</span>
                     </div>
                     <table class="data-table" style="min-width:0;">
                         <thead><tr><th style="width:130px;">Deduction</th><th>How it is computed</th><th style="width:120px;">In effect since</th><th style="width:210px;">Basis</th></tr></thead>
@@ -468,8 +468,11 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                         </tbody>
                     </table>
                     <p style="margin:0;padding:10px 16px;font-size:.78rem;color:#6b7280;border-top:1px solid #e5e7eb;">
-                        SSS is read on all pay earned in the month (overtime included); PhilHealth and Pag-IBIG on basic pay.
-                        On a semi-monthly or weekly payroll they are taken per the <em>Contribution Schedule</em> above.
+                        Payroll does not work these out. It deducts the monthly SSS, PhilHealth, Pag-IBIG and withholding-tax amounts typed
+                        on each employee (Employees &rsaquo; Add / Edit) - on the cut-offs the <em>Contribution Schedule</em> above names -
+                        and an employee with none has nothing deducted. The company's share is figured on what was deducted:
+                        SSS 10% against the employee's 5% (twice the employee's amount) plus the Employees' Compensation of ₱10, or ₱30 from a ₱750
+                        SSS share; PhilHealth equal to the employee's; Pag-IBIG 2% each.
                         When an agency changes its rates, the developer updates <code>PH_RULES</code> in <code>includes/helpers.php</code>.
                     </p>
                 </div>

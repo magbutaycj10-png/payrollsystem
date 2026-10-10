@@ -6,7 +6,7 @@
 const API  = window.QA.api;
 const HIST = API.data.filter(r => r.total_net > 0);
 const $    = id => document.getElementById(id);
-const PESO = /^₱[\d,]+\.\d{2}$/;
+const PESO = /^[−-]?₱[\d,]+\.\d{2}$/;      // two decimals (D-15); fmt() is signed, and a model may extrapolate below zero
 
 const finished = () => $('fcContent').style.display === 'block' || $('fcError').style.display === 'block';
 

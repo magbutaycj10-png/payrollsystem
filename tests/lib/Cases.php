@@ -30,9 +30,10 @@ function qa_fuzz_case(int $seed): array
     $rest = $pick(['7', '7', '7', '6,7', '', '1', '3,4']);
     $restList = $rest === '' ? [] : array_map('intval', explode(',', $rest));
     $dayH = (float)($hpd ?? 8);
+    // the employee's own monthly amounts, as typed on Employees: some have none (0.00), the rest anything from ₱50 up to a plausible ceiling
+    $typed = fn(int $maxCentavos) => mt_rand(1, 100) <= 35 ? '0.00' : sprintf('%.2f', mt_rand(5000, $maxCentavos) / 100);
     $emp = ['salary_type' => $type, 'base_salary' => $base, 'hours_per_day' => $hpd, 'rest_days' => $rest,
-            'deduct_sss' => mt_rand(1, 10) > 1 ? 1 : 0, 'deduct_philhealth' => mt_rand(1, 10) > 1 ? 1 : 0,
-            'deduct_pagibig' => mt_rand(1, 10) > 1 ? 1 : 0];
+            'sss_amount' => $typed(175000), 'philhealth_amount' => $typed(250000), 'pagibig_amount' => $typed(20000), 'tax_amount' => $typed(3000000)];
 
     $days = [];
     $leave = $pending = $rejected = [];
@@ -71,7 +72,8 @@ function qa_fuzz_case(int $seed): array
     }
     return ['emp' => $emp, 'runs' => $runs, 'days' => $days, 'leave' => $leave, 'pending' => $pending, 'rejected' => $rejected,
             'cfg' => ['ot_rate' => $pick(['45', '150', '62.50', '93.75', '100.40']),
-                      'timing' => ['sss' => $pick(['split', 'second']), 'philhealth' => $pick(['split', 'second']), 'pagibig' => $pick(['split', 'second'])]]
+                      'timing' => ['sss' => $pick(['first', 'split', 'second']), 'philhealth' => $pick(['first', 'split', 'second']),
+                                   'pagibig' => $pick(['first', 'split', 'second']), 'tax' => $pick(['first', 'split', 'second'])]]
                      // every third case of the audit-fixed app pays overtime by the Labor Code method, with the multiplier cycling 1.25 / 1.30 / 2.00
                      // (decided from the case number, so the random stream - and every case of the original - is unchanged)
                      + (AppCopy::hasFixes() && $seed % 3 === 0 ? ['ot_method' => 'labor_code', 'ot_mult' => ['1.25', '1.30', '2.00'][intdiv($seed, 3) % 3]] : [])
@@ -98,6 +100,21 @@ function qa_adjust(int $periodId, array $empIds, string $type, string $amount, a
 function qa_worker(string $name, string $from, string $to, string $rate = '500.00', array $emp = []): string
 {
     return Fixtures::employee($emp + ['full_name' => $name, 'base_salary' => $rate]);
+}
+
+/**
+ * What the admin does on Employees → Edit: one employee through the real page, every field posted again as the form does,
+ * with $change on top (e.g. ['tax_amount' => '0']). Returns the page's response.
+ */
+function qa_edit_employee(string $empId, array $change): array
+{
+    $e = Fixtures::empRow($empId);
+    $post = ['action' => 'edit', 'id' => $e['id'], 'emp_id' => $e['emp_id'], 'full_name' => $e['full_name'], 'position' => (string)$e['position'],
+             'branch' => (string)$e['branch'], 'email' => (string)$e['email'], 'salary_type' => $e['salary_type'], 'base_salary' => $e['base_salary'],
+             'date_hired' => (string)$e['date_hired'], 'hours_per_day' => (string)$e['hours_per_day'],
+             'rest_days' => $e['rest_days'] === '' ? [] : explode(',', $e['rest_days']),
+             'sss_amount' => $e['sss_amount'], 'philhealth_amount' => $e['philhealth_amount'], 'pagibig_amount' => $e['pagibig_amount'], 'tax_amount' => $e['tax_amount']];
+    return Http::page('employee.php', $change + $post);
 }
 
 /* ---- the DBeaver queries (tests/dbeaver_checks.sql), parsed and run ---- */
@@ -136,51 +153,67 @@ function qa_sql_dataset(): array
                                        ['start' => "$y-$m-16", 'end' => date('Y-m-t', strtotime("$y-$m-01")), 'type' => 'Semi-Monthly']];
     $set = [];
 
+    // Every employee below has typed monthly amounts, as the admin does on Employees (sss_amount, philhealth_amount, pagibig_amount, tax_amount) -
+    // each one something on both cut-offs, so no period is without a deduction.
+
     // Jan - kinsenas ₱15,000: an absence, an undertime day, overtime
     $days = Scenario::fullDays('2026-01-01', '2026-01-31');
     unset($days['2026-01-08']);                                                   // absent
     $days['2026-01-09'] = ['h' => '7.00', 'under' => '1'];                        // an hour short
     $days['2026-01-12'] = ['h' => '8.00', 'ot' => '2', 'under' => '0'];
-    $set['jan'] = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00'], 'runs' => $SM('2026', '01'), 'days' => $days]);
+    $set['jan'] = Scenario::play(['emp' => ['salary_type' => 'kinsenas', 'base_salary' => '15000.00', 'sss_amount' => '675.00', 'philhealth_amount' => '750.00',
+                                            'pagibig_amount' => '200.00', 'tax_amount' => '800.00'], 'runs' => $SM('2026', '01'), 'days' => $days]);
 
     // Feb - daily ₱480: a day off, approved leave, overtime, lateness
     $days = Scenario::fullDays('2026-02-01', '2026-02-28');
     $days['2026-02-10'] = ['off' => true];
     unset($days['2026-02-17']);
     $days['2026-02-04'] = ['h' => '8.00', 'ot' => '3', 'late' => '0.50', 'under' => '0'];
-    $set['feb'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '480.00'], 'runs' => $SM('2026', '02'), 'days' => $days, 'leave' => ['2026-02-17']]);
+    $set['feb'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '480.00', 'sss_amount' => '300.00', 'philhealth_amount' => '250.00'],
+                                  'runs' => $SM('2026', '02'), 'days' => $days, 'leave' => ['2026-02-17']]);
 
     // Mar - monthly ₱75,000, one monthly run
-    $set['mar'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '75000.00'],
+    $set['mar'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '75000.00', 'sss_amount' => '1750.00', 'philhealth_amount' => '1875.00',
+                                            'pagibig_amount' => '200.00', 'tax_amount' => '9668.80'],
         'runs' => [['start' => '2026-03-01', 'end' => '2026-03-31', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-03-01', '2026-03-31')]);
 
     // Apr - a ₱20,000 monthly employee on a WEEKLY calendar (four runs; the month ends on the fourth)
-    $set['apr'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '20000.00'],
+    $set['apr'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '20000.00', 'sss_amount' => '1000.00', 'pagibig_amount' => '200.00', 'tax_amount' => '600.00'],
         'runs' => [['start' => '2026-04-01', 'end' => '2026-04-07', 'type' => 'Weekly'], ['start' => '2026-04-08', 'end' => '2026-04-14', 'type' => 'Weekly'],
                    ['start' => '2026-04-15', 'end' => '2026-04-21', 'type' => 'Weekly'], ['start' => '2026-04-22', 'end' => '2026-04-28', 'type' => 'Weekly']],
         'days' => Scenario::fullDays('2026-04-01', '2026-04-28')]);
 
-    // May - ₱1,000 a day: 13 days in the first half, one in the second (the audit's tax-refund case)
-    $set['may'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1000.00'], 'runs' => $SM('2026', '05'),
-        'days' => Scenario::fullDays('2026-05-01', '2026-05-15') + ['2026-05-16' => ['h' => '8.00', 'under' => '0']]]);
+    // May - ₱1,000 a day: 13 days in the first half, one in the second. The tax-refund case: the 1st cut-off is finalized with a typed tax of ₱600
+    // (₱300 taken), then the admin lowers it to ₱200 - the 2nd cut-off settles the month and hands ₱100 back (a negative tax).
+    $set['may'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1000.00', 'sss_amount' => '500.00', 'philhealth_amount' => '250.00', 'tax_amount' => '600.00'],
+        'runs' => $SM('2026', '05'),
+        'days' => Scenario::fullDays('2026-05-01', '2026-05-15') + ['2026-05-16' => ['h' => '8.00', 'under' => '0']],
+        'between' => [0 => function (string $empId, array $periods) {
+            Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $periods[0], 'ignore_drift' => true, 'allow_negative' => true]);
+            getDB()->prepare("UPDATE employees SET tax_amount = 200 WHERE emp_id = ?")->execute([$empId]);
+        }]]);
 
     // Jun - a monthly ₱26,000 salary, hired 9 June (the audit's hire-date case)
-    $set['jun'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-06-09'],
+    $set['jun'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-06-09', 'sss_amount' => '900.00',
+                                            'philhealth_amount' => '650.00', 'pagibig_amount' => '200.00'],
         'runs' => [['start' => '2026-06-01', 'end' => '2026-06-30', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-06-09', '2026-06-30')]);
 
-    // Jul - monthly ₱250,000 (every cap, the 30% bracket)
-    $set['jul'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00'],
+    // Jul - monthly ₱250,000 (big amounts, in full)
+    $set['jul'] = Scenario::play(['emp' => ['salary_type' => 'monthly', 'base_salary' => '250000.00', 'sss_amount' => '1750.00', 'philhealth_amount' => '2500.00',
+                                            'pagibig_amount' => '200.00', 'tax_amount' => '57206.70'],
         'runs' => [['start' => '2026-07-01', 'end' => '2026-07-31', 'type' => 'Monthly']], 'days' => Scenario::fullDays('2026-07-01', '2026-07-31')]);
 
     // Aug - daily ₱1,500 with a ₱3,000 bonus and a ₱500 deduction recorded through Adjustments
-    $set['aug'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00'], 'runs' => $SM('2026', '08'), 'days' => Scenario::fullDays('2026-08-01', '2026-08-31')]);
+    $set['aug'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '1500.00', 'sss_amount' => '500.00', 'pagibig_amount' => '200.00'],
+                                  'runs' => $SM('2026', '08'), 'days' => Scenario::fullDays('2026-08-01', '2026-08-31')]);
     Http::page('adjustments.php', ['period_id' => $set['aug']['periods'][1], 'emp_ids' => [$set['aug']['emp']], 'entry_type' => 'Bonus', 'amount' => '3000', 'reason_select' => 'Performance bonus']);
     Http::page('adjustments.php', ['period_id' => $set['aug']['periods'][1], 'emp_ids' => [$set['aug']['emp']], 'entry_type' => 'Deduction', 'amount' => '500', 'reason_select' => 'Cash advance']);
 
     // Sep - a 10-hour duty day, Saturday and Sunday off, a ₱620 daily rate, overtime
     $days = Scenario::fullDays('2026-09-01', '2026-09-30', [6, 7], '10.00');
     $days['2026-09-03'] = ['h' => '10.00', 'ot' => '2', 'under' => '0'];
-    $set['sep'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '620.00', 'hours_per_day' => '10.00', 'rest_days' => '6,7'], 'runs' => $SM('2026', '09'), 'days' => $days]);
+    $set['sep'] = Scenario::play(['emp' => ['salary_type' => 'daily', 'base_salary' => '620.00', 'hours_per_day' => '10.00', 'rest_days' => '6,7',
+                                            'sss_amount' => '450.00', 'philhealth_amount' => '250.00'], 'runs' => $SM('2026', '09'), 'days' => $days]);
 
     // a finalized period (statuses must agree), through the real endpoint
     foreach ($set['jan']['periods'] as $pid) Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $pid, 'ignore_drift' => true, 'allow_negative' => true]);

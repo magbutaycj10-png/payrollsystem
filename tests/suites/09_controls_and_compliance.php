@@ -94,11 +94,12 @@ T::suite('09 · Controls & compliance', function () {
             'forecast-data.php offers: ' . implode(', ', array_keys($row)) . ' - the models predict "total_net", which excludes the employer\'s contributions and any bonus deducted from it');
     }, ['defect' => 'D-06']);
 
-    T::test('correcting cut-off 1 after cut-off 2 was finalized still leaves the month tax and contributions exact', function (T $t) {
-        // ₱1,200 a day. Both cut-offs are finalized; then cut-off 1 is unlocked and corrected with ₱1,980 more overtime.
-        // The app re-settles only OPEN later cut-offs, so the locked cut-off 2 still settles the month against the OLD cut-off 1.
+    T::test('correcting cut-off 1 after cut-off 2 was finalized still leaves the month\'s contributions and tax exact', function (T $t) {
+        // ₱1,200 a day, typed SSS ₱600 and tax ₱1,000. Both cut-offs are finalized. The admin then raises the typed amounts (SSS ₱800, tax ₱1,400)
+        // - which leaves both locked cut-offs as they were - and cut-off 1 is unlocked and corrected with ₱1,980 more overtime, so it is computed with
+        // the NEW amounts. The app re-settles only OPEN later cut-offs, so the locked cut-off 2 still settles the month against the OLD cut-off 1.
         Fixtures::reset();
-        $emp = Fixtures::employee(['full_name' => 'Stale Month', 'base_salary' => '1200.00']);
+        $emp = Fixtures::employee(['full_name' => 'Stale Month', 'base_salary' => '1200.00', 'sss_amount' => '600.00', 'tax_amount' => '1000.00']);
         $a = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
         $b = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
         $rowsA = Fixtures::fullDays('Stale Month', '2026-04-01', '2026-04-15');
@@ -108,6 +109,7 @@ T::suite('09 · Controls & compliance', function () {
         $f2 = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $b]);
         $t->same(true, $f1['json']['success'] ?? null, 'finalize cut-off 1: ' . json_encode($f1['json'] ?? $f1['body']));
         $t->same(true, $f2['json']['success'] ?? null, 'finalize cut-off 2: ' . json_encode($f2['json'] ?? $f2['body']));
+        qa_edit_employee($emp, ['sss_amount' => '800', 'tax_amount' => '1400']);
         Http::api('update-payroll.php', ['action' => 'unlock', 'period_id' => $a]);
         foreach (range(0, 10) as $i) $rowsA[$i]['overtime_hours'] = 4;           // 11 days × 4 h = 44 h of overtime (₱1,980)
         $r = Fixtures::days($a, $rowsA);
@@ -130,19 +132,16 @@ T::suite('09 · Controls & compliance', function () {
 
         $pa = Fixtures::payroll($a)[$emp];
         $pb = Fixtures::payroll($b)[$emp];
-        $comp = Ledger::c($pa['gross_pay']) + Ledger::c($pb['gross_pay']);
-        $basic = $comp - Ledger::c($pa['ot_late_adj']) - Ledger::c($pb['ot_late_adj']);
         $sss = Ledger::c($pa['sss']) + Ledger::c($pb['sss']);
         $ph = Ledger::c($pa['philhealth']) + Ledger::c($pb['philhealth']);
         $pi = Ledger::c($pa['pagibig']) + Ledger::c($pb['pagibig']);
         $tax = Ledger::c($pa['withholding_tax']) + Ledger::c($pb['withholding_tax']);
-        $monthTaxable = $comp - $sss - $ph - $pi;
         $off = [];
-        if ($sss !== Ledger::sssEe($comp)) $off[] = 'SSS ₱' . Ledger::fmt($sss) . ' vs ₱' . Ledger::fmt(Ledger::sssEe($comp));
-        if ($ph !== Ledger::philhealthEe($basic)) $off[] = 'PhilHealth ₱' . Ledger::fmt($ph) . ' vs ₱' . Ledger::fmt(Ledger::philhealthEe($basic));
-        if ($pi !== Ledger::pagibigEe($basic)) $off[] = 'Pag-IBIG ₱' . Ledger::fmt($pi) . ' vs ₱' . Ledger::fmt(Ledger::pagibigEe($basic));
-        if ($tax !== Ledger::tax('monthly', $monthTaxable)) $off[] = 'tax ₱' . Ledger::fmt($tax) . ' vs ₱' . Ledger::fmt(Ledger::tax('monthly', $monthTaxable)) . ' on a month taxable of ₱' . Ledger::fmt($monthTaxable);
-        $t->same([], $off, 'month totals after the correction (app vs what the month\'s pay requires)');
+        if ($sss !== 80000) $off[] = 'SSS ₱' . Ledger::fmt($sss) . ' vs the typed ₱800.00';
+        if ($ph !== 0) $off[] = 'PhilHealth ₱' . Ledger::fmt($ph) . ' vs none typed';
+        if ($pi !== 0) $off[] = 'Pag-IBIG ₱' . Ledger::fmt($pi) . ' vs none typed';
+        if ($tax !== 140000) $off[] = 'tax ₱' . Ledger::fmt($tax) . ' vs the typed ₱1,400.00';
+        $t->same([], $off, 'month totals after the correction (app vs the amounts typed on the employee)');
     }, ['defect' => 'D-18']);
 
     /* ================================================================== access control */
