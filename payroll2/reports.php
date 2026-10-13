@@ -48,6 +48,14 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
         }
         tr.is-revised td,
         .table-wrap.table-sticky .data-table tr.is-revised td:nth-child(2) { background: #fffbeb; }
+        /* Header controls beside the title; on a phone they go under it */
+        .rp-header { flex-wrap: nowrap; }
+        @media (max-width: 768px) {
+            .rp-header  { flex-wrap: wrap; }
+            .rp-actions { max-width: 100%; }
+            .rp-actions > div { flex-wrap: wrap; max-width: 100%; }
+            .rp-actions select { min-width: 0 !important; max-width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -55,21 +63,27 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
 <?php require 'includes/sidebar.php'; ?>
 
 <div class="main-content">
-    <div class="page-header">
-        <div>
+    <!-- The controls stay beside the title, on the right: in one row when there is room,
+         otherwise "Copies" on top and the three buttons under it -->
+    <div class="page-header rp-header">
+        <div style="flex:1 1 200px;min-width:200px;">
             <h1>Reports &amp; Payslips</h1>
             <p>Issue payslips &amp; acknowledgement receipts for the period</p>
         </div>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <label for="copyMode" style="font-weight:600;font-size:.8rem;color:#6b7280;">Copies:</label>
-            <select id="copyMode" class="form-control" style="width:auto;min-width:180px;">
-                <option value="both">Employee + Company copy</option>
-                <option value="employee">Employee copy only</option>
-                <option value="company">Company copy only</option>
-            </select>
-            <button class="btn btn-print" onclick="printSummary()">Payroll Register</button>
-            <button class="btn btn-print" onclick="exportCSV()">Export CSV</button>
-            <button class="btn btn-print" onclick="printAllPayslips()">Print All</button>
+        <div class="rp-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;min-width:0;">
+            <div style="display:flex;gap:10px;align-items:center;">
+                <label for="copyMode" style="font-weight:600;font-size:.8rem;color:#6b7280;">Copies:</label>
+                <select id="copyMode" class="form-control" style="width:auto;min-width:180px;">
+                    <option value="both">Employee + Company copy</option>
+                    <option value="employee">Employee copy only</option>
+                    <option value="company">Company copy only</option>
+                </select>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+                <button class="btn btn-print" onclick="printSummary()">Payroll Register</button>
+                <button class="btn btn-print" onclick="exportCSV()">Export CSV</button>
+                <button class="btn btn-print" onclick="printAllPayslips()">Print All</button>
+            </div>
         </div>
     </div>
 
