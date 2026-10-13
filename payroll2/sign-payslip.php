@@ -118,10 +118,11 @@ $companyName = getSetting('company_name', 'My Company');
 
                 <?php if (!empty($rows)): ?>
                 <label style="font-weight:600;font-size:.875rem;">Employee:</label>
-                <select name="payroll_id" class="form-control" style="min-width:200px;" onchange="this.form.submit()">
+                <select name="payroll_id" class="form-control" style="min-width:200px;" onchange="this.form.submit()" data-emp-search>
                     <option value="">- Select Employee -</option>
                     <?php foreach ($rows as $r): ?>
-                    <option value="<?= $r['id'] ?>" <?= $r['id'] == $payroll_id ? 'selected' : '' ?>>
+                    <option value="<?= $r['id'] ?>" <?= $r['id'] == $payroll_id ? 'selected' : '' ?>
+                            data-name="<?= htmlspecialchars($r['emp_name']) ?>" data-id="<?= htmlspecialchars($r['emp_id']) ?>" data-signed="<?= $r['sig_id'] ? 1 : 0 ?>">
                         <?= htmlspecialchars($r['emp_name']) ?> (<?= $r['emp_id'] ?>)
                         <?= $r['sig_id'] ? ' - Signed' : '' ?>
                     </option>
@@ -366,5 +367,6 @@ function openReceipt(params) {
     }
 })();
 </script>
+<script src="assets/js/emp-search.js"></script>
 </body>
 </html>
