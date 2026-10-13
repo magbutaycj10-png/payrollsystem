@@ -70,3 +70,4 @@ $activePage = $activePage ?? '';
     });
 })();
 </script>
+<script src="/assets/js/table-scroll.js"></script>

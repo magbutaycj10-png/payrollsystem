@@ -76,7 +76,9 @@ $marks = [
     .ma-box-h { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border, #e5e7eb); }
     .ma-box-h h2 { font-size: 1rem; margin: 0; }
     .ma-box-h input[type=search] { padding: 6px 10px; border: 1px solid var(--border, #e5e7eb); border-radius: 8px; font: inherit; min-width: 200px; }
-    .ma-scroll { overflow-x: auto; }
+    .ma-scroll { overflow: auto; max-height: calc(100vh - 140px); }
+    .ma-scroll thead th { position: sticky; top: 0; z-index: 2; }
+    .ma-scroll thead th.who { z-index: 3; }
 
     .ma-table { width: 100%; border-collapse: collapse; font-size: .86rem; }
     .ma-table th, .ma-table td { padding: 9px 12px; border-bottom: 1px solid var(--border, #e5e7eb); text-align: left; white-space: nowrap; }

@@ -193,7 +193,14 @@ body::before {
 .box-body { padding: 20px; }
 
 /* ── Tables ──────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; }
+/* Long tables scroll inside a box no taller than the screen, so the left/right
+   scrollbar is always in view; the header row stays on top. */
+.table-wrap { overflow: auto; max-height: calc(100vh - 140px); }
+.table-wrap .data-table thead th { position: sticky; top: 0; z-index: 2; }
+
+/* Extra left/right scrollbar above wide tables (assets/js/table-scroll.js) */
+.top-scroll { overflow-x: auto; overflow-y: hidden; }
+.top-scroll > div { height: 1px; }
 
 .data-table { width: 100%; border-collapse: collapse; min-width: 600px; font-size: .875rem; }
 
@@ -526,8 +533,6 @@ a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visib
 .btn:active:not(:disabled) { transform: translateY(1px); }
 
 /* Wide tables: header and the name column stay in view while scrolling */
-.table-wrap.table-sticky { max-height: 72vh; overflow: auto; }
-.table-wrap.table-sticky .data-table thead th { position: sticky; top: 0; z-index: 2; }
 .table-wrap.table-sticky .data-table th:nth-child(2),
 .table-wrap.table-sticky .data-table td:nth-child(2) {
     position: sticky; left: 0; z-index: 1; background: var(--surface);

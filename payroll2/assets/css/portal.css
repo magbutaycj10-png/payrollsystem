@@ -151,7 +151,14 @@ body::before {
 .p-box-body { padding: 18px; }
 
 /* ── Tables ──────────────────────────────────────────────── */
-.p-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Long tables scroll inside a box no taller than the screen, so the left/right
+   scrollbar is always in view; the header row stays on top. */
+.p-table-wrap { overflow: auto; max-height: calc(100vh - 140px); -webkit-overflow-scrolling: touch; }
+.p-table-wrap .p-table thead th { position: sticky; top: 0; z-index: 2; }
+
+/* Extra left/right scrollbar above wide tables (assets/js/table-scroll.js) */
+.top-scroll { overflow-x: auto; overflow-y: hidden; }
+.top-scroll > div { height: 1px; }
 
 .p-table { width: 100%; border-collapse: collapse; font-size: .875rem; min-width: 480px; }
 .p-table th { background: #1e293b; color: #f1f5f9; padding: 10px 14px; text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }

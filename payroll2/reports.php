@@ -46,7 +46,8 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
             font-size: .64rem; font-weight: 700; text-transform: uppercase;
             letter-spacing: .04em; vertical-align: middle; white-space: nowrap;
         }
-        tr.is-revised td { background: #fffbeb; }
+        tr.is-revised td,
+        .table-wrap.table-sticky .data-table tr.is-revised td:nth-child(2) { background: #fffbeb; }
     </style>
 </head>
 <body>
@@ -156,7 +157,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
     <?php endif; ?>
 
     <div class="box">
-        <div class="table-wrap">
+        <div class="table-wrap table-sticky">
             <table class="data-table">
                 <thead>
                     <tr>
