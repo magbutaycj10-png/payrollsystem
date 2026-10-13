@@ -31,7 +31,7 @@ $logs = $db->query("
             <h1>Print History</h1>
             <p>Audit log of all printed documents and exports</p>
         </div>
-        <button class="btn btn-print no-print" onclick="window.open('print-doc.php?doc=printlog','_blank','width=980,height=760')" title="Print this log of printed documents">Print</button>
+        <button class="btn btn-print no-print" onclick="window.open('print-doc.php?doc=printlog','_blank','width=980,height=760')">Print All</button>
     </div>
 
     <div class="box">

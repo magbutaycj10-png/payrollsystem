@@ -160,7 +160,7 @@ $canPay    = (bool)$openPeriods;
                 </select>
             </form>
             <a class="btn btn-ghost" href="thirteenth-month.php?year=<?= $year ?>&amp;export=csv">Export CSV</a>
-            <button type="button" class="btn btn-print" onclick="window.print()" title="Print the computation sheet - the rows shown below">Print</button>
+            <button type="button" class="btn btn-print" onclick="window.print()">Print sheet</button>
         </div>
     </div>
 
