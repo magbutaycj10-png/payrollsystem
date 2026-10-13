@@ -88,13 +88,12 @@ $companyName = getSetting('company_name', 'My Company');
             <p>Employee draws their signature, then the acknowledgement receipt is issued in two copies</p>
         </div>
         <?php if (!empty($rows)): ?>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn btn-print" onclick="openReceipt({doc:'payslip',period:<?= $period_id ?>,copies:'both',sig:0})">
-                Blank Copies
-            </button>
-            <button class="btn btn-print" onclick="openReceipt({doc:'payslip',period:<?= $period_id ?>,copies:'both'})">
-                Print All
-            </button>
+        <div class="print-menu">
+            <button type="button" class="btn btn-print" aria-haspopup="true" aria-expanded="false">Print</button>
+            <div class="print-menu-panel">
+                <button type="button" class="pm-item" onclick="openReceipt({doc:'payslip',period:<?= $period_id ?>,copies:'both'})"><b>All receipts</b><span>Every employee's receipt, with the signatures collected so far</span></button>
+                <button type="button" class="pm-item" onclick="openReceipt({doc:'payslip',period:<?= $period_id ?>,copies:'both',sig:0})"><b>Blank receipts</b><span>Every employee's receipt with an empty signature line, to sign by hand</span></button>
+            </div>
         </div>
         <?php endif; ?>
     </div>
@@ -203,9 +202,8 @@ $companyName = getSetting('company_name', 'My Company');
                     <button class="btn btn-primary" id="saveBtn" onclick="saveSignature()" <?= $canSign ? '' : 'disabled title="Finalize the period first"' ?>>Save Signature</button>
                     <button class="btn btn-ghost"   onclick="clearCanvas()">Clear</button>
                     <button class="btn btn-print"
-                            onclick="openReceipt({doc:'payslip',payroll_id:<?= (int)$payroll_id ?>,copies:'both'})">
-                        Print Receipt - Employee + Company Copy
-                    </button>
+                            onclick="openReceipt({doc:'payslip',payroll_id:<?= (int)$payroll_id ?>,copies:'both'})"
+                            title="Print this employee's receipt - employee + company copy">Print</button>
                 </div>
                 <div id="sigMsg" style="margin-top:10px;font-size:.875rem;display:none;"></div>
             </div>
@@ -249,9 +247,8 @@ $companyName = getSetting('company_name', 'My Company');
                             <?= $r['sig_id'] ? 'Re-sign' : 'Get Signature' ?>
                         </a>
                         <button class="btn btn-print btn-sm"
-                                onclick="openReceipt({doc:'payslip',payroll_id:<?= (int)$r['id'] ?>,copies:'both'})">
-                            Print Receipt
-                        </button>
+                                onclick="openReceipt({doc:'payslip',payroll_id:<?= (int)$r['id'] ?>,copies:'both'})"
+                                title="Print this employee's receipt - employee + company copy">Print</button>
                     </td>
                 </tr>
                 <?php endforeach; ?>

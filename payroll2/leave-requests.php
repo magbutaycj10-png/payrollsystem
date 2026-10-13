@@ -124,7 +124,7 @@ $companyName = getSetting('company_name', 'My Company');
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <a href="leave-history.php" class="btn btn-ghost">Leave History</a>
-            <button class="btn btn-print" onclick="window.open('print-doc.php?doc=leaves','_blank','width=980,height=760')">Print All</button>
+            <button class="btn btn-print" onclick="window.open('print-doc.php?doc=leaves','_blank','width=980,height=760')" title="Print the list of leave requests">Print</button>
         </div>
     </div>
 

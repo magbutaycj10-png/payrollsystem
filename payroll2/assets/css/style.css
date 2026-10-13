@@ -253,6 +253,39 @@ body::before {
 }
 .btn-print:hover { background: #1a3a8f; color: #fff; }
 
+/* Every print button carries the same printer icon. Naming: "Print" on a row
+   (that one record), "Print all" / "Print" in the page header, and "Print" with
+   a caret when the page can print more than one kind of document (.print-menu). */
+.btn-print::before {
+    content: ""; width: 15px; height: 15px; flex: none; background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9V2h12v7'/%3E%3Cpath d='M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2'/%3E%3Crect x='6' y='14' width='12' height='8'/%3E%3C/svg%3E") center / contain no-repeat;
+            mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9V2h12v7'/%3E%3Cpath d='M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2'/%3E%3Crect x='6' y='14' width='12' height='8'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.btn-sm.btn-print::before { width: 13px; height: 13px; }
+
+/* One "Print" button that opens a short list of what can be printed (assets/js/print-menu.js) */
+.print-menu { position: relative; display: inline-block; }
+.print-menu > .btn-print::after {
+    content: ""; border: 4px solid transparent; border-top-color: currentColor; margin: 4px 0 0 2px;
+}
+.print-menu-panel {
+    display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
+    width: 300px; max-width: calc(100vw - 32px); padding: 6px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+}
+.print-menu.open .print-menu-panel { display: block; }
+.pm-item {
+    display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 7px;
+    padding: 9px 12px; cursor: pointer; font-family: var(--font); color: var(--text);
+}
+.pm-item:hover, .pm-item:focus-visible { background: #eef2ff; outline: none; }
+.pm-item b    { display: block; font-size: .875rem; font-weight: 600; color: #1a3a8f; }
+.pm-item span { display: block; font-size: .76rem; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+.pm-sep   { height: 1px; background: var(--border); margin: 6px 4px; }
+.pm-field { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.pm-field label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ── Forms ───────────────────────────────────────────────── */

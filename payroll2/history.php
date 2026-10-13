@@ -60,7 +60,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
         </div>
         <div style="display:flex;gap:10px;">
             <a href="adjustments.php<?= $fPeriod ? '?period=' . $fPeriod : '' ?>" class="btn btn-green no-print">Add Bonus / Deduction</a>
-            <button class="btn btn-print no-print" onclick="printAll()">Print All</button>
+            <button class="btn btn-print no-print" onclick="printAll()" title="Print every entry in the list below, with the filters you set">Print all</button>
         </div>
     </div>
 
@@ -173,9 +173,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                         </td>
                         <td><?= htmlspecialchars($h['processed_by']) ?></td>
                         <td class="no-print">
-                            <button class="btn btn-print btn-sm" onclick="printReceipt(<?= (int)$h['id'] ?>)">
-                                Print Receipt
-                            </button>
+                            <button class="btn btn-print btn-sm" onclick="printReceipt(<?= (int)$h['id'] ?>)" title="Print the receipt for this entry">Print</button>
                         </td>
                     </tr>
                     <?php endforeach; ?>

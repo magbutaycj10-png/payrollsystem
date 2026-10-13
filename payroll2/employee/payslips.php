@@ -93,7 +93,7 @@ if ($rows) {
             <h1>My Payslips</h1>
             <p>Complete history of your pay records and signed receipts</p>
         </div>
-        <button class="btn btn-print no-print" onclick="openReceipt({})">Print All</button>
+        <button class="btn btn-print no-print" onclick="openReceipt({})" title="Print all of your payslips">Print all</button>
     </div>
 
     <?php if (empty($rows)): ?>
@@ -118,7 +118,7 @@ if ($rows) {
                         <span class="badge badge-purple">Signed <?= date('M d, Y', strtotime($sig['signed_at'])) ?></span>
                     <?php endif; ?>
                     <button class="btn btn-ghost btn-sm no-print" onclick="toggleDetail(<?= $r['id'] ?>)">Details</button>
-                    <button class="btn btn-print btn-sm no-print" onclick="openReceipt({payroll_id:<?= (int)$r['id'] ?>})">Print</button>
+                    <button class="btn btn-print btn-sm no-print" onclick="openReceipt({payroll_id:<?= (int)$r['id'] ?>})" title="Print this payslip">Print</button>
                 </div>
             </div>
 

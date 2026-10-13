@@ -1789,7 +1789,7 @@ function negativeNetLines(PDO $db, int $periodId): array {
  */
 function thirteenthMonthData(PDO $db, int $year): array {
     $names = [];
-    foreach ($db->query("SELECT emp_id, full_name, status FROM employees")->fetchAll() as $e) $names[$e['emp_id']] = $e;
+    foreach ($db->query("SELECT emp_id, full_name, status, branch FROM employees")->fetchAll() as $e) $names[$e['emp_id']] = $e;
 
     $cents = fn($v): int => (int)round((float)$v * 100);
     $rows  = [];
@@ -1802,7 +1802,7 @@ function thirteenthMonthData(PDO $db, int $year): array {
     foreach ($st->fetchAll() as $r) {
         $id = (string)$r['emp_id'];
         $rows[$id] ??= ['emp_id' => $id, 'full_name' => $names[$id]['full_name'] ?? $r['emp_name'], 'status' => $names[$id]['status'] ?? 'Removed',
-                        'cents' => array_fill(1, 12, 0), 'sum' => 0];
+                        'branch' => trim((string)($names[$id]['branch'] ?? '')), 'cents' => array_fill(1, 12, 0), 'sum' => 0];
         $rows[$id]['cents'][(int)$r['m']] += $cents($r['basic']);
         $rows[$id]['sum']                 += $cents($r['basic']);
     }
@@ -1829,7 +1829,7 @@ function thirteenthMonthData(PDO $db, int $year): array {
         $other   = max(0, ($bonus[$id] ?? 0) - $p);
         $balance = $due - $p;
         $excess  = max(0, $other + $p + max(0, $balance) - (int)round(BIR_EXEMPT_BENEFITS * 100));
-        $out[$id] = ['emp_id' => $id, 'full_name' => $r['full_name'], 'status' => $r['status'],
+        $out[$id] = ['emp_id' => $id, 'full_name' => $r['full_name'], 'status' => $r['status'], 'branch' => $r['branch'],
                      'months' => array_map(fn($c) => $c / 100, $r['cents']), 'basic' => $r['sum'] / 100,
                      'months_paid' => count(array_filter($r['cents'], fn($c) => $c > 0)),
                      'due' => $due / 100, 'paid' => $p / 100, 'balance' => $balance / 100,

@@ -61,15 +61,23 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
             <p>Issue payslips &amp; acknowledgement receipts for the period</p>
         </div>
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <label for="copyMode" style="font-weight:600;font-size:.8rem;color:#6b7280;">Copies:</label>
-            <select id="copyMode" class="form-control" style="width:auto;min-width:180px;">
-                <option value="both">Employee + Company copy</option>
-                <option value="employee">Employee copy only</option>
-                <option value="company">Company copy only</option>
-            </select>
-            <button class="btn btn-print" onclick="printSummary()">Payroll Register</button>
-            <button class="btn btn-print" onclick="exportCSV()">Export CSV</button>
-            <button class="btn btn-print" onclick="printAllPayslips()">Print All</button>
+            <button class="btn btn-ghost" onclick="exportCSV()">Export CSV</button>
+            <div class="print-menu">
+                <button type="button" class="btn btn-print" aria-haspopup="true" aria-expanded="false">Print</button>
+                <div class="print-menu-panel">
+                    <div class="pm-field">
+                        <label for="copyMode">Payslip copies</label>
+                        <select id="copyMode" class="form-control">
+                            <option value="both">Employee + Company copy</option>
+                            <option value="employee">Employee copy only</option>
+                            <option value="company">Company copy only</option>
+                        </select>
+                    </div>
+                    <button type="button" class="pm-item" onclick="printAllPayslips()"><b>All payslips</b><span>A payslip and receipt for every employee in this period</span></button>
+                    <div class="pm-sep"></div>
+                    <button type="button" class="pm-item" onclick="printSummary()"><b>Payroll register</b><span>One summary sheet of the whole period with totals</span></button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -194,9 +202,7 @@ $totTax      = array_sum(array_column($rows, 'withholding_tax'));
                         <td>₱<?= number_format($r['other_deductions'], 2) ?></td>
                         <td><strong>₱<?= number_format($r['net_pay'], 2) ?></strong></td>
                         <td>
-                            <button class="btn btn-print btn-sm" onclick="printPayslip(<?= (int)$r['id'] ?>)">
-                                Print Receipt
-                            </button>
+                            <button class="btn btn-print btn-sm" onclick="printPayslip(<?= (int)$r['id'] ?>)" title="Print this employee's payslip and receipt">Print</button>
                         </td>
                     </tr>
                     <?php endforeach; ?>

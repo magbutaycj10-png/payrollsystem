@@ -129,6 +129,10 @@ $canPay    = (bool)$openPeriods;
         .amt-in { width: 110px; text-align: right; padding: 4px 6px; }
         .pay-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
         .note { font-size: .74rem; color: #92400e; }
+        .sheet-tools { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+        .sheet-tools .search-input { width: 240px; max-width: 100%; }
+        .sheet-tools label.chk { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; font-weight: 600; cursor: pointer; }
+        .sheet-tools .count { font-size: .8rem; color: #6b7280; margin-left: auto; }
         @media print {
             .no-print, .pay-col { display: none !important; }
             .sheet th, .sheet td { padding: 3px 5px; font-size: 8.5pt; }
@@ -156,7 +160,7 @@ $canPay    = (bool)$openPeriods;
                 </select>
             </form>
             <a class="btn btn-ghost" href="thirteenth-month.php?year=<?= $year ?>&amp;export=csv">Export CSV</a>
-            <button type="button" class="btn btn-print" onclick="window.print()">Print sheet</button>
+            <button type="button" class="btn btn-print" onclick="window.print()" title="Print the computation sheet - the rows shown below">Print</button>
         </div>
     </div>
 
@@ -241,20 +245,40 @@ $canPay    = (bool)$openPeriods;
                                 </option>
                             <?php endforeach; ?>
                         </select>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('balance')">Pay full balance</button>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('half')" title="Half of the 13th month, less what was already paid - the usual mid-year instalment">Pay half (advance)</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('balance')" title="Tick everyone shown with a balance and fill in the whole balance">Pay full balance</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="payAll('half')" title="For everyone shown: half of the 13th month, less what was already paid - the usual mid-year instalment">Pay half (advance)</button>
                         <button type="submit" class="btn btn-primary" onclick="return confirmPay()">Record 13th Month Pay</button>
                     <?php else: ?>
                         <span class="note">No open pay period: create or unlock one to record the payment.</span>
                     <?php endif; ?>
                 </div>
             </div>
+            <?php
+            $branchList = array_values(array_unique(array_filter(array_column($rows, 'branch'), 'strlen')));
+            natcasesort($branchList);
+            $noBranch = in_array('', array_column($rows, 'branch'), true);
+            ?>
+            <div class="sheet-tools no-print">
+                <input type="search" id="sheetSearch" class="form-control search-input" placeholder="Search name or ID…" aria-label="Search employee by name or ID" oninput="applyFilter()">
+                <select id="branchSel" class="form-control" style="width:auto;min-width:170px;" aria-label="Branch" onchange="applyFilter()">
+                    <option value="*">All branches</option>
+                    <?php foreach ($branchList as $b): ?>
+                        <option value="<?= htmlspecialchars($b) ?>"><?= htmlspecialchars($b) ?></option>
+                    <?php endforeach; ?>
+                    <?php if ($noBranch): ?><option value="">(No branch)</option><?php endif; ?>
+                </select>
+                <?php if ($canPay): ?>
+                    <label class="chk" title="Tick everyone shown who still has a balance"><input type="checkbox" id="selAll" onchange="selectAll(this.checked)"> Select all</label>
+                    <label class="chk" title="Tick every Active employee shown who still has a balance"><input type="checkbox" id="selActive" onchange="selectActive(this.checked)"> All active</label>
+                <?php endif; ?>
+                <span class="count" id="sheetCount"></span>
+            </div>
             <div class="table-wrap">
                 <table class="data-table sheet">
                     <thead>
                         <tr>
-                            <th class="pay-col no-print"><input type="checkbox" id="selAll" title="Select everyone with a balance" onchange="selectAll(this.checked)"></th>
-                            <th>ID</th><th>Name</th><th>Status</th>
+                            <th class="pay-col no-print"></th>
+                            <th>ID</th><th>Name</th><th>Branch</th><th>Status</th>
                             <?php foreach ($months as $mn): ?><th class="num mo"><?= $mn ?></th><?php endforeach; ?>
                             <th class="num">Basic pay <?= $year ?></th>
                             <th class="num">13th month</th>
@@ -265,12 +289,14 @@ $canPay    = (bool)$openPeriods;
                     </thead>
                     <tbody>
                     <?php foreach ($rows as $id => $r): $owed = $r['balance'] > 0.004; ?>
-                        <tr data-due="<?= number_format($r['due'], 2, '.', '') ?>" data-paid="<?= number_format($r['paid'], 2, '.', '') ?>" data-balance="<?= number_format(max(0, $r['balance']), 2, '.', '') ?>">
+                        <tr data-due="<?= number_format($r['due'], 2, '.', '') ?>" data-paid="<?= number_format($r['paid'], 2, '.', '') ?>" data-balance="<?= number_format(max(0, $r['balance']), 2, '.', '') ?>"
+                            data-branch="<?= htmlspecialchars($r['branch']) ?>" data-status="<?= htmlspecialchars($r['status']) ?>" data-find="<?= htmlspecialchars($id . ' ' . $r['full_name']) ?>">
                             <td class="pay-col no-print"><?php if ($owed && $canPay): ?><input type="checkbox" name="emp_ids[]" value="<?= htmlspecialchars($id) ?>" class="pick" onchange="rowToggle(this)"><?php endif; ?></td>
                             <td><?= htmlspecialchars($id) ?></td>
                             <td><strong><?= htmlspecialchars($r['full_name']) ?></strong>
                                 <?php if ($r['taxable_excess'] > 0): ?><div class="note" title="Bonuses plus this 13th month pass &#8369;<?= number_format(BIR_EXEMPT_BENEFITS, 0) ?>; the excess is taxable and is not withheld here">taxable excess &#8369;<?= number_format($r['taxable_excess'], 2) ?></div><?php endif; ?>
                             </td>
+                            <td><?= $r['branch'] !== '' ? htmlspecialchars($r['branch']) : '-' ?></td>
                             <td><span class="badge badge-<?= $r['status'] === 'Active' ? 'green' : 'yellow' ?>"><?= htmlspecialchars($r['status']) ?></span></td>
                             <?php foreach ($r['months'] as $v): ?><td class="num mo"><?= $v > 0 ? number_format($v, 2) : '-' ?></td><?php endforeach; ?>
                             <td class="num"><?= number_format($r['basic'], 2) ?></td>
@@ -284,7 +310,7 @@ $canPay    = (bool)$openPeriods;
                     </tbody>
                     <tfoot>
                         <tr class="total">
-                            <td class="pay-col no-print"></td><td></td><td>TOTAL</td><td></td>
+                            <td class="pay-col no-print"></td><td></td><td>TOTAL</td><td></td><td></td>
                             <?php foreach ($months as $mi => $mn): $sum = 0; foreach ($rows as $r) $sum += $r['months'][$mi]; ?><td class="num mo"><?= number_format($sum, 2) ?></td><?php endforeach; ?>
                             <td class="num"><?= number_format($totals['basic'], 2) ?></td>
                             <td class="num"><?= number_format($totals['due'], 2) ?></td>
@@ -293,7 +319,7 @@ $canPay    = (bool)$openPeriods;
                             <td class="pay-col no-print"></td>
                         </tr>
                         <tr class="accrual">
-                            <td class="pay-col no-print"></td><td></td><td colspan="2">Set aside each month (basic &divide; 12)</td>
+                            <td class="pay-col no-print"></td><td></td><td colspan="3">Set aside each month (basic &divide; 12)</td>
                             <?php foreach ($months as $mi => $mn): ?><td class="num"><?= number_format($totals['accrual'][$mi], 2) ?></td><?php endforeach; ?>
                             <td class="num"><?= number_format(array_sum($totals['accrual']), 2) ?></td><td colspan="3"></td><td class="pay-col no-print"></td>
                         </tr>
@@ -307,16 +333,56 @@ $canPay    = (bool)$openPeriods;
 </div>
 
 <script>
+/* Rows on screen after the search box and the branch filter. Ticks on rows that are filtered out
+   are kept (search one name, tick, search the next), and the counter says how many are ticked. */
+function shownRows() {
+    return Array.prototype.filter.call(document.querySelectorAll('#payForm tbody tr'), function (tr) { return tr.style.display !== 'none'; });
+}
+function applyFilter() {
+    var words = document.getElementById('sheetSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
+    var branch = document.getElementById('branchSel').value;
+    document.querySelectorAll('#payForm tbody tr').forEach(function (tr) {
+        var find = tr.dataset.find.toLowerCase();
+        var ok = (branch === '*' || tr.dataset.branch === branch)
+              && words.every(function (w) { return find.indexOf(w) !== -1; });
+        tr.style.display = ok ? '' : 'none';
+    });
+    syncChecks();
+}
+function syncChecks() {
+    var rows = shownRows(), all = document.getElementById('selAll'), act = document.getElementById('selActive');
+    var picks = rows.map(function (tr) { return tr.querySelector('.pick'); }).filter(Boolean);
+    var active = rows.filter(function (tr) { return tr.dataset.status === 'Active'; })
+                     .map(function (tr) { return tr.querySelector('.pick'); }).filter(Boolean);
+    var every = function (list) { return list.length > 0 && list.every(function (b) { return b.checked; }); };
+    if (all) { all.checked = every(picks); all.disabled = !picks.length; }
+    if (act) { act.checked = every(active); act.disabled = !active.length; }
+    var total = document.querySelectorAll('#payForm tbody tr').length;
+    var ticked = document.querySelectorAll('#payForm .pick:checked').length;
+    document.getElementById('sheetCount').textContent = 'Showing ' + rows.length + ' of ' + total + (all ? ' · ' + ticked + ' ticked' : '');
+}
 function rowToggle(box) {
     var tr = box.closest('tr'), amt = tr.querySelector('.amt-in');
     if (amt) amt.disabled = !box.checked;
+    syncChecks();
+}
+function setPick(tr, on) {
+    var b = tr.querySelector('.pick'), amt = tr.querySelector('.amt-in');
+    if (!b) return;
+    b.checked = on;
+    if (amt) amt.disabled = !on;
 }
 function selectAll(on) {
-    document.querySelectorAll('#payForm .pick').forEach(function (b) { b.checked = on; rowToggle(b); });
+    shownRows().forEach(function (tr) { setPick(tr, on); });
+    syncChecks();
 }
-/* fill the amounts: the whole balance, or half of the 13th month less what was already paid (never above the balance) */
+function selectActive(on) {
+    shownRows().forEach(function (tr) { if (tr.dataset.status === 'Active') setPick(tr, on); });
+    syncChecks();
+}
+/* fill the amounts of the rows shown: the whole balance, or half of the 13th month less what was already paid (never above the balance) */
 function payAll(mode) {
-    document.querySelectorAll('#payForm tbody tr').forEach(function (tr) {
+    shownRows().forEach(function (tr) {
         var box = tr.querySelector('.pick'), amt = tr.querySelector('.amt-in');
         if (!box || !amt) return;
         var due = parseFloat(tr.dataset.due), paid = parseFloat(tr.dataset.paid), bal = parseFloat(tr.dataset.balance);
@@ -325,8 +391,9 @@ function payAll(mode) {
         amt.disabled = !box.checked;
         amt.value = v.toFixed(2);
     });
-    var all = document.getElementById('selAll'); if (all) all.checked = false;
+    syncChecks();
 }
+if (document.getElementById('sheetSearch')) applyFilter();
 function confirmPay() {
     var n = document.querySelectorAll('#payForm .pick:checked').length;
     if (!n) { alert('Tick at least one employee (or press "Pay full balance").'); return false; }

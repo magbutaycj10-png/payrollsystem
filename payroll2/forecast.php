@@ -525,8 +525,13 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
             </div>
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                 <a id="detailPayrollLink" href="#" class="btn btn-ghost btn-sm">Open in Payroll</a>
-                <button class="btn btn-print btn-sm" onclick="printGeneralSummary()">Payroll Register</button>
-                <button class="btn btn-print btn-sm" onclick="printAllPayslipsModal()">Print All</button>
+                <div class="print-menu">
+                    <button type="button" class="btn btn-print btn-sm" aria-haspopup="true" aria-expanded="false">Print</button>
+                    <div class="print-menu-panel">
+                        <button type="button" class="pm-item" onclick="printAllPayslipsModal()"><b>All payslips</b><span>A payslip and receipt for every employee in this period</span></button>
+                        <button type="button" class="pm-item" onclick="printGeneralSummary()"><b>Payroll register</b><span>One summary sheet of the whole period with totals</span></button>
+                    </div>
+                </div>
                 <button class="btn btn-ghost btn-sm" onclick="closeDetail()"
                         style="font-size:1.1rem; padding:6px 12px; line-height:1;">&times;</button>
             </div>
@@ -649,9 +654,7 @@ async function openDetail(periodId, periodLabel) {
             <td><strong>&#8369;${parseFloat(r.net_pay).toLocaleString('en-PH',{minimumFractionDigits:2})}</strong></td>
             <td>
                 <button class="btn btn-print btn-sm"
-                        onclick="printSinglePayslip(${r.id})">
-                    Payslip
-                </button>
+                        onclick="printSinglePayslip(${r.id})" title="Print this employee's payslip and receipt">Print</button>
             </td>
         </tr>`).join('');
 }

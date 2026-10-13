@@ -221,7 +221,7 @@ if ($period_id) {
             <?php elseif ($curPeriod): ?>
                 <button class="btn btn-ghost" onclick="unlockPayroll()" title="Re-open this period to allow changes">Unlock Period</button>
             <?php endif; ?>
-            <button class="btn btn-print" onclick="printFullPayroll()">Print All</button>
+            <button class="btn btn-print" onclick="printFullPayroll()" title="Print the payroll register of this period - one summary sheet with totals">Print</button>
         </div>
     </div>
 
