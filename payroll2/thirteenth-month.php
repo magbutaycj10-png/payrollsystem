@@ -19,13 +19,13 @@ $heldForm = null;      /* employees held back by the ₱90,000 ceiling, to offer
 
 /* The years that have payroll; the page opens on the newest */
 $years = array_map('intval', $db->query(
-    "SELECT DISTINCT YEAR(pp.period_start) AS y FROM payroll_periods pp
+    "SELECT DISTINCT YEAR(pp.start_date) AS y FROM payroll_periods pp
       WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id) ORDER BY y DESC")->fetchAll(PDO::FETCH_COLUMN));
 $year = (int)($_POST['year'] ?? $_GET['year'] ?? ($years[0] ?? date('Y')));
 if ($year < 2000 || $year > 2100) $year = (int)date('Y');
 
 /* Open pay periods the payment can be added to (payslips of a finalized period are closed) */
-$openPeriods = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' ORDER BY period_start DESC, id DESC")->fetchAll();
+$openPeriods = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' ORDER BY start_date DESC, id DESC")->fetchAll();
 
 /* ── Record the payment ─────────────────────────────────────────────────────────────────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'pay') {
@@ -104,7 +104,7 @@ if (($_GET['export'] ?? '') === 'csv') {
 /* Which open period is the natural place for the payment: the one holding today, else the newest open one */
 $defaultTarget = 0;
 $today = date('Y-m-d');
-foreach ($openPeriods as $p) { if ($p['period_start'] <= $today && $p['period_end'] >= $today) { $defaultTarget = (int)$p['id']; break; } }
+foreach ($openPeriods as $p) { if ($p['start_date'] <= $today && $p['end_date'] >= $today) { $defaultTarget = (int)$p['id']; break; } }
 if (!$defaultTarget && $openPeriods) $defaultTarget = (int)$openPeriods[0]['id'];
 
 $deadline  = "$year-12-24";

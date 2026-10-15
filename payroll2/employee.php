@@ -7,7 +7,7 @@ $db         = getDB();
 $msg        = null;
 
 function nextEmpId(PDO $db): string {
-    $st = $db->query("SELECT emp_id FROM employees");
+    $st = $db->query("SELECT employee_code FROM employees");
     $max = 0;
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $eid) {
         if (preg_match('/(\d+)$/', $eid, $m)) $max = max($max, (int)$m[1]);
@@ -20,9 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add' || $action === 'edit') {
         $emp_id          = trim($_POST['emp_id']          ?? '');
-        $name            = trim($_POST['full_name']        ?? '');
+        $first           = trim($_POST['first_name']       ?? '');
+        $last            = trim($_POST['last_name']        ?? '');
+        $name            = trim($first . ' ' . $last);
         $pos             = trim($_POST['position']         ?? '');
-        $branch            = trim($_POST['branch']       ?? '');
+        $branch          = trim($_POST['branch']           ?? '');
         $email           = trim($_POST['email']            ?? '');
         $salary          = floatval($_POST['base_salary']  ?? 0);
         /* Whitelist against the enum - anything unexpected falls back to monthly */
@@ -36,11 +38,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dayHoursRaw = trim((string)($_POST['hours_per_day'] ?? ''));
         $dayHours = (float)$dayHoursRaw;
         $dayHours = $dayHours >= 1 && $dayHours <= 24 ? round($dayHours * 2) / 2 : null;
+        /* Contact details and the emergency contact - blank is stored as empty */
+        $profile = [];
+        foreach (['address', 'phone', 'emergency_name', 'emergency_phone', 'emergency_relation'] as $col) {
+            $v = trim((string)($_POST[$col] ?? ''));
+            $profile[$col] = $v === '' ? null : $v;
+        }
 
         /* A salary is a real, non-negative number: a negative one used to be accepted and produced a negative payslip,
            and an absurd one (₱1e12) a payroll nobody could pay. Duty-day hours, when given, are 1 to 24. */
         $formProblem = pesoProblem('Salary', $_POST['base_salary'] ?? '', $salary_type === 'daily' ? MAX_RATE_PESOS : MAX_SALARY_PESOS);
+        if ($formProblem === null && $first === '') $formProblem = 'The first name is required';
         if ($formProblem === null && $dayHoursRaw !== '' && $dayHours === null) $formProblem = 'Duty-day hours must be a number from 1 to 24 (or blank for the standard day)';
+        $branchId = branchId($db, $branch);
+        if ($formProblem === null && $branch !== '' && !$branchId) $formProblem = 'That branch is not in the branch list (add it in Settings)';
 
         /* The monthly SSS, PhilHealth, Pag-IBIG and withholding-tax amounts the admin types in. All optional: a blank box
            means this employee has none, and 0 is what is saved. Payroll deducts exactly these. */
@@ -52,17 +63,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $amounts[$k] = (float)$raw;
         }
 
+        $empPk = 0;     /* employees.id of the employee saved - what the portal account points at */
         if ($formProblem !== null) {
             $msg = ['type' => 'error', 'text' => "Not saved - $formProblem."];
         } elseif ($action === 'add') {
             $emp_id = nextEmpId($db);
             try {
-                $db->prepare("INSERT INTO employees (emp_id,full_name,position,branch,email,base_salary,salary_type,date_hired,sss_amount,philhealth_amount,pagibig_amount,tax_amount,rest_days,hours_per_day) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired,
-                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours]);
+                $db->prepare("INSERT INTO employees (employee_code,first_name,last_name,position_id,branch_id,email,base_salary,salary_type,date_hired,
+                                                     sss_amount,philhealth_amount,pagibig_amount,tax_amount,rest_days,hours_per_day,
+                                                     address,phone,emergency_name,emergency_phone,emergency_relation)
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours,
+                              $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation']]);
+                $empPk = (int)$db->lastInsertId();
                 $msg = ['type' => 'success', 'text' => "Employee $name added (ID: $emp_id)."];
             } catch (PDOException $e) {
-                $msg = ['type' => 'error', 'text' => 'The employee was not added. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
+                $msg = ['type' => 'error', 'text' => ($e->errorInfo[1] ?? 0) == 1062
+                    ? 'The employee was not added: another employee already has that email.'
+                    : 'The employee was not added. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
             }
         } else {
             $id = (int)$_POST['id'];
@@ -70,9 +89,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $prev = $db->prepare("SELECT * FROM employees WHERE id = ?");
                 $prev->execute([$id]);
                 $prev = $prev->fetch() ?: [];
-                $db->prepare("UPDATE employees SET emp_id=?,full_name=?,position=?,branch=?,email=?,base_salary=?,salary_type=?,date_hired=?,sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,rest_days=?,hours_per_day=? WHERE id=?")
-                   ->execute([$emp_id, $name, $pos, $branch, $email, $salary, $salary_type, $hired,
-                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours, $id]);
+                $db->prepare("UPDATE employees SET employee_code=?,first_name=?,last_name=?,position_id=?,branch_id=?,email=?,base_salary=?,salary_type=?,date_hired=?,
+                                                   sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,rest_days=?,hours_per_day=?,
+                                                   address=?,phone=?,emergency_name=?,emergency_phone=?,emergency_relation=? WHERE id=?")
+                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours,
+                              $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation'], $id]);
+                $empPk = $prev ? $id : 0;
+                /* the portal account carries the employee's name */
+                $db->prepare("UPDATE users SET full_name = ? WHERE employee_id = ?")->execute([$name, $id]);
                 $msg = ['type' => 'success', 'text' => "Employee $name updated."];
                 /* Anything the pay computation reads - rate, salary type, day off,
                    duty hours, the monthly contribution and tax amounts - changes
@@ -90,29 +115,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($redone) $msg['text'] .= ' Payroll recomputed for ' . implode(', ', $redone) . '.';
                 }
             } catch (PDOException $e) {
-                $msg = ['type' => 'error', 'text' => 'The changes were not saved. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
+                $msg = ['type' => 'error', 'text' => ($e->errorInfo[1] ?? 0) == 1062
+                    ? 'The changes were not saved: another employee already has that email.'
+                    : 'The changes were not saved. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
             }
         }
 
-        // Save/update employee profile fields
-        if (($msg['type'] ?? '') === 'success') {
-            $address   = trim($_POST['address']             ?? '');
-            $phone     = trim($_POST['phone']               ?? '');
-            $ename     = trim($_POST['emergency_name']      ?? '');
-            $ephone    = trim($_POST['emergency_phone']     ?? '');
-            $erelation = trim($_POST['emergency_relation']  ?? '');
-            $db->prepare("INSERT INTO employee_profiles (emp_id,address,phone,emergency_name,emergency_phone,emergency_relation)
-                          VALUES (?,?,?,?,?,?)
-                          ON DUPLICATE KEY UPDATE
-                            address=VALUES(address), phone=VALUES(phone),
-                            emergency_name=VALUES(emergency_name),
-                            emergency_phone=VALUES(emergency_phone),
-                            emergency_relation=VALUES(emergency_relation)")
-               ->execute([$emp_id, $address, $phone, $ename, $ephone, $erelation]);
-        }
-
         // Set portal credentials (hashed) if password was provided
-        if (($msg['type'] ?? '') === 'success' && $portal_password !== '') {
+        if (($msg['type'] ?? '') === 'success' && $empPk && $portal_password !== '') {
             if (!$email) {
                 $msg['text'] .= ' (Portal access skipped - email is required for login.)';
             } else {
@@ -120,26 +130,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                    employees. If another account already uses it, say who -
                    the employee record itself is already saved. */
                 $taken = $db->prepare("SELECT full_name, role FROM users
-                                        WHERE email = ? AND NOT (role = 'earner' AND emp_id <=> ?) LIMIT 1");
-                $taken->execute([$email, $emp_id]);
+                                        WHERE email = ? AND NOT (role = 'Employee' AND employee_id <=> ?) LIMIT 1");
+                $taken->execute([$email, $empPk]);
                 $owner = $taken->fetch();
                 if ($owner) {
                     $msg['type'] = 'warn';
                     $msg['text'] .= ' Portal access was NOT set: the email ' . $email . ' is already used to log in by '
-                                  . $owner['full_name'] . ' (' . ($owner['role'] === 'earner' ? 'employee' : $owner['role'])
+                                  . $owner['full_name'] . ' (' . ($owner['role'] === 'Employee' ? 'employee' : strtolower($owner['role']))
                                   . '). Give this employee a different email, then set the portal password again.';
                 } else {
                     $hash  = password_hash($portal_password, PASSWORD_BCRYPT);
-                    $check = $db->prepare("SELECT id FROM users WHERE emp_id=? AND role='earner'");
-                    $check->execute([$emp_id]);
+                    $check = $db->prepare("SELECT id FROM users WHERE employee_id=? AND role='Employee'");
+                    $check->execute([$empPk]);
                     if ($check->fetch()) {
                         $db->prepare("UPDATE users SET email=?, password_hash=?, status='Active', full_name=?
-                                      WHERE emp_id=? AND role='earner'")
-                           ->execute([$email, $hash, $name, $emp_id]);
+                                      WHERE employee_id=? AND role='Employee'")
+                           ->execute([$email, $hash, $name, $empPk]);
                     } else {
-                        $db->prepare("INSERT INTO users (full_name, email, password_hash, role, emp_id, status)
-                                      VALUES (?, ?, ?, 'earner', ?, 'Active')")
-                           ->execute([$name, $email, $hash, $emp_id]);
+                        $db->prepare("INSERT INTO users (full_name, email, password_hash, role, employee_id, status)
+                                      VALUES (?, ?, ?, 'Employee', ?, 'Active')")
+                           ->execute([$name, $email, $hash, $empPk]);
                     }
                     $msg['text'] .= ' Portal access set - employee can log in with their email and this password.';
                 }
@@ -150,24 +160,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'delete') {
         $id = (int)$_POST['id'];
         try {
-            /* Payroll, attendance, leave and payslip records are tied to the
-               employee by emp_id only (no database key enforces it), so look
-               before deleting: history must never be orphaned. */
-            $eid = $db->prepare("SELECT emp_id FROM employees WHERE id = ?");
-            $eid->execute([$id]);
-            $eid = (string)$eid->fetchColumn();
+            /* Payroll, attendance, leave and bonus/deduction records point at the employee (employee_id) with
+               ON DELETE RESTRICT, so the database itself refuses the delete. Looking first says which. (A payslip
+               signature hangs off a pay line, so a signed employee always has payroll.) */
             $used = [];
-            foreach (['payroll' => 'payroll', 'attendance' => 'attendance', 'biometric_daily' => 'daily attendance',
-                      'leave_requests' => 'leave', 'bonus_deduction_history' => 'bonus/deduction',
-                      'payslip_signatures' => 'payslip signature'] as $table => $what) {
-                $st = $db->prepare("SELECT 1 FROM $table WHERE emp_id = ? LIMIT 1");
-                $st->execute([$eid]);
+            foreach (['payroll' => 'payroll', 'attendance_summary' => 'attendance', 'biometric_daily' => 'daily attendance',
+                      'leave_requests' => 'leave', 'bonus_deductions' => 'bonus/deduction'] as $table => $what) {
+                $st = $db->prepare("SELECT 1 FROM $table WHERE employee_id = ? LIMIT 1");
+                $st->execute([$id]);
                 if ($st->fetchColumn()) $used[] = $what;
             }
-            if ($eid !== '' && $used) {
+            if ($used) {
                 $msg = ['type' => 'error', 'text' => 'This employee has ' . implode(', ', $used) . ' records, '
                       . 'so they cannot be deleted - those records must be kept. Revoke their portal access instead.'];
             } else {
+                /* Their portal login, manager assignments and device number go with them (ON DELETE CASCADE) */
                 $db->prepare("DELETE FROM employees WHERE id=?")->execute([$id]);
                 $msg = ['type' => 'success', 'text' => 'Employee deleted.'];
             }
@@ -186,7 +193,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'revoke_access') {
         $emp_id = trim($_POST['emp_id_action'] ?? '');
         if ($emp_id) {
-            $db->prepare("UPDATE users SET status='Inactive' WHERE emp_id=? AND role='earner'")->execute([$emp_id]);
+            $db->prepare("UPDATE users SET status='Inactive'
+                           WHERE employee_id = (SELECT id FROM employees WHERE employee_code = ?) AND role='Employee'")->execute([$emp_id]);
             $msg = ['type' => 'success', 'text' => "Portal access revoked for employee $emp_id. All their data is kept in the database."];
         }
     }
@@ -194,7 +202,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'restore_access') {
         $emp_id = trim($_POST['emp_id_action'] ?? '');
         if ($emp_id) {
-            $db->prepare("UPDATE users SET status='Active' WHERE emp_id=? AND role='earner'")->execute([$emp_id]);
+            $db->prepare("UPDATE users SET status='Active'
+                           WHERE employee_id = (SELECT id FROM employees WHERE employee_code = ?) AND role='Employee'")->execute([$emp_id]);
             $msg = ['type' => 'success', 'text' => "Portal access restored for employee $emp_id."];
         }
     }
@@ -207,27 +216,17 @@ $next_emp_id = nextEmpId($db);
 $scheduleNow = [];
 foreach (contributionTiming() as $k => $t) $scheduleNow[] = CONTRIBUTION_LABELS[$k] . ': ' . CONTRIBUTION_TIMING_LABELS[$t];
 
-/* The branch list maintained in Settings, plus any name already sitting on an
-   employee row that predates it - an existing assignment must stay selectable
-   or editing that employee would silently clear their branch. */
-$branchOptions = $db->query("
-    SELECT name FROM (
-        SELECT name FROM branches
-        UNION
-        SELECT DISTINCT TRIM(branch) AS name FROM employees
-         WHERE branch IS NOT NULL AND TRIM(branch) <> ''
-    ) b ORDER BY name
-")->fetchAll(PDO::FETCH_COLUMN);
+/* The branch list and the position titles maintained in Settings (a typed position that is new is added to the list when saved) */
+$branchOptions   = $db->query("SELECT name FROM branches ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+$positionOptions = $db->query("SELECT title FROM positions ORDER BY title")->fetchAll(PDO::FETCH_COLUMN);
 
 $search    = trim($_GET['q'] ?? '');
-$where     = $search ? "WHERE emp_id LIKE ? OR full_name LIKE ? OR branch LIKE ?" : '';
+$where     = $search ? "WHERE e.employee_code LIKE ? OR e.full_name LIKE ? OR br.name LIKE ?" : '';
 $params    = $search ? ["%$search%", "%$search%", "%$search%"] : [];
-$st        = $db->prepare("SELECT e.*, u.status AS portal_status,
-                    ep.address, ep.phone, ep.emergency_name, ep.emergency_phone, ep.emergency_relation
-                    FROM employees e
-                    LEFT JOIN users u ON u.emp_id=e.emp_id AND u.role='earner'
-                    LEFT JOIN employee_profiles ep ON ep.emp_id=e.emp_id
-                    $where ORDER BY e.emp_id ASC");
+$st        = $db->prepare("SELECT " . EMPLOYEE_COLUMNS . ", u.status AS portal_status
+                    FROM employees e " . EMPLOYEE_JOINS . "
+                    LEFT JOIN users u ON u.employee_id=e.id AND u.role='Employee'
+                    $where ORDER BY e.employee_code ASC");
 $st->execute($params);
 $employees = $st->fetchAll();
 $total     = count($employees);
@@ -300,8 +299,8 @@ $total     = count($employees);
                     <tr>
                         <td><strong><?= htmlspecialchars($e['emp_id']) ?></strong></td>
                         <td><?= htmlspecialchars($e['full_name']) ?></td>
-                        <td><?= htmlspecialchars($e['position'] ?? '-') ?></td>
-                        <td><?= htmlspecialchars($e['branch'] ?? '-') ?></td>
+                        <td><?= htmlspecialchars(($e['position'] ?? '') !== '' ? $e['position'] : '-') ?></td>
+                        <td><?= htmlspecialchars(($e['branch'] ?? '') !== '' ? $e['branch'] : '-') ?></td>
                         <td><?= htmlspecialchars($e['email'] ?? '-') ?></td>
                         <td>₱<?= number_format($e['base_salary'], 2) ?></td>
                         <td>
@@ -386,12 +385,19 @@ $total     = count($employees);
                            style="background:#f3f4f6;color:#6b7280;cursor:default;">
                 </div>
                 <div class="form-group">
-                    <label>Full Name *</label>
-                    <input type="text" name="full_name" id="f_name" class="form-control" required placeholder="Juan dela Cruz">
+                    <label>First Name * <span style="font-weight:400;color:#9ca3af;">(with middle initial)</span></label>
+                    <input type="text" name="first_name" id="f_first" class="form-control" required placeholder="Juan P.">
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" name="last_name" id="f_last" class="form-control" placeholder="dela Cruz">
                 </div>
                 <div class="form-group">
                     <label>Position</label>
-                    <input type="text" name="position" id="f_pos" class="form-control" placeholder="Cashier">
+                    <input type="text" name="position" id="f_pos" class="form-control" placeholder="Cashier" list="positionList" autocomplete="off">
+                    <datalist id="positionList">
+                        <?php foreach ($positionOptions as $p): ?><option value="<?= htmlspecialchars($p) ?>"><?php endforeach; ?>
+                    </datalist>
                 </div>
                 <div class="form-group">
                     <label>Branch</label>

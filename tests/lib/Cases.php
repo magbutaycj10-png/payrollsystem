@@ -109,7 +109,7 @@ function qa_worker(string $name, string $from, string $to, string $rate = '500.0
 function qa_edit_employee(string $empId, array $change): array
 {
     $e = Fixtures::empRow($empId);
-    $post = ['action' => 'edit', 'id' => $e['id'], 'emp_id' => $e['emp_id'], 'full_name' => $e['full_name'], 'position' => (string)$e['position'],
+    $post = ['action' => 'edit', 'id' => $e['id'], 'emp_id' => $e['emp_id'], 'first_name' => $e['first_name'], 'last_name' => (string)$e['last_name'], 'position' => (string)$e['position'],
              'branch' => (string)$e['branch'], 'email' => (string)$e['email'], 'salary_type' => $e['salary_type'], 'base_salary' => $e['base_salary'],
              'date_hired' => (string)$e['date_hired'], 'hours_per_day' => (string)$e['hours_per_day'],
              'rest_days' => $e['rest_days'] === '' ? [] : explode(',', $e['rest_days']),
@@ -190,7 +190,7 @@ function qa_sql_dataset(): array
         'days' => Scenario::fullDays('2026-05-01', '2026-05-15') + ['2026-05-16' => ['h' => '8.00', 'under' => '0']],
         'between' => [0 => function (string $empId, array $periods) {
             Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $periods[0], 'ignore_drift' => true, 'allow_negative' => true]);
-            getDB()->prepare("UPDATE employees SET tax_amount = 200 WHERE emp_id = ?")->execute([$empId]);
+            getDB()->prepare("UPDATE employees SET tax_amount = 200 WHERE employee_code = ?")->execute([$empId]);
         }]]);
 
     // Jun - a monthly ₱26,000 salary, hired 9 June (the audit's hire-date case)

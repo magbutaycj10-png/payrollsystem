@@ -18,10 +18,10 @@
 function qa13_period(string $start, string $end, string $status = 'Open'): int
 {
     $db = getDB();
-    $have = $db->prepare("SELECT id FROM payroll_periods WHERE period_start = ? AND period_end = ?");
+    $have = $db->prepare("SELECT id FROM payroll_periods WHERE start_date = ? AND end_date = ?");
     $have->execute([$start, $end]);
     if ($id = $have->fetchColumn()) return (int)$id;               // employees of one scene share the cut-offs
-    $db->prepare("INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES (?,?,?,?,?)")
+    $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES (?,?,?,?,?)")
        ->execute([date('M j', strtotime($start)) . '-' . date('j, Y', strtotime($end)), $start, $end, 'Semi-Monthly', $status]);
     return (int)$db->lastInsertId();
 }
@@ -29,8 +29,10 @@ function qa13_period(string $start, string $end, string $status = 'Open'): int
 /** a payroll line straight into the table: gross pay, of which $otLate is overtime / tardiness, plus a bonus */
 function qa13_line(int $periodId, string $empId, string $name, $gross, $otLate = 0, $bonus = 0): void
 {
-    getDB()->prepare("INSERT INTO payroll (period_id, emp_id, emp_name, gross_pay, ot_late_adj, bonus, net_pay) VALUES (?,?,?,?,?,?,?)")
-           ->execute([$periodId, $empId, $name, $gross, $otLate, $bonus, (float)$gross + (float)$bonus]);
+    /* basic pay = gross less the overtime / tardiness adjustment: overtime pay when it is positive, the late cost when it is negative */
+    getDB()->prepare("INSERT INTO payroll (period_id, employee_id, basic_pay, overtime_pay, tardy_undertime_deduction, gross_pay, bonus_pay, net_pay)
+                      VALUES (?,(SELECT id FROM employees WHERE employee_code = ?),?,?,?,?,?,?)")
+           ->execute([$periodId, $empId, (float)$gross - (float)$otLate, max(0.0, (float)$otLate), max(0.0, -(float)$otLate), $gross, $bonus, (float)$gross + (float)$bonus]);
 }
 
 /** twelve months × two cut-offs of one year for one employee, $perCutoff pesos of basic pay each, from month $from to month $to */
@@ -216,7 +218,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         qa13_year('E-A', 'Ana Pay', 2026, '15000.00');
         qa13_year('E-B', 'Ben Pay', 2026, '10000.00');
         // the payment goes into the last open cut-off of the year (the 24th period holds both employees)
-        $target = (int)getDB()->query("SELECT id FROM payroll_periods WHERE period_start = '2026-12-16'")->fetchColumn();
+        $target = (int)getDB()->query("SELECT id FROM payroll_periods WHERE start_date = '2026-12-16'")->fetchColumn();
         return [$target];
     };
     $pay = fn(int $target, array $emps, array $amounts, array $extra = [], int $year = 2026) =>
@@ -236,7 +238,8 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $t->money('30000.00', $after['E-A']['bonus'], 'bonus on Ana\'s payslip');
         $t->money('20000.00', $after['E-B']['bonus']);
         $t->money(Ledger::c($before['E-A']['net_pay']) + 3000000, $after['E-A']['net_pay'], 'net pay up by exactly the 13th month');
-        $hist = $db->query("SELECT emp_id, entry_type, amount, reason, period_id FROM bonus_deduction_history ORDER BY emp_id")->fetchAll();
+        $hist = $db->query("SELECT e.employee_code, h.type AS entry_type, h.amount, h.reason, h.period_id FROM bonus_deductions h
+                             JOIN employees e ON e.id = h.employee_id ORDER BY e.employee_code")->fetchAll();
         $t->same([['E-A', 'Bonus', '30000.00', '13th Month Pay 2026', $target], ['E-B', 'Bonus', '20000.00', '13th Month Pay 2026', $target]],
                  array_map('array_values', $hist), 'history');
         $d = thirteenthMonthData($db, 2026);
@@ -247,7 +250,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         // press the same button again
         $again = $pay($target, ['E-A', 'E-B'], ['E-A' => '30000.00', 'E-B' => '20000.00']);
         $t->contains('more than the balance of ₱0.00', $again['body'], 'refused: nothing is owed');
-        $t->same(2, (int)$db->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn(), 'no new history rows');
+        $t->same(2, (int)$db->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn(), 'no new history rows');
         $t->money('30000.00', Fixtures::payroll($target)['E-A']['bonus'], 'bonus unchanged');
     });
 
@@ -255,7 +258,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         qa_need_fixes();
         [$target] = $payScene();
         $db = getDB();
-        $june = (int)$db->query("SELECT id FROM payroll_periods WHERE period_start = '2026-06-16'")->fetchColumn();
+        $june = (int)$db->query("SELECT id FROM payroll_periods WHERE start_date = '2026-06-16'")->fetchColumn();
         $pay($june, ['E-A'], ['E-A' => '15000.00']);                                         // the advance: half of ₱30,000
         $d = thirteenthMonthData($db, 2026)['rows']['E-A'];
         $t->money('15000.00', $d['paid']);
@@ -263,7 +266,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         // Ben's half was typed by hand on the Bonus & Deductions page long ago, with the old reason text
         Http::page('adjustments.php', ['period_id' => $june, 'emp_ids' => ['E-B'], 'entry_type' => 'Bonus', 'amount' => '10000', 'reason_select' => '13th Month Pay']);
         Http::page('adjustments.php', ['period_id' => $june, 'emp_ids' => ['E-B'], 'entry_type' => 'Bonus', 'amount' => '77', 'reason_select' => 'Performance Reward']);
-        $db->prepare("INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), 'E-B', 'Ben Pay', 'Deduction', 5000, '13th Month Pay', ?)")->execute([$june]);
+        $db->prepare("INSERT INTO bonus_deductions (entry_date, employee_id, type, amount, reason, period_id) VALUES (CURDATE(), (SELECT id FROM employees WHERE employee_code = 'E-B'), 'Deduction', 5000, '13th Month Pay', ?)")->execute([$june]);
         $b = thirteenthMonthData($db, 2026)['rows']['E-B'];
         $t->money('10000.00', $b['paid'], 'only the Bonus entries whose reason starts "13th Month Pay" count - not a Performance Reward, not a Deduction');
         $t->money('10000.00', $b['balance']);
@@ -276,7 +279,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $t->money('20000.00', $d['rows']['E-B']['paid']);
         $t->money('0.00', $d['totals']['balance']);
         // the entries from a different year are not counted
-        $db->prepare("INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), 'E-A', 'Ana Pay', 'Bonus', 9999, '13th Month Pay 2025', ?)")
+        $db->prepare("INSERT INTO bonus_deductions (entry_date, employee_id, type, amount, reason, period_id) VALUES (CURDATE(), (SELECT id FROM employees WHERE employee_code = 'E-A'), 'Bonus', 9999, '13th Month Pay 2025', ?)")
            ->execute([qa13_period('2025-12-01', '2025-12-15')]);
         $t->money('30000.00', thirteenthMonthData($db, 2026)['rows']['E-A']['paid'], '2025\'s 13th month is not 2026\'s');
     });
@@ -291,7 +294,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         }
         $r = $pay($target, ['NOBODY'], ['NOBODY' => '100']);
         $t->contains('has no pay in 2026', $r['body']);
-        $t->same(0, (int)$db->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn(), 'no history rows');
+        $t->same(0, (int)$db->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn(), 'no history rows');
         $t->money('0.00', Fixtures::payroll($target)['E-A']['bonus']);
         // exactly the balance is fine, and so are the centavos of an amount that is not a round number
         $r = $pay($target, ['E-A'], ['E-A' => '30000.00']);
@@ -305,7 +308,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $db->exec("UPDATE payroll_periods SET status = 'Locked' WHERE id = $target");
         $r = $pay($target, ['E-A'], ['E-A' => '30000.00']);
         $t->contains('Choose an open pay period', $r['body']);
-        $t->same(0, (int)$db->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn());
+        $t->same(0, (int)$db->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn());
         $db->exec("UPDATE payroll_periods SET status = 'Locked'");
         $page = Http::page('thirteenth-month.php', [], ['year' => 2026])['body'];
         $t->contains('No open pay period', $page, 'the page explains why there is no Pay button');
@@ -319,8 +322,8 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $db->exec("UPDATE payroll_periods SET finalize_count = 1, reopen_count = 1 WHERE id = $target");     // finalized once, now open again
         $r = $pay($target, ['E-A'], ['E-A' => '30000.00']);
         $t->contains('marked as a revision', $r['body']);
-        $t->same(1, (int)$db->query("SELECT revised_after_finalize FROM payroll WHERE period_id = $target AND emp_id = 'E-A'")->fetchColumn(), 'payroll row stamped');
-        $t->same(1, (int)$db->query("SELECT finalize_cycle FROM bonus_deduction_history WHERE emp_id = 'E-A'")->fetchColumn(), 'history row stamped with the cycle');
+        $t->same(1, (int)$db->query("SELECT revised_after_finalize FROM payroll WHERE period_id = $target AND employee_id = (SELECT id FROM employees WHERE employee_code = 'E-A')")->fetchColumn(), 'payroll row stamped');
+        $t->same(1, (int)$db->query("SELECT finalize_cycle FROM bonus_deductions WHERE employee_id = (SELECT id FROM employees WHERE employee_code = 'E-A')")->fetchColumn(), 'history row stamped with the cycle');
         // a period where Ben has no payroll line
         $empty = qa13_period('2027-01-01', '2027-01-15');
         qa13_line($empty, 'E-A', 'Ana Pay', '15000.00');
@@ -346,7 +349,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         qa_adjust($target, ['E-A', 'E-B'], 'Bonus', '10');
         $note = (string)$db->query("SELECT note FROM period_audit WHERE period_id = $target AND action = 'Revised' ORDER BY id DESC LIMIT 1")->fetchColumn();
         $t->same('Bonus of PHP 10.00 (Performance bonus) applied to 2 employee(s) after finalize #2.', $note);
-        $t->same(4, (int)$db->query('SELECT COUNT(*) FROM bonus_deduction_history WHERE finalize_cycle = 2')->fetchColumn(), 'four history rows, each stamped with cycle 2');
+        $t->same(4, (int)$db->query('SELECT COUNT(*) FROM bonus_deductions WHERE finalize_cycle = 2')->fetchColumn(), 'four history rows, each stamped with cycle 2');
     });
 
     T::test('the ₱90,000 ceiling: a 13th month of ₱120,000 is held back for a decision; ₱90,000 is allowed; the rest is held; "Record anyway" records it once', function (T $t) use ($pay) {
@@ -355,7 +358,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         Fixtures::employee(['emp_id' => 'E-BIG', 'full_name' => 'Big Earner', 'base_salary' => '60000.00', 'salary_type' => 'kinsenas']);
         qa13_year('E-BIG', 'Big Earner', 2026, '60000.00');                                  // ₱1,440,000 of basic pay → ₱120,000
         $db = getDB();
-        $target = (int)$db->query("SELECT id FROM payroll_periods WHERE period_start = '2026-12-16'")->fetchColumn();
+        $target = (int)$db->query("SELECT id FROM payroll_periods WHERE start_date = '2026-12-16'")->fetchColumn();
         $d = thirteenthMonthData($db, 2026)['rows']['E-BIG'];
         $t->money('120000.00', $d['due']);
         $t->money('30000.00', $d['taxable_excess'], '120,000 − 90,000, shown on the sheet');
@@ -374,7 +377,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $r = $pay($target, ['E-BIG'], ['E-BIG' => '30000.00'], ['confirm_over_exempt' => '1']);   // what the "Record anyway" button sends
         $t->contains('recorded for 1 employee', $r['body']);
         $t->money('120000.00', Fixtures::payroll($target)['E-BIG']['bonus']);
-        $t->same(2, (int)$db->query("SELECT COUNT(*) FROM bonus_deduction_history WHERE emp_id = 'E-BIG'")->fetchColumn(), 'two entries: 90,000 and 30,000');
+        $t->same(2, (int)$db->query("SELECT COUNT(*) FROM bonus_deductions WHERE employee_id = (SELECT id FROM employees WHERE employee_code = 'E-BIG')")->fetchColumn(), 'two entries: 90,000 and 30,000');
         $t->money('0.00', thirteenthMonthData($db, 2026)['rows']['E-BIG']['balance']);
     });
 
@@ -409,7 +412,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         qa_need_fixes();
         Fixtures::reset();
         $t->same(302, Http::call('thirteenth-month.php', ['method' => 'GET', 'session' => []])['status'], 'no session');
-        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type) VALUES ('Mgr', ?, 'x', 'manager', '', 'branch')")->execute(['mgr13-' . uniqid() . '@test']);
+        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mgr', ?, 'x', 'Manager')")->execute(['mgr13-' . uniqid() . '@test']);
         $mid = (int)getDB()->lastInsertId();
         $t->same(302, Http::page('thirteenth-month.php', [], [], Http::manager($mid, 'Mgr', ''))['status'], 'a manager');
         $t->same(302, Http::call('thirteenth-month.php', ['method' => 'POST', 'post' => ['action' => 'pay'], 'session' => []])['status'], 'a visitor posting a payment');
@@ -427,12 +430,12 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $t->same([], qa_sql_run($checks['C60']), 'nothing wrong yet');
         $pay($target, ['E-A'], ['E-A' => '30000.00']);
         $t->same([], qa_sql_run($checks['C60']), 'paying exactly what is due is fine');
-        $db->prepare("INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), 'E-A', 'Ana Pay', 'Bonus', 0.01, '13th Month Pay 2026', ?)")->execute([$target]);
+        $db->prepare("INSERT INTO bonus_deductions (entry_date, employee_id, type, amount, reason, period_id) VALUES (CURDATE(), (SELECT id FROM employees WHERE employee_code = 'E-A'), 'Bonus', 0.01, '13th Month Pay 2026', ?)")->execute([$target]);
         $rows = qa_sql_run($checks['C60']);
         $t->same(1, count($rows), 'one cent over is found');
-        $t->same('E-A', $rows[0]['emp_id']);
+        $t->same('E-A', $rows[0]['employee_code']);
         $r = qa_sql_run($checks['R03']);
-        $row = array_values(array_filter($r, fn($x) => $x['emp_id'] === 'E-B'))[0];
+        $row = array_values(array_filter($r, fn($x) => $x['employee_code'] === 'E-B'))[0];
         $t->money('20000.00', $row['thirteenth_month_due'], 'R03 reports Ben\'s 13th month');
     });
 
@@ -455,56 +458,117 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
 
     /* ================================================================== F · a fresh install */
 
-    T::test('a fresh install: sql/database.sql on an empty database, then the application\'s own first-load setup - sign in, add an employee, a period, a day, and it computes pay', function (T $t) {
+    /** what a schema is made of, to compare two of them: every column, every index and every foreign key, as text lines */
+    function qa13_signature(PDO $root, string $schema): array
+    {
+        $out = [];
+        $st = $root->prepare("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COALESCE(COLUMN_DEFAULT, 'NULL') AS d, COALESCE(GENERATION_EXPRESSION, '') AS g,
+                                     COALESCE(COLLATION_NAME, '') AS c, EXTRA
+                                FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, COLUMN_NAME");
+        $st->execute([$schema]);
+        foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) $out[] = 'column ' . implode(' | ', $r);
+        $st = $root->prepare("SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS cols
+                                FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE ORDER BY TABLE_NAME, INDEX_NAME");
+        $st->execute([$schema]);
+        foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) $out[] = 'index ' . implode(' | ', $r);
+        $st = $root->prepare("SELECT k.TABLE_NAME, k.CONSTRAINT_NAME, GROUP_CONCAT(k.COLUMN_NAME ORDER BY k.ORDINAL_POSITION), k.REFERENCED_TABLE_NAME,
+                                     GROUP_CONCAT(k.REFERENCED_COLUMN_NAME ORDER BY k.ORDINAL_POSITION), r.UPDATE_RULE, r.DELETE_RULE
+                                FROM information_schema.KEY_COLUMN_USAGE k
+                                JOIN information_schema.REFERENTIAL_CONSTRAINTS r ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME AND r.TABLE_NAME = k.TABLE_NAME
+                               WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL
+                               GROUP BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.REFERENCED_TABLE_NAME, r.UPDATE_RULE, r.DELETE_RULE ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME");
+        $st->execute([$schema]);
+        foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) $out[] = 'foreign key ' . implode(' | ', $r);
+        $st = $root->prepare("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME");
+        $st->execute([$schema]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $tbl) $out[] = "table $tbl";
+        return $out;
+    }
+
+    T::test('sql/database.sql on an empty database builds exactly the layout every other test runs on (tests/schema.sql) - and running it again changes nothing', function (T $t) {
         qa_need_fixes();
         $sqlFile = AppCopy::root() . '/sql/database.sql';
         $t->ok(is_file($sqlFile), 'sql/database.sql ships with the app');
         $root = TestDb::root();
         $root->exec('DROP DATABASE IF EXISTS qa_fresh');
         $root->exec('CREATE DATABASE qa_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-        foreach (['127.0.0.1', 'localhost', '%'] as $h) $root->exec("GRANT ALL ON qa_fresh.* TO '" . TestDb::USER . "'@'$h'");
         $fresh = TestDb::root('qa_fresh');
-        $statements = array_filter(array_map('trim', explode(";\n", preg_replace('/^--.*$/m', '', (string)file_get_contents($sqlFile)))));
+        $statements = splitSqlStatements((string)file_get_contents($sqlFile));
+        $t->same(23, count($statements), 'one CREATE TABLE for each of the 23 tables');
         foreach ($statements as $s) $fresh->exec($s);
-        $base = $fresh->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-        sort($base);
-        $t->same(['attendance', 'bonus_deduction_history', 'employees', 'payroll', 'payroll_periods', 'print_log', 'settings'], $base, 'the seven base tables');
-        // running the file twice changes nothing
-        foreach ($statements as $s) $fresh->exec($s);
-
-        $env = ['env' => ['DB_NAME' => 'qa_fresh']];
-        $r = Http::call('dashboard.php', ['method' => 'GET', 'session' => Http::admin()] + $env);          // first page load: applySchemaPatches()
-        $t->same(200, $r['status'], 'the first page opens on an empty database: ' . substr(strip_tags($r['body']), 0, 160));
-        $all = $fresh->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-        foreach (['users', 'leave_requests', 'biometric_daily', 'period_audit', 'payslip_signatures', 'employee_profiles', 'login_attempts'] as $tbl) {
-            $t->ok(in_array($tbl, $all, true), "the application created $tbl by itself");
+        $a = qa13_signature($root, TestDb::DB);
+        $b = qa13_signature($root, 'qa_fresh');
+        $t->ok(count($a) > 250, 'the comparison saw the columns, indexes and foreign keys (' . count($a) . ' lines)');
+        $t->same([], array_values(array_diff($a, $b)), 'in the tested schema but not in database.sql (or different)');
+        $t->same([], array_values(array_diff($b, $a)), 'in database.sql but not in the tested schema (or different)');
+        foreach ($statements as $s) $fresh->exec($s);                                    // every statement is IF NOT EXISTS
+        $t->same($b, qa13_signature($root, 'qa_fresh'), 'running the file twice changes nothing');
+        // the standard layout in one look: one table per thing, every table has its own id, links are <thing>_id, a person's number is employee_code
+        $cols = $fresh->query("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_KEY FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'qa_fresh'")->fetchAll(PDO::FETCH_NUM);
+        $byTable = [];
+        foreach ($cols as [$tbl, $col, $key]) $byTable[$tbl][$col] = $key;
+        foreach (['branches', 'departments', 'positions', 'employees', 'users', 'user_scopes', 'payroll_periods', 'biometric_daily', 'attendance_summary', 'leave_requests',
+                  'bonus_deductions', 'payroll', 'payslip_signatures', 'print_logs', 'period_audit', 'login_attempts', 'document_serials', 'biometric_api_keys'] as $tbl) {
+            $t->same('PRI', $byTable[$tbl]['id'] ?? null, "$tbl has its own id as the primary key");
         }
-        // the shipped file builds exactly the tables every other test runs on (the ERD export in tests/schema.sql, plus the app's own patches)
-        $cols = function (PDO $db, string $schema): array {
-            $st = $db->prepare("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COALESCE(COLUMN_DEFAULT, 'NULL') AS d, COLLATION_NAME
-                                  FROM information_schema.COLUMNS
-                                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('settings','employees','payroll_periods','attendance','payroll','bonus_deduction_history','print_log')
-                                 ORDER BY TABLE_NAME, COLUMN_NAME");
-            $st->execute([$schema]);
-            return array_map(fn($r) => implode(' | ', $r), $st->fetchAll(PDO::FETCH_NUM));
-        };
-        $a = $cols($root, TestDb::DB);
-        $b = $cols($root, 'qa_fresh');
-        $t->ok(count($a) > 80, 'the comparison saw the columns (' . count($a) . ')');
-        $t->same([], array_values(array_diff($a, $b)), 'columns the test database has and the fresh install lacks / differs in');
-        $t->same([], array_values(array_diff($b, $a)), 'columns the fresh install has and the test database lacks / differs in');
+        foreach ($byTable as $tbl => $cs) {
+            $t->ok(!isset($cs['emp_id']) && !isset($cs['emp_name']), "$tbl holds no emp_id / emp_name (a person's number is employees.employee_code, the name is read from employees)");
+        }
+        $root->exec('DROP DATABASE qa_fresh');
+    });
+
+    T::test('sql/001_attendance_logs.sql (the terminal tables, for a database set up before them) builds exactly what database.sql builds for them', function (T $t) {
+        qa_need_fixes();
+        $root = TestDb::root();
+        $root->exec('DROP DATABASE IF EXISTS qa_fresh3');
+        $root->exec('CREATE DATABASE qa_fresh3 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        $db = TestDb::root('qa_fresh3');
+        foreach (splitSqlStatements((string)file_get_contents(AppCopy::root() . '/sql/database.sql')) as $s) $db->exec($s);
+        $before = qa13_signature($root, 'qa_fresh3');
+        $four = ['attendance_logs', 'biometric_employee_map', 'biometric_agent_state', 'biometric_api_keys'];
+        foreach (array_reverse($four) as $tbl) $db->exec("DROP TABLE `$tbl`");
+        $t->same(19, count(array_filter(qa13_signature($root, 'qa_fresh3'), fn($l) => str_starts_with($l, 'table '))), 'the four terminal tables are gone from the copy');
+        foreach (splitSqlStatements((string)file_get_contents(AppCopy::root() . '/sql/001_attendance_logs.sql')) as $s) $db->exec($s);
+        $t->same($before, qa13_signature($root, 'qa_fresh3'), 'the script builds the four tables - columns, keys and foreign key - exactly as database.sql does');
+        $cols = $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'qa_fresh3' AND TABLE_NAME = 'attendance_logs'")->fetchAll(PDO::FETCH_COLUMN);
+        $t->ok(in_array('device_user_id', $cols, true) && !in_array('employee_id', $cols, true), "attendance_logs holds the terminal's own number as device_user_id");
+        $root->exec('DROP DATABASE qa_fresh3');
+    });
+
+    T::test('a fresh install: the application builds the schema itself on an EMPTY database - sign in, add an employee, a period, a day, and it computes pay', function (T $t) {
+        qa_need_fixes();
+        $root = TestDb::root();
+        $root->exec('DROP DATABASE IF EXISTS qa_fresh2');
+        $root->exec('CREATE DATABASE qa_fresh2 CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+        foreach (['127.0.0.1', 'localhost', '%'] as $h) $root->exec("GRANT ALL ON qa_fresh2.* TO '" . TestDb::USER . "'@'$h'");
+        $fresh = TestDb::root('qa_fresh2');
+        $t->same([], $fresh->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN), 'the database starts with no table at all');
+
+        $env = ['env' => ['DB_NAME' => 'qa_fresh2']];
         $call = fn(string $script, array $spec) => Http::call($script, $spec + $env);
-        $r = $call('employee.php', ['method' => 'POST', 'post' => ['action' => 'add', 'full_name' => 'Fresh Install', 'base_salary' => '500', 'salary_type' => 'daily', 'branch' => 'MAIN'], 'session' => Http::admin()]);
-        $emp = (string)$fresh->query("SELECT emp_id FROM employees WHERE full_name = 'Fresh Install'")->fetchColumn();
+        $r = $call('dashboard.php', ['method' => 'GET', 'session' => Http::admin()]);                      // first page load: applySchemaPatches()
+        $t->same(200, $r['status'], 'the first page opens on an empty database: ' . substr(strip_tags($r['body']), 0, 160));
+        $t->same(qa13_signature($root, TestDb::DB), qa13_signature($root, 'qa_fresh2'), 'the tables the application built are exactly the tested layout');
+        $t->ok((bool)$fresh->query("SELECT 1 FROM users WHERE role = 'Admin'")->fetchColumn(), 'the admin account was created');
+        $t->ok((bool)$fresh->query("SELECT 1 FROM settings WHERE setting_key = 'schema_version'")->fetchColumn(), 'the layout is remembered, so the next page costs one query');
+
+        $fresh->exec("INSERT INTO branches (name) VALUES ('MAIN')");
+        $r = $call('employee.php', ['method' => 'POST', 'post' => ['action' => 'add', 'first_name' => 'Fresh', 'last_name' => 'Install', 'base_salary' => '500', 'salary_type' => 'daily', 'branch' => 'MAIN',
+                                                                  'position' => 'Cashier', 'phone' => '0917 000 0000'], 'session' => Http::admin()]);
+        $emp = (string)$fresh->query("SELECT employee_code FROM employees WHERE full_name = 'Fresh Install'")->fetchColumn();
         $t->ok($emp !== '', 'the employee was saved in the fresh database');
+        $row = $fresh->query("SELECT e.first_name, e.last_name, e.phone, b.name AS branch, p.title AS position FROM employees e
+                                LEFT JOIN branches b ON b.id = e.branch_id LEFT JOIN positions p ON p.id = e.position_id WHERE e.employee_code = '$emp'")->fetch();
+        $t->same(['Fresh', 'Install', '0917 000 0000', 'MAIN', 'Cashier'], array_values($row), 'first and last name, phone, branch and position (a new position joins the list) are stored');
         $r = $call('api/create-period.php', ['method' => 'POST', 'body' => json_encode(['label' => 'Apr 1-15, 2026', 'start' => '2026-04-01', 'end' => '2026-04-15', 'type' => 'Semi-Monthly']), 'session' => Http::admin()]);
         $pid = (int)($r['json']['id'] ?? 0);
         $t->ok($pid > 0, 'a period: ' . $r['body']);
+        $t->same((int)Http::admin()['admin_id'], (int)$fresh->query("SELECT created_by FROM payroll_periods WHERE id = $pid")->fetchColumn(), 'the period remembers who created it');
         $r = $call('api/save-daily-attendance.php', ['method' => 'POST', 'session' => Http::admin(),
             'body' => json_encode(['period_id' => $pid, 'rows' => [Fixtures::day('Fresh Install', '2026-04-01', 8, 0, 0, 0)]])]);
         $t->same(true, $r['json']['success'] ?? null, $r['body']);
-        $gross = (string)$fresh->query("SELECT gross_pay FROM payroll WHERE period_id = $pid AND emp_id = '$emp'")->fetchColumn();
-        $t->money('500.00', $gross, 'one day at ₱500 on a database built only from sql/database.sql');
-        $root->exec('DROP DATABASE qa_fresh');
+        $gross = (string)$fresh->query("SELECT gross_pay FROM payroll WHERE period_id = $pid AND employee_id = (SELECT id FROM employees WHERE employee_code = '$emp')")->fetchColumn();
+        $t->money('500.00', $gross, 'one day at ₱500 on a database the application built by itself');
+        $root->exec('DROP DATABASE qa_fresh2');
     });
 });

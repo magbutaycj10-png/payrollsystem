@@ -17,11 +17,11 @@ $msg = null;
 
 [$scopeWhere, $scopeParams] = mgrScopeWhere();
 
-$employees = $db->prepare("SELECT e.emp_id, e.full_name, e.branch FROM employees e WHERE e.status='Active' $scopeWhere ORDER BY e.full_name");
+$employees = $db->prepare("SELECT e.id, e.employee_code AS emp_id, e.full_name, COALESCE(br.name, '') AS branch FROM employees e LEFT JOIN branches br ON br.id = e.branch_id WHERE e.status='Active' $scopeWhere ORDER BY e.full_name");
 $employees->execute($scopeParams);
 $employees = $employees->fetchAll();
 
-$openPeriods = $db->query("SELECT * FROM payroll_periods WHERE status='Open' ORDER BY period_start DESC")->fetchAll();
+$openPeriods = $db->query("SELECT * FROM payroll_periods WHERE status='Open' ORDER BY start_date DESC")->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emp_id = trim($_POST['emp_id'] ?? '');
@@ -42,7 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     /* The Open period that holds this day */
     $period = null;
     foreach ($openPeriods as $p) {
-        if ($date >= $p['period_start'] && $date <= $p['period_end']) { $period = $p; break; }
+        if ($date >= $p['start_date'] && $date <= $p['end_date']) { $period = $p; break; }
     }
 
     if (!$emp) {
@@ -54,19 +54,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!$period) {
         $msg = ['type' => 'error', 'text' => 'No open pay period covers ' . date('M d, Y', strtotime($date))
                                            . '. Ask the admin to create or unlock it.'];
-    } elseif ($other = dailyDaysElsewhere($db, (int)$period['id'], ["$emp_id|$date"])) {
-        $msg = ['type' => 'error', 'text' => 'That day is already recorded in ' . reset($other) . '.'];
     } else {
         try {
             $db->prepare("
                 INSERT INTO biometric_daily
-                    (period_id, emp_id, emp_name, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, day_off, entered_by)
-                VALUES (?,?,?,?,?,?,?,NULL,?,?)
+                    (employee_id, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, is_day_off, entered_by)
+                VALUES (?,?,?,?,?,NULL,?,?)
                 ON DUPLICATE KEY UPDATE
-                    emp_name = VALUES(emp_name), hours_worked = VALUES(hours_worked),
+                    hours_worked = VALUES(hours_worked),
                     overtime_hours = VALUES(overtime_hours), late_hours = VALUES(late_hours),
-                    undertime_hours = NULL, day_off = VALUES(day_off), entered_by = VALUES(entered_by)
-            ")->execute([$period['id'], $emp_id, $emp['full_name'], $date, $hours, $ot, $late, $dayOff ? 1 : 0, $m['name']]);
+                    undertime_hours = NULL, is_day_off = VALUES(is_day_off), entered_by = VALUES(entered_by)
+            ")->execute([(int)$emp['id'], $date, $hours, $ot, $late, $dayOff ? 1 : 0, $m['id']]);
 
             /* Only this employee's line is rebuilt, from all their saved days */
             recomputeMonthFrom($db, (int)$period['id'], ['role' => 'manager', 'scope' => [$emp_id]]);
@@ -80,10 +78,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 /* Recent hand-entered days for this manager's employees */
-[$bScope, $bParams] = mgrScopeWhere('b');
+[$bScope, $bParams] = mgrScopeWhere('e');
 $recentManual = $db->prepare("
-    SELECT b.*, pp.period_label FROM biometric_daily b
-    JOIN payroll_periods pp ON pp.id = b.period_id
+    SELECT b.id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours, b.is_day_off AS day_off, b.uploaded_at, ub.full_name AS entered_by,
+           e.employee_code AS emp_id, e.full_name AS emp_name,
+           (SELECT pp.period_label FROM payroll_periods pp WHERE b.att_date BETWEEN pp.start_date AND pp.end_date
+             ORDER BY pp.start_date, pp.id LIMIT 1) AS period_label
+    FROM biometric_daily b
+    JOIN employees e ON e.id = b.employee_id
+    LEFT JOIN users ub ON ub.id = b.entered_by
     WHERE b.entered_by IS NOT NULL $bScope
     ORDER BY b.uploaded_at DESC LIMIT 15
 ");
@@ -188,7 +191,7 @@ $recentManual = $recentManual->fetchAll();
                     <tr>
                         <td><?= htmlspecialchars($r['emp_name'] ?: $r['emp_id']) ?></td>
                         <td><?= date('M d, Y', strtotime($r['att_date'])) ?></td>
-                        <td><span class="badge badge-blue"><?= htmlspecialchars($r['period_label']) ?></span></td>
+                        <td><span class="badge badge-blue"><?= htmlspecialchars((string)$r['period_label']) ?></span></td>
                         <td><?= (int)($r['day_off'] ?? 0) ? '<span class="badge badge-blue">Day off</span>' : number_format($r['hours_worked'], 2) ?></td>
                         <td><?= number_format($r['overtime_hours'], 2) ?></td>
                         <td><?= number_format($r['late_hours'], 2) ?></td>

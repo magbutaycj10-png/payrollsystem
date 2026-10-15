@@ -6,10 +6,11 @@ $activePage = 'print-history';
 $db         = getDB();
 
 $logs = $db->query("
-    SELECT pl.*, pp.period_label
-    FROM print_log pl
+    SELECT pl.id, pl.document_name, pl.document_type, pl.printed_at, pp.period_label, COALESCE(u.full_name, '') AS printed_by
+    FROM print_logs pl
     LEFT JOIN payroll_periods pp ON pl.period_id = pp.id
-    ORDER BY pl.log_datetime DESC
+    LEFT JOIN users u ON u.id = pl.printed_by
+    ORDER BY pl.printed_at DESC
     LIMIT 100
 ")->fetchAll();
 ?>
@@ -52,7 +53,7 @@ $logs = $db->query("
                     <?php foreach ($logs as $i => $l): ?>
                     <tr>
                         <td><?= $i + 1 ?></td>
-                        <td><?= date('M d, Y - h:i A', strtotime($l['log_datetime'])) ?></td>
+                        <td><?= date('M d, Y - h:i A', strtotime($l['printed_at'])) ?></td>
                         <td><?= htmlspecialchars($l['document_name']) ?></td>
                         <td>
                             <span class="badge badge-<?= $l['document_type'] === 'PDF Export' ? 'blue' : 'green' ?>">

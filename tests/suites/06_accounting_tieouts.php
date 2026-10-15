@@ -92,12 +92,16 @@ T::suite('06 · Accounting tie-outs', function () {
                 if ((int)round($b['tax'] * 100) !== Ledger::c($row['withholding_tax'])) $note('er', "$label run $k: stored tax ₱{$row['withholding_tax']} but the same inputs now give ₱" . number_format($b['tax'], 2));
             }
 
-            // 4 ─ attendance mirrors payroll (this case's periods)
+            // 4 ─ every pay line has its attendance_summary row, and the stored basic pay + overtime pay − late/undertime cost ties to gross
             $in = implode(',', array_map('intval', $c['periods']));
-            $q = $db->query("SELECT COUNT(*) FROM payroll p LEFT JOIN attendance a ON a.period_id = p.period_id AND a.emp_id = p.emp_id
-                              WHERE p.period_id IN ($in) AND (a.id IS NULL OR a.gross_pay <> p.gross_pay OR a.withholding_tax <> p.withholding_tax)");
+            $q = $db->query("SELECT COUNT(*) FROM payroll p LEFT JOIN attendance_summary a ON a.period_id = p.period_id AND a.employee_id = p.employee_id
+                              WHERE p.period_id IN ($in) AND a.id IS NULL");
             $t->checks++;
-            if ((int)$q->fetchColumn() !== 0) $note('mirror', "$label: payroll lines without a matching attendance row, or with different gross/tax");
+            if ((int)$q->fetchColumn() !== 0) $note('mirror', "$label: payroll lines without a matching attendance_summary row");
+            $q = $db->query("SELECT COUNT(*) FROM payroll p WHERE p.period_id IN ($in)
+                                AND ABS(p.net_pay - (p.gross_pay + p.bonus_pay - p.total_deductions)) >= 0.005");
+            $t->checks++;
+            if ((int)$q->fetchColumn() !== 0) $note('mirror', "$label: a pay line whose net pay is not gross + bonus - total_deductions");
 
             // 5 ─ recompute is stable and order-independent (first 30 multi-run cases)
             if (count($c['periods']) >= 2 && $stableChecked < 30) {
@@ -128,7 +132,7 @@ T::suite('06 · Accounting tie-outs', function () {
         for ($i = 0; $i < 5000; $i++) {
             $type = $types[mt_rand(0, 2)];
             $period = [['2026-04-01', '2026-04-15', 'Semi-Monthly'], ['2026-04-16', '2026-04-30', 'Semi-Monthly'], ['2026-04-01', '2026-04-30', 'Monthly'], ['2026-04-06', '2026-04-12', 'Weekly']][mt_rand(0, 3)];
-            $ctx = buildPayContext(['period_start' => $period[0], 'period_end' => $period[1], 'period_type' => $period[2]],
+            $ctx = buildPayContext(['start_date' => $period[0], 'end_date' => $period[1], 'period_type' => $period[2]],
                 mt_rand(0, 1) ? ['QA' => ['g' => mt_rand(0, 3000000) / 100, 'basic' => mt_rand(0, 3000000) / 100, 'sss' => mt_rand(0, 90000) / 100, 'philhealth' => 0.0, 'pagibig' => 0.0, 'tax' => mt_rand(0, 100000) / 100]] : [], 1);
             $emp = payEmployee(['emp_id' => 'QA', 'salary_type' => $type, 'base_salary' => mt_rand(30000, 9000000) / 100, 'hours_per_day' => mt_rand(0, 2) ? null : 10,
                                 'sss_amount' => mt_rand(0, 1) ? mt_rand(0, 175000) / 100 : 0, 'philhealth_amount' => mt_rand(0, 1) ? mt_rand(0, 250000) / 100 : 0,

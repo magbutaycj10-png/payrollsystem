@@ -16,8 +16,9 @@ Runs silently on a Windows client PC. On every poll it tries, in order:
 
 Whatever it collects is normalised to (employee_id, punch_time, punch_state)
 and pushed to the Render API endpoint and/or straight into Aiven MySQL.
-Dedup is enforced by a UNIQUE key on (employee_id, punch_time), so re-running
-the sync - or running two PCs at once - can never double-count a punch.
+Dedup is enforced by a UNIQUE key on (device_user_id, punch_time) - the terminal's own
+user number, not employees.id - so re-running the sync - or running two PCs at
+once - can never double-count a punch.
 
 The process never exits on error: every failure path backs off and retries.
 
@@ -1010,7 +1011,7 @@ def db_connect(cfg):
 
 def write_to_db(cfg, punches):
     """UPSERT straight into Aiven. Duplicate punches are dropped by the
-    UNIQUE key on (employee_id, punch_time), so re-syncs are free."""
+    UNIQUE key on (device_user_id, punch_time), so re-syncs are free."""
     conn = None
     try:
         conn, driver = db_connect(cfg)
@@ -1018,12 +1019,12 @@ def write_to_db(cfg, punches):
 
         if driver == "postgres":
             sql = ("INSERT INTO attendance_logs "
-                   "(employee_id, punch_time, punch_state, verify_mode, device_id, source) "
+                   "(device_user_id, punch_time, punch_state, verify_mode, device_id, source) "
                    "VALUES (%s, %s, %s, %s, %s, %s) "
-                   "ON CONFLICT (employee_id, punch_time) DO NOTHING")
+                   "ON CONFLICT (device_user_id, punch_time) DO NOTHING")
         else:
             sql = ("INSERT IGNORE INTO attendance_logs "
-                   "(employee_id, punch_time, punch_state, verify_mode, device_id, source) "
+                   "(device_user_id, punch_time, punch_state, verify_mode, device_id, source) "
                    "VALUES (%s, %s, %s, %s, %s, %s)")
 
         rows = [(p.employee_id, p.punch_time.strftime("%Y-%m-%d %H:%M:%S"),

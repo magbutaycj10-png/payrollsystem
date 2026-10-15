@@ -32,13 +32,13 @@ $people   = 0;
 if ($periodId) {
     $st = $db->prepare("
         SELECT COUNT(*)                              AS rows_total,
-               COALESCE(SUM(a.manager_approved),0)   AS approved,
-               COALESCE(SUM(a.hours_worked),0)       AS hours,
-               COALESCE(SUM(a.overtime_hours),0)     AS ot,
-               COALESCE(SUM(a.late_hours),0)         AS late_h,
-               COUNT(DISTINCT a.emp_id)              AS people
-        FROM attendance a
-        JOIN employees e ON e.emp_id = a.emp_id
+               COALESCE(SUM(a.approval_status = 'Approved'),0) AS approved,
+               COALESCE(SUM(a.total_hours_worked),0)   AS hours,
+               COALESCE(SUM(a.total_overtime_hours),0) AS ot,
+               COALESCE(SUM(a.total_late_hours),0)     AS late_h,
+               COUNT(DISTINCT a.employee_id)         AS people
+        FROM attendance_summary a
+        JOIN employees e ON e.id = a.employee_id
         WHERE a.period_id = ? $scopeWhere
     ");
     $st->execute(array_merge([$periodId], $scopeParams));
@@ -51,21 +51,21 @@ if ($periodId) {
     $people      = (int)($r['people']     ?? 0);
 }
 $approvalPct = $attTotal ? round($attApproved / $attTotal * 100) : 0;
-/* attendance.hours_worked is regular time only - overtime is kept apart from it */
+/* total_hours_worked is regular time only - overtime is kept apart from it */
 $avgHours    = $people ? ($sumHours + $sumOt) / $people : 0;
 $otShare     = ($sumHours + $sumOt) ? round($sumOt / ($sumHours + $sumOt) * 100, 1) : 0;
 
 /* ── Team hours across the last six periods - the trend ───────────────── */
 $trendSt = $db->prepare("
     SELECT pp.period_label,
-           COALESCE(SUM(a.hours_worked),0)   AS hours,
-           COALESCE(SUM(a.overtime_hours),0) AS ot
+           COALESCE(SUM(a.total_hours_worked),0)   AS hours,
+           COALESCE(SUM(a.total_overtime_hours),0) AS ot
     FROM payroll_periods pp
-    JOIN attendance a ON a.period_id = pp.id
-    JOIN employees  e ON e.emp_id    = a.emp_id
+    JOIN attendance_summary a ON a.period_id = pp.id
+    JOIN employees  e ON e.id        = a.employee_id
     WHERE 1=1 $scopeWhere
-    GROUP BY pp.id, pp.period_label, pp.period_start
-    ORDER BY pp.period_start DESC
+    GROUP BY pp.id, pp.period_label, pp.start_date
+    ORDER BY pp.start_date DESC
     LIMIT 6
 ");
 $trendSt->execute($scopeParams);
@@ -75,15 +75,16 @@ $trend = array_reverse($trendSt->fetchAll());
 $teamHours = [];
 if ($periodId) {
     $th = $db->prepare("
-        SELECT e.emp_id, e.full_name, e.position,
-               COALESCE(SUM(a.hours_worked),0)     AS hours,
-               COALESCE(SUM(a.overtime_hours),0)   AS ot,
-               COUNT(a.id)                         AS rows_logged,
-               COALESCE(SUM(a.manager_approved),0) AS approved
+        SELECT e.employee_code AS emp_id, e.full_name, COALESCE(pos.title, '') AS `position`,
+               COALESCE(SUM(a.total_hours_worked),0)   AS hours,
+               COALESCE(SUM(a.total_overtime_hours),0) AS ot,
+               COUNT(a.id)                             AS rows_logged,
+               COALESCE(SUM(a.approval_status = 'Approved'),0) AS approved
         FROM employees e
-        LEFT JOIN attendance a ON a.emp_id = e.emp_id AND a.period_id = ?
+        LEFT JOIN positions pos ON pos.id = e.position_id
+        LEFT JOIN attendance_summary a ON a.employee_id = e.id AND a.period_id = ?
         WHERE 1=1 $scopeWhere
-        GROUP BY e.emp_id, e.full_name, e.position
+        GROUP BY e.id, e.employee_code, e.full_name, pos.title
         ORDER BY hours DESC
         LIMIT 8
     ");
@@ -98,7 +99,7 @@ $leaveSplit = ['Pending' => 0, 'Approved' => 0, 'Rejected' => 0];
 $ls = $db->prepare("
     SELECT lr.status, COUNT(*) AS c
     FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    JOIN employees e ON e.id = lr.employee_id
     WHERE 1=1 $scopeWhere
     GROUP BY lr.status
 ");
@@ -109,7 +110,7 @@ $leaveTotal = array_sum($leaveSplit);
 $ldSt = $db->prepare("
     SELECT lr.date_from, lr.date_to, e.rest_days
     FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    JOIN employees e ON e.id = lr.employee_id
     WHERE lr.status = 'Approved' AND YEAR(lr.date_from) = YEAR(CURDATE()) $scopeWhere
 ");
 $ldSt->execute($scopeParams);
@@ -117,9 +118,9 @@ $leaveDaysYtd = 0;   /* duty days: each employee's days off are not leave */
 foreach ($ldSt->fetchAll() as $l) $leaveDaysYtd += leaveDays($l['date_from'], $l['date_to'], $l['rest_days'])['duty'];
 
 $onLeaveToday = $db->prepare("
-    SELECT lr.emp_name, lr.leave_type, lr.date_to
+    SELECT e.full_name AS emp_name, lr.leave_type, lr.date_to
     FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    JOIN employees e ON e.id = lr.employee_id
     WHERE lr.status = 'Approved' AND CURDATE() BETWEEN lr.date_from AND lr.date_to $scopeWhere
     ORDER BY lr.date_to ASC LIMIT 5
 ");
@@ -127,8 +128,7 @@ $onLeaveToday->execute($scopeParams);
 $onLeaveToday = $onLeaveToday->fetchAll();
 
 $recentLeave = $db->prepare("
-    SELECT lr.* FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    SELECT " . LEAVE_LINE_COLUMNS . " FROM leave_requests lr " . LEAVE_LINE_JOINS . "
     WHERE 1=1 $scopeWhere
     ORDER BY lr.created_at DESC LIMIT 6
 ");

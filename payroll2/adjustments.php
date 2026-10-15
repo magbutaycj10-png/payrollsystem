@@ -5,7 +5,7 @@
  * Bonuses and deductions always belong to ONE payroll period (the "month"),
  * and they are only ever accepted while that period is still Open:
  *
- *   Open    → the entry is written to bonus_deduction_history AND folded into
+ *   Open    → the entry is written to bonus_deductions AND folded into
  *             the employee's payroll row (bonus / other_deductions / net_pay)
  *             in a single transaction, so history and payroll can never drift.
  *   Locked  → refused. The period has been finalized; to correct it you unlock
@@ -24,7 +24,7 @@ $activePage = 'adjustments';
 $db  = getDB();
 $msg = null;
 
-$periods = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 
 /*
  * Working period: an explicit choice wins, otherwise fall back to the newest
@@ -127,12 +127,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $roster = [];
 if ($period_id) {
     $st = $db->prepare(
-        "SELECT p.emp_id, p.emp_name, p.bonus, p.other_deductions, p.net_pay,
-                p.revised_after_finalize, e.position
+        "SELECT e.employee_code AS emp_id, e.full_name AS emp_name, p.bonus_pay AS bonus, p.other_deductions, p.net_pay,
+                p.revised_after_finalize, COALESCE(pos.title, '') AS `position`
            FROM payroll p
-      LEFT JOIN employees e ON e.emp_id = p.emp_id
+           JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN positions pos ON pos.id = e.position_id
           WHERE p.period_id = ?
-       ORDER BY p.emp_name ASC"
+       ORDER BY e.full_name ASC"
     );
     $st->execute([$period_id]);
     $roster = $st->fetchAll();
@@ -146,8 +147,8 @@ $adjBonus = $adjDed = 0.0;
 $adjCount = 0;
 if ($period_id) {
     $st = $db->prepare(
-        "SELECT entry_type, COUNT(*) AS c, SUM(amount) AS s
-           FROM bonus_deduction_history WHERE period_id = ? GROUP BY entry_type"
+        "SELECT type AS entry_type, COUNT(*) AS c, SUM(amount) AS s
+           FROM bonus_deductions WHERE period_id = ? GROUP BY type"
     );
     $st->execute([$period_id]);
     foreach ($st->fetchAll() as $r) {
@@ -252,8 +253,8 @@ if ($period_id) {
                 <?php if ($curPeriod): ?>
                     <span class="badge badge-<?= $isOpen ? 'blue' : 'green' ?>"><?= $isOpen ? 'Open' : 'Finalized' ?></span>
                     <span style="font-size:.82rem;color:#6b7280;">
-                        <?= date('M j', strtotime($curPeriod['period_start'])) ?>
-                        &ndash; <?= date('M j, Y', strtotime($curPeriod['period_end'])) ?>
+                        <?= date('M j', strtotime($curPeriod['start_date'])) ?>
+                        &ndash; <?= date('M j, Y', strtotime($curPeriod['end_date'])) ?>
                         &nbsp;&bull;&nbsp; <?= count($roster) ?> employee(s) on payroll
                         &nbsp;&bull;&nbsp; <?= $adjCount ?> adjustment(s) recorded
                         (bonus &#8369;<?= number_format($adjBonus, 2) ?> / deduction &#8369;<?= number_format($adjDed, 2) ?>)

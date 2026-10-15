@@ -16,61 +16,52 @@
 
 CREATE TABLE IF NOT EXISTS attendance_logs (
     id           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-
-    -- The number as the TERMINAL knows it (e.g. "00001"). Not necessarily
-    -- the payroll emp_id - see biometric_employee_map below.
-    employee_id  VARCHAR(32)  NOT NULL,
-
+    -- The number as the TERMINAL knows it (e.g. "00001"). Not the payroll
+    -- employee (employees.employee_code / employees.id) - see biometric_employee_map below.
+    device_user_id VARCHAR(32) NOT NULL,
     punch_time   DATETIME     NOT NULL,
-
     -- ZKTeco punch states:
     --   0 check-in   1 check-out   2 break-out
     --   3 break-in   4 ot-in       5 ot-out
     punch_state  TINYINT      NOT NULL DEFAULT 0,
-
     -- How the person identified: 0 password, 1 fingerprint, 2 card, ...
     verify_mode  TINYINT      NOT NULL DEFAULT 0,
-
     -- Which terminal, and which transport the agent used to get it.
     device_id    VARCHAR(40)  NOT NULL DEFAULT '',
     source       VARCHAR(16)  NOT NULL DEFAULT 'serial',
-
     -- Flipped to 1 once the row has been folded into biometric_daily.
     processed    TINYINT(1)   NOT NULL DEFAULT 0,
-
     received_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
     PRIMARY KEY (id),
-
     -- THE duplicate guard. One person cannot punch twice in the same second,
     -- so this makes every re-sync idempotent: INSERT IGNORE silently drops
     -- anything already stored. Two PCs syncing the same terminal is safe.
-    UNIQUE KEY uq_punch (employee_id, punch_time),
-
+    UNIQUE KEY uq_attendance_logs_punch (device_user_id, punch_time),
     -- Drives the rollup query (unprocessed rows in date order).
-    KEY idx_unprocessed (processed, punch_time),
-
+    KEY idx_attendance_logs_unprocessed (processed, punch_time),
     -- Date-range scans for a payroll period.
-    KEY idx_punch_time (punch_time)
+    KEY idx_attendance_logs_punch_time (punch_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ---------------------------------------------------------------------
---  Terminal user number  ->  payroll emp_id
+--  Terminal user number  ->  payroll employee (employees.id)
 --
---  The A6 stores users as 00001, 00002... while the payroll tables use
---  whatever emp_id the employee was created with. Without this mapping the
---  rollup falls back to stripping leading zeros, which is right often
---  enough to be dangerous. Populate this table for anyone it is wrong for.
+--  The A6 stores users as 00001, 00002... while the payroll knows its
+--  people by their own employee_code. Without this mapping the rollup falls back
+--  to stripping leading zeros, which is right often enough to be dangerous.
+--  Populate this table for anyone it is wrong for.
+--  (Run after sql/database.sql - it points at the employees table.)
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS biometric_employee_map (
     device_user_id VARCHAR(32) NOT NULL,
-    emp_id         VARCHAR(20) NOT NULL,
+    employee_id    INT         NOT NULL,
     device_id      VARCHAR(40) NOT NULL DEFAULT '',
     created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
     PRIMARY KEY (device_user_id),
-    KEY idx_emp (emp_id)
+    KEY idx_biometric_employee_map_employee (employee_id),
+    CONSTRAINT fk_biometric_employee_map_employee_id FOREIGN KEY (employee_id) REFERENCES employees (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -88,7 +79,6 @@ CREATE TABLE IF NOT EXISTS biometric_agent_state (
     last_punch_time DATETIME     NULL DEFAULT NULL,
     last_sync_at    TIMESTAMP    NULL DEFAULT NULL,
     punches_total   INT UNSIGNED NOT NULL DEFAULT 0,
-
     PRIMARY KEY (device_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -110,9 +100,8 @@ CREATE TABLE IF NOT EXISTS biometric_api_keys (
     active       TINYINT(1)   NOT NULL DEFAULT 1,
     last_used_at TIMESTAMP    NULL DEFAULT NULL,
     created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
     PRIMARY KEY (id),
-    UNIQUE KEY uq_key_hash (key_hash)
+    UNIQUE KEY uq_biometric_api_keys_hash (key_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

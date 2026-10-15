@@ -144,7 +144,7 @@ $marks = [
     </span>
     <div class="ma-chips">
         <?php foreach ($MA['periods'] as $p): ?>
-            <span class="ma-chip <?= $p['status'] === 'Open' ? '' : 'locked' ?>" title="<?= $h($p['period_start'] . ' to ' . $p['period_end']) ?>">
+            <span class="ma-chip <?= $p['status'] === 'Open' ? '' : 'locked' ?>" title="<?= $h($p['start_date'] . ' to ' . $p['end_date']) ?>">
                 <?= $h($p['period_label']) ?> · <?= $p['status'] === 'Open' ? 'Open' : 'Finalized' ?>
             </span>
         <?php endforeach; ?>

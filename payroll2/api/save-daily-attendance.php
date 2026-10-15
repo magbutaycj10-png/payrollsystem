@@ -2,8 +2,8 @@
 /*
  * api/save-daily-attendance.php
  * Receives daily biometric rows from the front-end, upserts them into
- * biometric_daily by (period_id, emp_id, att_date), then re-aggregates all
- * daily records for the period and rewrites the attendance + payroll tables.
+ * biometric_daily by (employee_id, att_date), then re-aggregates all
+ * daily records inside the period's dates and rewrites the attendance_summary + payroll tables.
  *
  * Days accumulate: today's file adds today, tomorrow's file adds tomorrow,
  * and the days already saved stay. A file holding days already saved (the
@@ -40,11 +40,11 @@ if (!$period_id || empty($rows)) {
 uploadPeriodGuard($db, $period_id, $who);
 saveBioLinks($db, $body['bio_links'] ?? [], $who);   /* device report -> employee choices */
 
-/* Registered employees: emp_id => full name and duty-day hours */
+/* Registered employees: emp_id => employees.id, full name and duty-day hours */
 $standard = max(1.0, (float)getSetting('standard_hours', '8'));
 $empData  = [];
-foreach ($db->query("SELECT emp_id, full_name, hours_per_day FROM employees")->fetchAll() as $er) {
-    $empData[$er['emp_id']] = ['full_name' => $er['full_name'],
+foreach ($db->query("SELECT id, employee_code AS emp_id, full_name, hours_per_day FROM employees")->fetchAll() as $er) {
+    $empData[$er['emp_id']] = ['pk' => (int)$er['id'], 'full_name' => $er['full_name'],
                                'day_hours' => (float)$er['hours_per_day'] > 0 ? (float)$er['hours_per_day'] : $standard];
 }
 $autoOt = !empty($body['auto_ot']);
@@ -64,7 +64,7 @@ try {
 
     /* Only days inside the pay period count: a whole-month file uploaded into
        the 16–31 cut-off must not put the 1st–15th into it */
-    $pr = $db->prepare("SELECT period_start, period_end, period_label FROM payroll_periods WHERE id = ?");
+    $pr = $db->prepare("SELECT start_date, end_date, period_label FROM payroll_periods WHERE id = ?");
     $pr->execute([$period_id]);
     $per = $pr->fetch();
     $outsidePeriod = 0;
@@ -77,7 +77,7 @@ try {
 
         /* Validate date format */
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $att_date)) continue;
-        if ($att_date < $per['period_start'] || $att_date > $per['period_end']) { $outsidePeriod++; continue; }
+        if ($att_date < $per['start_date'] || $att_date > $per['end_date']) { $outsidePeriod++; continue; }
 
         /* Name -> the system's own employee ID */
         $emp_id = $resolve('', $emp_name);
@@ -117,30 +117,14 @@ try {
             $hours = $dayHours;
         }
 
-        /* Stored under the registered name, not however the file typed it */
-        $daily["$emp_id|$att_date"] = [$period_id, $emp_id, $empData[$emp_id]['full_name'], $att_date,
+        /* Stored under the employee (employees.id), not however the file typed the name. A day is one row per employee and
+           date, so a day uploaded again - into this period or any other that holds the date - replaces itself and is never
+           paid twice. */
+        $daily["$emp_id|$att_date"] = [$empData[$emp_id]['pk'], $att_date,
                                        round($hours, 2), round($ot, 2), round($late, 2), $under, $off ? 1 : 0];
     }
 
-    /*
-     * A day belongs to one pay period only. If an employee's day is already
-     * saved in another period that covers that date (overlapping periods, or
-     * the file uploaded into the wrong one earlier), it stays there and is
-     * not saved here a second time - otherwise it would be paid twice.
-     * Days re-uploaded into THIS period simply replace themselves (uq_daily).
-     */
-    $elsewhere = [];   /* period label => days not saved because of it */
-    foreach (dailyDaysElsewhere($db, $period_id, array_keys($daily)) as $key => $label) {
-        unset($daily[$key]);
-        $elsewhere[$label] = ($elsewhere[$label] ?? 0) + 1;
-    }
-
     $inserted = count($daily);
-    if ($inserted === 0 && $elsewhere) {
-        jsonResponse(['error' => "These days are already saved in another pay period ("
-            . implode(', ', array_keys($elsewhere)) . "), so nothing was saved again. "
-            . "Upload the file into that period instead."], 409);
-    }
     if ($inserted === 0 && $invalid) {
         $first = reset($invalid);
         jsonResponse(['error' => 'Nothing was saved: ' . count($invalid) . ' day record(s) have hours that cannot be right (e.g. '
@@ -153,54 +137,27 @@ try {
               . ($who['role'] === 'manager' ? ' assigned to you' : ' in Employee Management')
               . ' (e.g. ' . implode(', ', array_slice(array_values($unmatched + $outOfScope), 0, 3)) . ').'
             : ($outsidePeriod
-                ? "None of the file's days fall inside {$per['period_label']} ({$per['period_start']} to {$per['period_end']}). Choose the pay period that matches the file."
+                ? "None of the file's days fall inside {$per['period_label']} ({$per['start_date']} to {$per['end_date']}). Choose the pay period that matches the file."
                 : 'No valid rows found. Check the Name and Date columns.');
         jsonResponse(['error' => $why], 400);
     }
 
     bulkInsert($db,
-        "INSERT INTO biometric_daily (period_id, emp_id, emp_name, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, day_off) VALUES",
-        "(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO biometric_daily (employee_id, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, is_day_off) VALUES",
+        "(?,?,?,?,?,?,?)",
         array_values($daily),
         "ON DUPLICATE KEY UPDATE
-            emp_name       = VALUES(emp_name),
             hours_worked   = VALUES(hours_worked),
             overtime_hours = VALUES(overtime_hours),
             late_hours     = VALUES(late_hours),
             undertime_hours = VALUES(undertime_hours),
-            day_off        = VALUES(day_off),
+            is_day_off     = VALUES(is_day_off),
             entered_by     = NULL");
-    $daysOff = count(array_filter($daily, fn($d) => $d[8] === 1));
+    $daysOff = count(array_filter($daily, fn($d) => $d[6] === 1));
 
-    /*
-     * Days an older upload filed under a biometric number (before that person
-     * was registered) move onto the employee's real ID, so they count again.
-     * UPDATE IGNORE skips a day the employee already has under their real ID;
-     * the DELETE then clears those leftover duplicates. A day the employee
-     * already has in ANOTHER period is not moved either - the same
-     * one-period-per-day rule as the upload itself.
-     */
-    $old = $db->prepare("SELECT DISTINCT emp_id, emp_name FROM biometric_daily WHERE period_id = ?");
-    $old->execute([$period_id]);
-    foreach ($old->fetchAll() as $o) {
-        if (isset($empData[$o['emp_id']])) continue;
-        $sysId = $resolve('', $o['emp_name']);
-        if ($sysId === null || ($scopeSet !== null && !isset($scopeSet[$sysId]))) continue;
-
-        $dates = $db->prepare("SELECT att_date FROM biometric_daily WHERE period_id = ? AND emp_id = ?");
-        $dates->execute([$period_id, $o['emp_id']]);
-        $keys  = array_map(fn($d) => "$sysId|$d", $dates->fetchAll(PDO::FETCH_COLUMN));
-        foreach (dailyDaysElsewhere($db, $period_id, $keys) as $key => $label) {
-            $db->prepare("DELETE FROM biometric_daily WHERE period_id = ? AND emp_id = ? AND att_date = ?")
-               ->execute([$period_id, $o['emp_id'], explode('|', $key, 2)[1]]);
-            $elsewhere[$label] = ($elsewhere[$label] ?? 0) + 1;
-        }
-
-        $db->prepare("UPDATE IGNORE biometric_daily SET emp_id = ?, emp_name = ? WHERE period_id = ? AND emp_id = ?")
-           ->execute([$sysId, $empData[$sysId]['full_name'], $period_id, $o['emp_id']]);
-        $db->prepare("DELETE FROM biometric_daily WHERE period_id = ? AND emp_id = ?")
-           ->execute([$period_id, $o['emp_id']]);
-    }
+    /* (Older uploads could file days under a biometric number instead of an employee, and this is where they were moved onto
+       the employee's real ID. Every day now points at an employees row - the foreign key on biometric_daily.employee_id - so
+       there is nothing left to move.) */
 
     /* ── Step 2: Rebuild the period's payroll from ALL its saved days ──
        Days from earlier uploads stay and count; see recomputePeriodFromDaily() */
@@ -210,10 +167,7 @@ try {
     if ($unmatched) {
         $message .= ' ' . count($unmatched) . ' name(s) in the file match no employee - those rows were not saved.';
     }
-    if ($elsewhere) {
-        $message .= ' ' . array_sum($elsewhere) . ' day record(s) were already saved in '
-                  . implode(', ', array_keys($elsewhere)) . ' and were not counted again.';
-    }
+
     if ($outOfScope) {
         $message .= ' ' . count($outOfScope) . ' employee(s) are not assigned to you - those rows were not saved.';
     }
@@ -231,7 +185,6 @@ try {
         'invalid_count' => count($invalid),
         'message'      => $message,
         'outside_period' => $outsidePeriod,
-        'elsewhere'      => $elsewhere,
         'days_off'       => $daysOff,
     ]);
 

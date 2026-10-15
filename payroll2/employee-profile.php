@@ -14,25 +14,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ephone    = trim($_POST['emergency_phone']    ?? '');
     $erelation = trim($_POST['emergency_relation'] ?? '');
 
-    if ($emp_id) {
-        $db->prepare("INSERT INTO employee_profiles (emp_id,address,phone,emergency_name,emergency_phone,emergency_relation)
-                      VALUES (?,?,?,?,?,?)
-                      ON DUPLICATE KEY UPDATE
-                        address=VALUES(address), phone=VALUES(phone),
-                        emergency_name=VALUES(emergency_name),
-                        emergency_phone=VALUES(emergency_phone),
-                        emergency_relation=VALUES(emergency_relation)")
-           ->execute([$emp_id, $address, $phone, $ename, $ephone, $erelation]);
+    $empPk = $emp_id !== '' ? employeePk($db, $emp_id) : null;
+    if ($empPk) {
+        $db->prepare("UPDATE employees SET address=?, phone=?, emergency_name=?, emergency_phone=?, emergency_relation=? WHERE id=?")
+           ->execute([$address ?: null, $phone ?: null, $ename ?: null, $ephone ?: null, $erelation ?: null, $empPk]);
         $msg = ['type' => 'success', 'text' => 'Profile updated.'];
+    } elseif ($emp_id !== '') {
+        $msg = ['type' => 'error', 'text' => "There is no employee $emp_id - the profile was not saved."];
     }
 }
 
 $employees = $db->query("
-    SELECT e.emp_id, e.full_name, e.branch, e.position,
-           ep.address, ep.phone, ep.emergency_name, ep.emergency_phone, ep.emergency_relation, ep.updated_at
+    SELECT e.employee_code AS emp_id, e.full_name, COALESCE(br.name, '') AS branch, COALESCE(pos.title, '') AS `position`,
+           e.address, e.phone, e.emergency_name, e.emergency_phone, e.emergency_relation,
+           CASE WHEN e.address IS NULL AND e.phone IS NULL AND e.emergency_name IS NULL AND e.emergency_phone IS NULL AND e.emergency_relation IS NULL
+                THEN NULL ELSE e.updated_at END AS updated_at
     FROM employees e
-    LEFT JOIN employee_profiles ep ON ep.emp_id = e.emp_id
-    ORDER BY e.emp_id ASC
+    LEFT JOIN branches br ON br.id = e.branch_id
+    LEFT JOIN positions pos ON pos.id = e.position_id    ORDER BY e.employee_code ASC
+
 ")->fetchAll();
 ?>
 <!DOCTYPE html>

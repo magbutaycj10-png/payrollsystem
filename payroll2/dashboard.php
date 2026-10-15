@@ -8,8 +8,8 @@ $db         = getDB();
 /* Most recent payroll period BY DATE that has payroll - a period entered later for an older month is not "latest" */
 $latestPeriodRow   = $db->query("SELECT pp.id, pp.period_label, pp.status, pp.period_type FROM payroll_periods pp
                                   WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
-                                  ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1")->fetch()
-                  ?: $db->query("SELECT id, period_label, status, period_type FROM payroll_periods ORDER BY period_start DESC, id DESC LIMIT 1")->fetch();
+                                  ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1")->fetch()
+                  ?: $db->query("SELECT id, period_label, status, period_type FROM payroll_periods ORDER BY start_date DESC, id DESC LIMIT 1")->fetch();
 $latestPeriod      = $latestPeriodRow['id']           ?? null;
 $latestPeriodLabel = $latestPeriodRow['period_label'] ?? null;
 /* What one point of the trend below is: a month, a cut-off or a week - the card must say what it predicts */
@@ -21,15 +21,17 @@ $totals = ['headcount'=>0,'total_gross'=>0,'total_net'=>0,'total_tax'=>0,
 if ($latestPeriod) {
     $t = $db->prepare("
         SELECT
-            COUNT(DISTINCT emp_id)              AS headcount,
-            COALESCE(SUM(gross_pay),0)          AS total_gross,
-            COALESCE(SUM(net_pay),0)            AS total_net,
-            COALESCE(SUM(withholding_tax),0)    AS total_tax,
-            COALESCE(SUM(overtime_hours),0)     AS total_ot,
-            COALESCE(SUM(late_hours),0)         AS total_late,
-            COALESCE(SUM(bonus),0)              AS total_bonus,
-            COALESCE(SUM(other_deductions),0)   AS total_ded
-        FROM payroll WHERE period_id = ?
+            COUNT(DISTINCT p.employee_id)         AS headcount,
+            COALESCE(SUM(p.gross_pay),0)          AS total_gross,
+            COALESCE(SUM(p.net_pay),0)            AS total_net,
+            COALESCE(SUM(p.withholding_tax),0)    AS total_tax,
+            COALESCE(SUM(s.total_overtime_hours),0) AS total_ot,
+            COALESCE(SUM(s.total_late_hours),0)   AS total_late,
+            COALESCE(SUM(p.bonus_pay),0)          AS total_bonus,
+            COALESCE(SUM(p.other_deductions),0)   AS total_ded
+        FROM payroll p
+        LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
+        WHERE p.period_id = ?
     ");
     $t->execute([$latestPeriod]);
     $totals = $t->fetch() ?: $totals;
@@ -43,17 +45,17 @@ if ($latestPeriod) {
 /* The SIX MOST RECENT periods (newest first inside, oldest first outside) - the trend is about now, not about the first six ever */
 $monthly = $db->query("
     SELECT * FROM (
-        SELECT pp.id, pp.period_label, pp.period_start,
+        SELECT pp.id, pp.period_label, pp.start_date,
                COALESCE(SUM(p.net_pay),0)   AS total_net,
                COALESCE(SUM(p.gross_pay),0) AS total_gross
         FROM payroll_periods pp
         LEFT JOIN payroll p ON p.period_id = pp.id
         GROUP BY pp.id
         HAVING total_net > 0
-        ORDER BY pp.period_start DESC, pp.id DESC
+        ORDER BY pp.start_date DESC, pp.id DESC
         LIMIT 6
     ) latest
-    ORDER BY period_start ASC, id ASC
+    ORDER BY start_date ASC, id ASC
 ")->fetchAll();
 
 /* Linear regression on the net pay series to forecast the next point (next month / cut-off / week, see $nextWord) */
@@ -76,12 +78,14 @@ if ($n >= 2) {
 $recentPayroll = [];
 if ($latestPeriod) {
     $rq = $db->prepare("
-        SELECT p.emp_id, p.emp_name, p.hours_worked, p.gross_pay, p.bonus,
+        SELECT e.employee_code AS emp_id, e.full_name AS emp_name, COALESCE(s.total_hours_worked, 0) AS hours_worked, p.gross_pay, p.bonus_pay AS bonus,
                p.other_deductions, p.net_pay, p.status, pp.period_label
         FROM payroll p
+        JOIN employees e ON e.id = p.employee_id
         JOIN payroll_periods pp ON p.period_id = pp.id
+        LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
         WHERE p.period_id = ?
-        ORDER BY p.emp_name ASC
+        ORDER BY e.full_name ASC
         LIMIT 8
     ");
     $rq->execute([$latestPeriod]);
@@ -100,7 +104,7 @@ $periodStatus = $latestPeriodRow['status'] ?? null;
 /* a finalized period's status is 'Locked' (payroll_periods.status is Open | Locked) */
 $periodLocked = in_array($periodStatus, ['Locked', 'Finalized'], true);
 if ($latestPeriod) {
-    $q = $db->prepare("SELECT COUNT(*), COALESCE(SUM(manager_approved),0) FROM attendance WHERE period_id = ?");
+    $q = $db->prepare("SELECT COUNT(*), COALESCE(SUM(approval_status = 'Approved'),0) FROM attendance_summary WHERE period_id = ?");
     $q->execute([$latestPeriod]);
     [$attRows, $attApproved] = array_map('intval', $q->fetch(PDO::FETCH_NUM));
 
@@ -121,9 +125,9 @@ $composition = ['net' => 0.0, 'sss' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.
 if ($latestPeriod) {
     $c = $db->prepare("
         SELECT COALESCE(SUM(net_pay),0)          AS net,
-               COALESCE(SUM(sss),0)              AS sss,
-               COALESCE(SUM(philhealth),0)       AS philhealth,
-               COALESCE(SUM(pagibig),0)          AS pagibig,
+               COALESCE(SUM(sss_deduction),0)    AS sss,
+               COALESCE(SUM(philhealth_deduction),0) AS philhealth,
+               COALESCE(SUM(pagibig_deduction),0) AS pagibig,
                COALESCE(SUM(withholding_tax),0)  AS tax,
                COALESCE(SUM(other_deductions),0) AS other
         FROM payroll WHERE period_id = ?
@@ -138,9 +142,11 @@ $totalDeductions = $composition['sss'] + $composition['philhealth'] + $compositi
 $topEarners = [];
 if ($latestPeriod) {
     $te = $db->prepare("
-        SELECT emp_id, emp_name, net_pay, overtime_hours
-        FROM payroll WHERE period_id = ? AND net_pay > 0
-        ORDER BY net_pay DESC LIMIT 5
+        SELECT e.employee_code AS emp_id, e.full_name AS emp_name, p.net_pay, COALESCE(s.total_overtime_hours, 0) AS overtime_hours
+        FROM payroll p JOIN employees e ON e.id = p.employee_id
+        LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
+        WHERE p.period_id = ? AND p.net_pay > 0
+        ORDER BY p.net_pay DESC LIMIT 5
     ");
     $te->execute([$latestPeriod]);
     $topEarners = $te->fetchAll();
@@ -151,11 +157,12 @@ $topNet = $topEarners ? (float)$topEarners[0]['net_pay'] : 0;
 $byBranch = [];
 if ($latestPeriod) {
     $bb = $db->prepare("
-        SELECT CASE WHEN e.branch IS NULL OR e.branch = '' THEN 'Unassigned' ELSE e.branch END AS branch,
-               COUNT(DISTINCT e.emp_id)         AS headcount,
+        SELECT COALESCE(br.name, 'Unassigned')  AS branch,
+               COUNT(DISTINCT e.id)             AS headcount,
                COALESCE(SUM(p.net_pay),0)       AS net
         FROM employees e
-        LEFT JOIN payroll p ON p.emp_id = e.emp_id AND p.period_id = ?
+        LEFT JOIN branches br ON br.id = e.branch_id
+        LEFT JOIN payroll p ON p.employee_id = e.id AND p.period_id = ?
         GROUP BY branch
         ORDER BY net DESC, headcount DESC
         LIMIT 6
@@ -164,9 +171,9 @@ if ($latestPeriod) {
     $byBranch = $bb->fetchAll();
 } else {
     $byBranch = $db->query("
-        SELECT CASE WHEN branch IS NULL OR branch = '' THEN 'Unassigned' ELSE branch END AS branch,
+        SELECT COALESCE(br.name, 'Unassigned') AS branch,
                COUNT(*) AS headcount, 0 AS net
-        FROM employees GROUP BY branch ORDER BY headcount DESC LIMIT 6
+        FROM employees e LEFT JOIN branches br ON br.id = e.branch_id GROUP BY branch ORDER BY headcount DESC LIMIT 6
     ")->fetchAll();
 }
 $branchMaxNet = 0;
@@ -178,17 +185,20 @@ try {
     $activity = $db->query("
         SELECT * FROM (
             SELECT h.created_at AS at,
-                   CONCAT(h.entry_type, ' for ', h.emp_name) AS what,
-                   CONCAT(FORMAT(h.amount, 2), ' by ', COALESCE(NULLIF(h.processed_by,''), 'admin')) AS detail,
-                   h.entry_type AS kind
-            FROM bonus_deduction_history h
+                   CONCAT(h.type, ' for ', he.full_name) AS what,
+                   CONCAT(FORMAT(h.amount, 2), ' by ', COALESCE(hu.full_name, 'admin')) AS detail,
+                   h.type AS kind
+            FROM bonus_deductions h
+            JOIN employees he ON he.id = h.employee_id
+            LEFT JOIN users hu ON hu.id = h.processed_by
             UNION ALL
             SELECT a.created_at AS at,
                    CONCAT(pp.period_label, ' ', a.action) AS what,
-                   COALESCE(NULLIF(a.performed_by,''), 'system') AS detail,
+                   COALESCE(au.full_name, 'system') AS detail,
                    a.action AS kind
             FROM period_audit a
             LEFT JOIN payroll_periods pp ON pp.id = a.period_id
+            LEFT JOIN users au ON au.id = a.performed_by
         ) feed
         ORDER BY at DESC LIMIT 6
     ")->fetchAll();

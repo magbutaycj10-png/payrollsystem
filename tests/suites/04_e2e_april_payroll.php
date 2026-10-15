@@ -23,7 +23,8 @@ function qa_expected(array $emp, array $payloadByRun, array $runs, array $upto):
                                      'late' => sprintf('%.2f', $r['late_hours']), 'under' => $r['undertime_hours'] === null ? null : sprintf('%.2f', $r['undertime_hours']),
                                      'off' => (bool)$r['day_off']];
         }
-        $leave = getDB()->prepare("SELECT date_from, date_to FROM leave_requests WHERE emp_id = ? AND status = 'Approved'");
+        $leave = getDB()->prepare("SELECT lr.date_from, lr.date_to FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id
+                                    WHERE e.employee_code = ? AND lr.status = 'Approved'");
         $leave->execute([$id]);
         $dates = [];
         foreach ($leave->fetchAll() as $l) $dates = array_merge($dates, Ledger::dates($l['date_from'], $l['date_to']));
@@ -171,7 +172,7 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
                 $t->same($row[$col], $after[$k][$emp][$col], "$emp run $k $col");
             }
         }
-        $t->same(5, (int)getDB()->query("SELECT COUNT(*) FROM attendance WHERE period_id = {$S->periods[0]}")->fetchColumn(), 'one attendance row per employee');
+        $t->same(5, (int)getDB()->query("SELECT COUNT(*) FROM attendance_summary WHERE period_id = {$S->periods[0]}")->fetchColumn(), 'one attendance row per employee');
         $verify($t, 1, 'after the re-upload');
     });
 
@@ -207,7 +208,8 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->money('1000.00', $row['bonus']);
         $t->money('500.50', $row['other_deductions']);
         $t->money(Ledger::fmt(Ledger::c((string)$net0) + 100000 - 50050), $row['net_pay'], 'net moved by +1,000.00 − 500.50');
-        $t->same(2, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deduction_history WHERE emp_id = '$id' AND period_id = {$S->periods[0]}")->fetchColumn());
+        $t->same(2, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                                          WHERE e.employee_code = '$id' AND h.period_id = {$S->periods[0]}")->fetchColumn());
         // a re-upload recomputes the engine's figures but keeps the adjustments
         Fixtures::days($S->periods[0], $S->payload[0]);
         $again = Fixtures::payroll($S->periods[0])[$id];
@@ -218,11 +220,11 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
     });
 
     T::test('adjustments refuse zero/negative amounts and employees with no payroll line', function (T $t) use ($S) {
-        $before = (int)getDB()->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn();
+        $before = (int)getDB()->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn();
         Http::page('adjustments.php', ['period_id' => $S->periods[0], 'emp_ids' => [$S->emp['ALMA REYES']], 'entry_type' => 'Bonus', 'amount' => '-50', 'reason_select' => 'x']);
         Http::page('adjustments.php', ['period_id' => $S->periods[0], 'emp_ids' => [$S->emp['ALMA REYES']], 'entry_type' => 'Bonus', 'amount' => '0', 'reason_select' => 'x']);
         Http::page('adjustments.php', ['period_id' => $S->periods[0], 'emp_ids' => ['NOBODY'], 'entry_type' => 'Bonus', 'amount' => '10', 'reason_select' => 'x']);
-        $t->same($before, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn(), 'nothing was recorded');
+        $t->same($before, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn(), 'nothing was recorded');
     });
 
     T::test('finalize cut-off 1: rows become Finalized; uploads and adjustments are then refused', function (T $t) use ($S) {
@@ -237,9 +239,9 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->same(409, $r['status'], 'finalizing twice is refused');
         $up = Fixtures::days($S->periods[0], $S->payload[0]);
         $t->same(403, $up['status'], 'upload into a finalized period is refused: ' . json_encode($up));
-        $adj = (int)getDB()->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn();
+        $adj = (int)getDB()->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn();
         Http::page('adjustments.php', ['period_id' => $S->periods[0], 'emp_ids' => [$S->emp['ALMA REYES']], 'entry_type' => 'Bonus', 'amount' => '50', 'reason_select' => 'late']);
-        $t->same($adj, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn(), 'adjustment into a finalized period is refused');
+        $t->same($adj, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn(), 'adjustment into a finalized period is refused');
         foreach ($snapshot as $emp => $row) {
             $now = Fixtures::payroll($S->periods[0])[$emp];
             $t->same($row['net_pay'], $now['net_pay'], "locked net of $emp unchanged");
@@ -305,7 +307,7 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->same('Semi-Monthly', $res['json']['period_type']);
         $t->same(2, $res['json']['periods_per_month']);
         foreach ($res['json']['data'] as $i => $p) {
-            $q = getDB()->prepare('SELECT SUM(gross_pay) g, SUM(net_pay) n, SUM(bonus) b, SUM(other_deductions) d, SUM(withholding_tax) tx, COUNT(*) c FROM payroll WHERE period_id = ?');
+            $q = getDB()->prepare('SELECT SUM(gross_pay) g, SUM(net_pay) n, SUM(bonus_pay) b, SUM(other_deductions) d, SUM(withholding_tax) tx, COUNT(*) c FROM payroll WHERE period_id = ?');
             $q->execute([$p['id']]);
             $x = $q->fetch();
             $t->money((string)$x['g'], $p['total_gross'], "period {$p['label']} gross");
@@ -319,8 +321,9 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
 
     T::test('manager scope: a manager can only upload for their own employees, and only into open periods', function (T $t) use ($S) {
         $db = getDB();
-        $db->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type) VALUES ('Mgr', 'mgr@test', 'x', 'manager', 'OTHERBRANCH', 'branch')")->execute();
+        $db->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mgr', 'mgr@test', 'x', 'Manager')")->execute();
         $mid = (int)$db->lastInsertId();
+        $db->prepare("INSERT INTO user_scopes (user_id, scope_type, branch_id) VALUES (?, 'Branch', ?)")->execute([$mid, Fixtures::lookup('branches', 'name', 'OTHERBRANCH')]);
         $sess = Http::manager($mid, 'Mgr', 'OTHERBRANCH');
         $open = Fixtures::period('May 1-15, 2026', '2026-05-01', '2026-05-15');
         $r = Fixtures::days($open, [Fixtures::day('ALMA REYES', '2026-05-04', 8)], [], $sess);
@@ -328,7 +331,8 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->same(['ALMA REYES'], $r['out_of_scope'] ?? ['ALMA REYES']);
         $r = Fixtures::days($S->periods[0], [Fixtures::day('ALMA REYES', '2026-04-03', 8)], [], Http::manager($mid, 'Mgr', ''));
         $t->ok(in_array($r['status'], [200, 403], true));
-        $db->prepare("UPDATE users SET branch = '' WHERE id = ?")->execute([$mid]);        // an unscoped manager
+        $db->prepare("DELETE FROM user_scopes WHERE user_id = ?")->execute([$mid]);        // an unscoped manager: one Global grant
+        $db->prepare("INSERT INTO user_scopes (user_id, scope_type) VALUES (?, 'Global')")->execute([$mid]);
         $r = Fixtures::days($S->periods[1], [Fixtures::day('ALMA REYES', '2026-04-30', 8)], [], Http::manager($mid, 'Mgr', ''));
         $t->same(200, $r['status'], 'unscoped manager into an open period');
         $db->exec("UPDATE payroll_periods SET status = 'Locked' WHERE id = " . (int)$S->periods[1]);
@@ -352,6 +356,6 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->same('has_days', $r['json']['error']);
         $r = Http::api('save-attendance.php', ['period_id' => $pid, 'replace_days' => true, 'rows' => [['emp_name' => 'TOTALS PERSON', 'hours_worked' => 120, 'overtime_hours' => 0, 'late_hours' => 0]]]);
         $t->same(true, $r['json']['success'] ?? null);
-        $t->same(0, (int)getDB()->query("SELECT COUNT(*) FROM biometric_daily WHERE period_id = $pid")->fetchColumn(), 'confirmed replace removes the old days');
+        $t->same(0, (int)getDB()->query("SELECT COUNT(*) FROM biometric_daily WHERE att_date BETWEEN '2026-04-01' AND '2026-04-15'")->fetchColumn(), 'confirmed replace removes the old days');
     });
 });

@@ -11,7 +11,7 @@
 
 CREATE TABLE IF NOT EXISTS attendance_logs (
     id           BIGSERIAL    PRIMARY KEY,
-    employee_id  VARCHAR(32)  NOT NULL,
+    device_user_id VARCHAR(32) NOT NULL,
     punch_time   TIMESTAMP    NOT NULL,
     punch_state  SMALLINT     NOT NULL DEFAULT 0,
     verify_mode  SMALLINT     NOT NULL DEFAULT 0,
@@ -21,24 +21,25 @@ CREATE TABLE IF NOT EXISTS attendance_logs (
     received_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 
     -- Makes every re-sync idempotent: ON CONFLICT DO NOTHING drops repeats.
-    CONSTRAINT uq_punch UNIQUE (employee_id, punch_time)
+    CONSTRAINT uq_attendance_logs_punch UNIQUE (device_user_id, punch_time)
 );
 
-CREATE INDEX IF NOT EXISTS idx_unprocessed ON attendance_logs (processed, punch_time);
-CREATE INDEX IF NOT EXISTS idx_punch_time  ON attendance_logs (punch_time);
+CREATE INDEX IF NOT EXISTS idx_attendance_logs_unprocessed ON attendance_logs (processed, punch_time);
+CREATE INDEX IF NOT EXISTS idx_attendance_logs_punch_time  ON attendance_logs (punch_time);
 
 COMMENT ON COLUMN attendance_logs.punch_state IS
     '0 check-in, 1 check-out, 2 break-out, 3 break-in, 4 ot-in, 5 ot-out';
 
 
+-- employee_id = the payroll's employees.id (an integer, as in the MySQL schema)
 CREATE TABLE IF NOT EXISTS biometric_employee_map (
     device_user_id VARCHAR(32) PRIMARY KEY,
-    emp_id         VARCHAR(20) NOT NULL,
+    employee_id    INTEGER     NOT NULL,
     device_id      VARCHAR(40) NOT NULL DEFAULT '',
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_map_emp ON biometric_employee_map (emp_id);
+CREATE INDEX IF NOT EXISTS idx_biometric_employee_map_employee ON biometric_employee_map (employee_id);
 
 
 CREATE TABLE IF NOT EXISTS biometric_agent_state (

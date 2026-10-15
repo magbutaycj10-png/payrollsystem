@@ -6,24 +6,39 @@ $activePage = 'settings';
 $db         = getDB();
 $msg        = null;
 
-/* ── Branch list maintenance ────────────────────────────────────────────
- * Posts under its own action so it never collides with the settings form.
+/* ── Lists: branches, departments and positions ─────────────────────────
+ * Each list posts under its own action ('list' = which one, 'list_action' = add / rename / delete) so it never collides with
+ * the settings form.
  *
- * employees.branch and users.branch store the branch NAME, not an id, so a
- * rename has to carry across to both of them. That happens in one
- * transaction with the branches row: either every reference moves or none
- * does, and the list can never disagree with the employees pointing at it.
+ * Employees, positions and managers point at a row of these lists by its id (branch_id, position_id, department_id), so renaming
+ * one is a single UPDATE and everything assigned to it follows. A row something still points at cannot be deleted.
+ *   'uses' = what is counted (and blocks a delete): label => [table, column that holds the id]
  */
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
-    $action = $_POST['branch_action'];
-    $name   = trim($_POST['branch_name'] ?? '');
-    $bid    = (int)($_POST['branch_id'] ?? 0);
+const SETTINGS_LISTS = [
+    'branch'     => ['table' => 'branches',    'col' => 'name',  'one' => 'branch',
+                     'uses'  => ['employee' => ['employees', 'branch_id'], 'manager' => ['user_scopes', 'branch_id']]],
+    'department' => ['table' => 'departments', 'col' => 'name',  'one' => 'department',
+                     'uses'  => ['position' => ['positions', 'department_id'], 'manager' => ['user_scopes', 'department_id']]],
+    'position'   => ['table' => 'positions',   'col' => 'title', 'one' => 'position',
+                     'uses'  => ['employee' => ['employees', 'position_id']]],
+];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['list_action']) && isset(SETTINGS_LISTS[$_POST['list'] ?? ''])) {
+    $kind   = $_POST['list'];
+    $cfg    = SETTINGS_LISTS[$kind];
+    $action = $_POST['list_action'];
+    $name   = trim($_POST['list_name'] ?? '');
+    $rid    = (int)($_POST['list_id'] ?? 0);
+    $deptId = $kind === 'position' ? ((int)($_POST['department_id'] ?? 0) ?: null) : null;
+    $table  = $cfg['table'];
+    $col    = $cfg['col'];
+    $one    = $cfg['one'];
 
     /* The name this id currently carries - also proves the row exists. */
     $current = null;
-    if ($bid) {
-        $st = $db->prepare("SELECT name FROM branches WHERE id = ?");
-        $st->execute([$bid]);
+    if ($rid) {
+        $st = $db->prepare("SELECT $col FROM $table WHERE id = ?");
+        $st->execute([$rid]);
         $current = $st->fetchColumn();
         if ($current === false) $current = null;
     }
@@ -31,74 +46,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
     try {
         if ($action === 'add') {
             if ($name === '') {
-                $msg = ['type' => 'error', 'text' => 'Enter a branch name.'];
+                $msg = ['type' => 'error', 'text' => "Enter a $one name."];
             } else {
-                $db->prepare("INSERT INTO branches (name) VALUES (?)")->execute([$name]);
-                $msg = ['type' => 'success', 'text' => 'Branch "' . $name . '" added.'];
+                if ($kind === 'position') $db->prepare("INSERT INTO positions (title, department_id) VALUES (?, ?)")->execute([$name, $deptId]);
+                else                      $db->prepare("INSERT INTO $table ($col) VALUES (?)")->execute([$name]);
+                $msg = ['type' => 'success', 'text' => ucfirst($one) . ' "' . $name . '" added.'];
             }
 
         } elseif ($action === 'rename') {
             if ($current === null) {
-                $msg = ['type' => 'error', 'text' => 'That branch no longer exists.'];
+                $msg = ['type' => 'error', 'text' => "That $one no longer exists."];
             } elseif ($name === '') {
-                $msg = ['type' => 'error', 'text' => 'A branch needs a name.'];
-            } elseif ($name === $current) {
+                $msg = ['type' => 'error', 'text' => "A $one needs a name."];
+            } elseif ($name === $current && $kind !== 'position') {
                 $msg = ['type' => 'success', 'text' => 'Nothing to change - the name is already "' . $name . '".'];
             } else {
-                $db->beginTransaction();
-                try {
-                    $db->prepare("UPDATE branches SET name = ? WHERE id = ?")->execute([$name, $bid]);
-
-                    $eSt = $db->prepare("UPDATE employees SET branch = ? WHERE branch = ?");
-                    $eSt->execute([$name, $current]);
-                    $moved = $eSt->rowCount();
-
-                    $mSt = $db->prepare("UPDATE users SET branch = ? WHERE branch = ?");
-                    $mSt->execute([$name, $current]);
-                    $movedMgr = $mSt->rowCount();
-
-                    $db->commit();
-                    $msg = ['type' => 'success', 'text' => sprintf(
-                        'Renamed "%s" to "%s". %d employee(s) and %d manager account(s) moved with it.',
-                        $current, $name, $moved, $movedMgr
-                    )];
-                } catch (PDOException $e) {
-                    $db->rollBack();
-                    throw $e;
-                }
+                if ($kind === 'position') $db->prepare("UPDATE positions SET title = ?, department_id = ? WHERE id = ?")->execute([$name, $deptId, $rid]);
+                else                      $db->prepare("UPDATE $table SET $col = ? WHERE id = ?")->execute([$name, $rid]);
+                $msg = ['type' => 'success', 'text' => $name === $current
+                    ? 'Saved ' . $one . ' "' . $name . '".'
+                    : 'Renamed "' . $current . '" to "' . $name . '". Everything assigned to it moved with it.'];
             }
 
         } elseif ($action === 'delete') {
             if ($current === null) {
-                $msg = ['type' => 'error', 'text' => 'That branch no longer exists.'];
+                $msg = ['type' => 'error', 'text' => "That $one no longer exists."];
             } else {
-                /* Refuse while anything still points at the name - deleting the
-                   row would otherwise strand those employees on a branch that
-                   is no longer in the list. */
-                $c = $db->prepare("SELECT COUNT(*) FROM employees WHERE branch = ?");
-                $c->execute([$current]);
-                $empUse = (int)$c->fetchColumn();
-
-                $c = $db->prepare("SELECT COUNT(*) FROM users WHERE role = 'manager' AND branch = ?");
-                $c->execute([$current]);
-                $mgrUse = (int)$c->fetchColumn();
-
-                if ($empUse || $mgrUse) {
-                    $msg = ['type' => 'error', 'text' => sprintf(
-                        'Cannot delete "%s" - it is still assigned to %d employee(s) and %d manager account(s). Move them to another branch first.',
-                        $current, $empUse, $mgrUse
-                    )];
+                /* Refuse while anything still points at the row - deleting it would strand them */
+                $inUse = [];
+                foreach ($cfg['uses'] as $label => [$useTable, $useCol]) {
+                    $c = $db->prepare("SELECT COUNT(*) FROM $useTable WHERE $useCol = ?");
+                    $c->execute([$rid]);
+                    if ($n = (int)$c->fetchColumn()) $inUse[] = $n . ' ' . $label . ($n === 1 ? '' : 's');
+                }
+                if ($inUse) {
+                    $msg = ['type' => 'error', 'text' => 'Cannot delete "' . $current . '" - it is still assigned to ' . implode(' and ', $inUse) . '. Move them first.'];
                 } else {
-                    $db->prepare("DELETE FROM branches WHERE id = ?")->execute([$bid]);
-                    $msg = ['type' => 'success', 'text' => 'Branch "' . $current . '" deleted.'];
+                    $db->prepare("DELETE FROM $table WHERE id = ?")->execute([$rid]);
+                    $msg = ['type' => 'success', 'text' => ucfirst($one) . ' "' . $current . '" deleted.'];
                 }
             }
         }
 
     } catch (PDOException $e) {
         $msg = ['type' => 'error', 'text' => $e->getCode() === '23000'
-            ? 'A branch called "' . $name . '" already exists.'
-            : 'Could not update the branch list. Please try again.'];
+            ? 'A ' . $one . ' called "' . $name . '" already exists.'
+            : 'Could not update the ' . $one . ' list. Please try again.'];
     }
 
 } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -142,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
     // Admin email update (stored in users table)
     if (!empty($_POST['admin_email_new'])) {
         $newEmail = trim($_POST['admin_email_new']);
-        $db->prepare("UPDATE users SET email=? WHERE role='admin'")->execute([$newEmail]);
+        $db->prepare("UPDATE users SET email=? WHERE role='Admin'")->execute([$newEmail]);
     }
 
     // Admin password change (verified + stored as bcrypt hash in users table)
@@ -151,7 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['branch_action'])) {
         $newPass     = $_POST['new_password'];
         $confirmPass = $_POST['confirm_password'];
 
-        $adminUser = $db->query("SELECT id, password_hash FROM users WHERE role='admin' LIMIT 1")->fetch();
+        $adminUser = $db->query("SELECT id, password_hash FROM users WHERE role='Admin' LIMIT 1")->fetch();
 
         if (!$adminUser || !password_verify($currentPass, $adminUser['password_hash'])) {
             $msg = ['type' => 'error', 'text' => 'Current password is incorrect. Password was not changed.'];
@@ -182,33 +175,36 @@ $bir         = birConfig();   // company letterhead fields, with defaults filled
 $serAR       = birSeriesStatus('AR');   // payslip / receipt numbering
 $serADJ      = birSeriesStatus('ADJ');  // bonus / deduction numbering
 
-/* Branch list plus what each one is currently carrying, so the page can say
-   why a branch cannot be deleted before anyone tries. */
+/* The three lists plus what each row is currently carrying, so the page can say
+   why a row cannot be deleted before anyone tries. */
 $branchRows = $db->query("
     SELECT b.id, b.name,
-           (SELECT COUNT(*) FROM employees e WHERE e.branch = b.name)                        AS emp_count,
-           (SELECT COUNT(*) FROM users u WHERE u.role = 'manager' AND u.branch = b.name)     AS mgr_count
+           (SELECT COUNT(*) FROM employees e WHERE e.branch_id = b.id)          AS emp_count,
+           (SELECT COUNT(*) FROM user_scopes s WHERE s.branch_id = b.id)        AS mgr_count
       FROM branches b
   ORDER BY b.name
 ")->fetchAll();
-
-/* Branch names sitting on employee rows that are not in the list - only
-   possible on data that predates the managed list. Offered for adoption
-   rather than silently ignored. */
-$orphanBranches = $db->query("
-    SELECT DISTINCT TRIM(e.branch) AS name
-      FROM employees e
-     WHERE e.branch IS NOT NULL AND TRIM(e.branch) <> ''
-       AND NOT EXISTS (SELECT 1 FROM branches b WHERE b.name = TRIM(e.branch))
-  ORDER BY name
-")->fetchAll(PDO::FETCH_COLUMN);
-$adminUser   = $db->query("SELECT id, full_name, email, created_at FROM users WHERE role='admin'  LIMIT 1")->fetch();
-$managers    = $db->query("SELECT id, full_name, email, status FROM users WHERE role='manager' ORDER BY full_name")->fetchAll();
+$deptRows = $db->query("
+    SELECT d.id, d.name,
+           (SELECT COUNT(*) FROM positions p WHERE p.department_id = d.id)      AS pos_count,
+           (SELECT COUNT(*) FROM user_scopes s WHERE s.department_id = d.id)    AS mgr_count
+      FROM departments d
+  ORDER BY d.name
+")->fetchAll();
+$posRows = $db->query("
+    SELECT p.id, p.title AS name, p.department_id,
+           (SELECT COUNT(*) FROM employees e WHERE e.position_id = p.id)        AS emp_count
+      FROM positions p
+  ORDER BY p.title
+")->fetchAll();
+$deptChoices = array_column($deptRows, 'name', 'id');
+$adminUser   = $db->query("SELECT id, full_name, email, created_at FROM users WHERE role='Admin'  LIMIT 1")->fetch();
+$managers    = $db->query("SELECT id, full_name, email, status FROM users WHERE role='Manager' ORDER BY full_name")->fetchAll();
 
 $empCount    = $db->query("SELECT COUNT(*) FROM employees")->fetchColumn();
 $payCount    = $db->query("SELECT COUNT(*) FROM payroll")->fetchColumn();
-$histCount   = $db->query("SELECT COUNT(*) FROM bonus_deduction_history")->fetchColumn();
-$logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
+$histCount   = $db->query("SELECT COUNT(*) FROM bonus_deductions")->fetchColumn();
+$logCount    = $db->query("SELECT COUNT(*) FROM print_logs")->fetchColumn();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -514,85 +510,97 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
     </form>
 
-    <!-- Branches - the list every employee and branch-scoped manager picks from.
-         Outside the settings form above: each row posts its own action. -->
+    <?php
+    /*
+     * One card per list (branches, departments, positions) - outside the settings form above, each row posts its own action.
+     *   $kind    which list (SETTINGS_LISTS key)         $rows   id, name, the counts below (and department_id for positions)
+     *   $counts  column of $rows => what is counted (the same words the delete message uses)
+     */
+    $renderList = function (string $kind, string $title, string $singular, string $blurb, array $rows, array $counts, string $footer, bool $withDept = false) use ($deptChoices) {
+        ob_start(); ?>
     <div class="box" style="margin-top:24px;">
         <div class="box-header">
-            <h2>Branches</h2>
-            <span style="font-size:.8rem;color:#6b7280;">
-                <?= count($branchRows) ?> branch<?= count($branchRows) === 1 ? '' : 'es' ?> -
-                offered when adding an employee or scoping a manager
-            </span>
+            <h2><?= htmlspecialchars($title) ?></h2>
+            <span style="font-size:.8rem;color:#6b7280;"><?= count($rows) ?> <?= htmlspecialchars($singular) ?><?= count($rows) === 1 ? '' : 's' ?> - <?= htmlspecialchars($blurb) ?></span>
         </div>
         <div class="box-body">
 
             <form method="POST" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px;">
-                <input type="hidden" name="branch_action" value="add">
+                <input type="hidden" name="list" value="<?= $kind ?>">
+                <input type="hidden" name="list_action" value="add">
                 <div class="form-group" style="flex:1;min-width:220px;max-width:340px;">
-                    <label>New Branch Name</label>
-                    <input type="text" name="branch_name" class="form-control" placeholder="e.g. Main Branch" required>
+                    <label>New <?= htmlspecialchars(ucfirst($singular)) ?> Name</label>
+                    <input type="text" name="list_name" class="form-control" required>
                 </div>
-                <button type="submit" class="btn btn-primary">Add Branch</button>
+                <?php if ($withDept): ?>
+                <div class="form-group" style="min-width:180px;">
+                    <label>Department <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
+                    <select name="department_id" class="form-control">
+                        <option value="">-</option>
+                        <?php foreach ($deptChoices as $did => $dname): ?><option value="<?= (int)$did ?>"><?= htmlspecialchars($dname) ?></option><?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-primary">Add <?= htmlspecialchars(ucfirst($singular)) ?></button>
             </form>
-
-            <?php if (!empty($orphanBranches)): ?>
-            <div class="alert alert-warn" style="margin-bottom:16px;">
-                <?= count($orphanBranches) ?> branch name(s) already on employee records are not in this list:
-                <strong><?= htmlspecialchars(implode(', ', $orphanBranches)) ?></strong>.
-                Add them above to manage them here.
-            </div>
-            <?php endif; ?>
 
             <div class="table-wrap">
                 <table class="data-table">
                     <thead>
                         <tr>
-                            <th>Branch</th>
-                            <th>Employees</th>
-                            <th>Managers</th>
-                            <th style="width:1%;white-space:nowrap;">Rename</th>
+                            <th><?= htmlspecialchars(ucfirst($singular)) ?></th>
+                            <?php foreach ($counts as $label): ?><th><?= htmlspecialchars(ucfirst($label)) ?>s</th><?php endforeach; ?>
+                            <th style="width:1%;white-space:nowrap;"><?= $withDept ? 'Rename / department' : 'Rename' ?></th>
                             <th style="width:1%;"></th>
                         </tr>
                     </thead>
                     <tbody>
-                    <?php if (empty($branchRows)): ?>
-                        <tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:24px;">
-                            No branches yet. Add the first one above.
+                    <?php if (empty($rows)): ?>
+                        <tr><td colspan="<?= 3 + count($counts) ?>" style="text-align:center;color:#9ca3af;padding:24px;">
+                            No <?= htmlspecialchars($singular) ?>s yet. Add the first one above.
                         </td></tr>
                     <?php else: ?>
-                        <?php foreach ($branchRows as $b): ?>
-                        <?php $inUse = (int)$b['emp_count'] + (int)$b['mgr_count']; ?>
+                        <?php foreach ($rows as $r): ?>
+                        <?php
+                        $inUse = 0; $who = [];
+                        foreach ($counts as $col => $label) {
+                            $n = (int)$r[$col];
+                            $inUse += $n;
+                            if ($n) $who[] = $n . ' ' . $label . ($n === 1 ? '' : 's');
+                        } ?>
                         <tr>
-                            <td style="font-weight:600;"><?= htmlspecialchars($b['name']) ?></td>
-                            <td><?= (int)$b['emp_count'] ?></td>
-                            <td><?= (int)$b['mgr_count'] ?></td>
+                            <td style="font-weight:600;"><?= htmlspecialchars($r['name']) ?></td>
+                            <?php foreach ($counts as $col => $label): ?><td><?= (int)$r[$col] ?></td><?php endforeach; ?>
                             <td>
                                 <form method="POST" style="display:flex;gap:6px;align-items:center;">
-                                    <input type="hidden" name="branch_action" value="rename">
-                                    <input type="hidden" name="branch_id" value="<?= (int)$b['id'] ?>">
-                                    <input type="text" name="branch_name" class="form-control"
+                                    <input type="hidden" name="list" value="<?= $kind ?>">
+                                    <input type="hidden" name="list_action" value="rename">
+                                    <input type="hidden" name="list_id" value="<?= (int)$r['id'] ?>">
+                                    <input type="text" name="list_name" class="form-control"
                                            style="min-width:170px;padding:6px 10px;font-size:.84rem;"
-                                           value="<?= htmlspecialchars($b['name']) ?>" required>
+                                           value="<?= htmlspecialchars($r['name']) ?>" required>
+                                    <?php if ($withDept): ?>
+                                    <select name="department_id" class="form-control" style="padding:6px 10px;font-size:.84rem;">
+                                        <option value="">-</option>
+                                        <?php foreach ($deptChoices as $did => $dname): ?>
+                                        <option value="<?= (int)$did ?>" <?= (int)($r['department_id'] ?? 0) === (int)$did ? 'selected' : '' ?>><?= htmlspecialchars($dname) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <?php endif; ?>
                                     <button type="submit" class="btn btn-ghost btn-sm">Save</button>
                                 </form>
                             </td>
                             <td>
                                 <?php if ($inUse): ?>
-                                    <?php
-                                    /* Spell out why there is no Delete button */
-                                    $who = array_filter([
-                                        (int)$b['emp_count'] ? (int)$b['emp_count'] . ' employee' . ((int)$b['emp_count'] === 1 ? '' : 's') : '',
-                                        (int)$b['mgr_count'] ? (int)$b['mgr_count'] . ' manager' . ((int)$b['mgr_count'] === 1 ? '' : 's') : '',
-                                    ]); ?>
                                     <span style="font-size:.76rem;color:#6b7280;line-height:1.35;display:inline-block;max-width:170px;">
-                                        Can&rsquo;t delete - <?= implode(' and ', $who) ?> assigned.
-                                        Move them to another branch first.
+                                        Can&rsquo;t delete - <?= htmlspecialchars(implode(' and ', $who)) ?> assigned.
                                     </span>
                                 <?php else: ?>
                                     <form method="POST"
-                                          onsubmit="return confirm('Delete the branch &quot;<?= htmlspecialchars($b['name'], ENT_QUOTES) ?>&quot;?');">
-                                        <input type="hidden" name="branch_action" value="delete">
-                                        <input type="hidden" name="branch_id" value="<?= (int)$b['id'] ?>">
+                                          onsubmit="return confirm('Delete &quot;<?= htmlspecialchars($r['name'], ENT_QUOTES) ?>&quot;?');">
+                                        <input type="hidden" name="list" value="<?= $kind ?>">
+                                        <input type="hidden" name="list_action" value="delete">
+                                        <input type="hidden" name="list_id" value="<?= (int)$r['id'] ?>">
                                         <button type="submit" class="btn btn-red btn-sm">Delete</button>
                                     </form>
                                 <?php endif; ?>
@@ -604,12 +612,21 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
                 </table>
             </div>
 
-            <p style="font-size:.78rem;color:#9ca3af;margin-top:12px;">
-                Renaming a branch also updates every employee and manager account assigned to it.
-                A branch can only be deleted once nothing is assigned to it.
-            </p>
+            <p style="font-size:.78rem;color:#9ca3af;margin-top:12px;"><?= htmlspecialchars($footer) ?></p>
         </div>
     </div>
+    <?php return ob_get_clean(); };
+
+    echo $renderList('branch', 'Branches', 'branch', 'offered when adding an employee or scoping a manager', $branchRows,
+                     ['emp_count' => 'employee', 'mgr_count' => 'manager'],
+                     'Renaming a branch also updates every employee and manager assigned to it. A branch can only be deleted once nothing is assigned to it.');
+    echo $renderList('department', 'Departments', 'department', 'group positions, and can be handed to a manager', $deptRows,
+                     ['pos_count' => 'position', 'mgr_count' => 'manager'],
+                     'A manager can be given a whole department (Managers). A department can only be deleted once no position and no manager uses it.');
+    echo $renderList('position', 'Positions', 'position', 'the job titles offered when adding an employee', $posRows,
+                     ['emp_count' => 'employee'],
+                     'A new position typed on an employee is added here by itself. A position can only be deleted once no employee has it.', true);
+    ?>
 
     <!-- Account Storage - shows exactly where each account type lives in the DB -->
     <div class="box" style="margin-top:24px;">
@@ -621,7 +638,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
             <!-- Admin account -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:8px;">
-                Admin - <code style="font-weight:400;">users.role = 'admin'</code>
+                Admin - <code style="font-weight:400;">users.role = 'Admin'</code>
             </p>
             <?php if ($adminUser): ?>
             <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:12px 16px;border-radius:8px;border:1px solid #e5e7eb;background:#f9fafb;margin-bottom:20px;">
@@ -648,7 +665,7 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
             <!-- Manager accounts -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:8px;">
-                Managers - <code style="font-weight:400;">users.role = 'manager'</code>
+                Managers - <code style="font-weight:400;">users.role = 'Manager'</code>
                 &nbsp;<a href="managers.php" style="font-size:.75rem;font-weight:400;color:#3b82f6;">Manage &rarr;</a>
             </p>
             <?php if (empty($managers)): ?>
@@ -684,12 +701,12 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_log")->fetchColumn();
 
             <!-- Earner note -->
             <p style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#6b7280;margin-bottom:6px;">
-                Earners (employees with portal access) - <code style="font-weight:400;">users.role = 'earner'</code>
+                Employees with portal access - <code style="font-weight:400;">users.role = 'Employee'</code>
                 &nbsp;<a href="employee.php" style="font-size:.75rem;font-weight:400;color:#3b82f6;">Manage &rarr;</a>
             </p>
             <p style="font-size:.85rem;color:#6b7280;margin-bottom:20px;">
                 Set or revoke access per employee in the <a href="employee.php">Employees</a> page.
-                Each earner's <code>users.emp_id</code> links their portal account to the <code>employees</code> table for payroll data.
+                Each employee account's <code>users.employee_id</code> links their portal account to the <code>employees</code> table for payroll data.
             </p>
 
         </div>

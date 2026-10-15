@@ -173,6 +173,10 @@ final class TestDb
             $cmd[] = '--mysqlx=OFF';
             $cmd[] = '--default-authentication-plugin=mysql_native_password';   // PHP's driver, loopback, no TLS
             // (name resolution stays on: --initialize-insecure creates root@localhost, which 127.0.0.1 only matches that way)
+            // PAYROLL_TEST_SQL_MODE runs everything under another sql_mode - the live server's, e.g. Aiven's ANSI list (ANSI_QUOTES: a
+            // double-quoted word is a column, not text; PIPES_AS_CONCAT; IGNORE_SPACE) - so SQL that only MySQL's default mode accepts shows up
+            $mode = getenv('PAYROLL_TEST_SQL_MODE');
+            if ($mode !== false && $mode !== '') $cmd[] = '--sql-mode=' . $mode;
         } else {
             $cmd[] = '--skip-name-resolve';
             // MariaDB cannot see that a column depends on the primary key, so ONLY_FULL_GROUP_BY would reject valid queries

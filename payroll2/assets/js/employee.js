@@ -14,7 +14,7 @@ function openModal() {
     document.getElementById('modalTitle').textContent   = 'Add Employee';
     document.getElementById('formAction').value         = 'add';
     document.getElementById('formId').value             = '';
-    ['f_name', 'f_pos', 'f_branch', 'f_email', 'f_hired', 'f_portal_pass',
+    ['f_first', 'f_last', 'f_pos', 'f_branch', 'f_email', 'f_hired', 'f_portal_pass',
      'f_address', 'f_phone', 'f_ename', 'f_ephone', 'f_erelation']
         .forEach(id => document.getElementById(id).value = '');
     document.getElementById('f_emp_id').value       = _nextEmpId;
@@ -35,7 +35,8 @@ function editEmp(e) {
     document.getElementById('formId').value              = e.id;
     document.getElementById('f_emp_id').value            = e.emp_id;
     document.getElementById('f_emp_id').readOnly         = true;
-    document.getElementById('f_name').value              = e.full_name;
+    document.getElementById('f_first').value             = e.first_name;
+    document.getElementById('f_last').value              = e.last_name   || '';
     document.getElementById('f_pos').value               = e.position    || '';
     document.getElementById('f_branch').value              = e.branch   || '';
     document.getElementById('f_email').value             = e.email        || '';

@@ -20,6 +20,7 @@ final class Fixtures
     public static function reset(array $settings = []): void
     {
         TestDb::truncateAll();
+        self::lookup('branches', 'name', 'MAIN');          /* the branch the employee forms in the tests post */
         foreach (self::DEFAULT_SETTINGS as $k => $v) setSetting($k, $v);
         foreach ($settings as $k => $v) setSetting($k, (string)$v);
     }
@@ -37,11 +38,33 @@ final class Fixtures
                'branch' => 'MAIN', 'base_salary' => '480.00', 'salary_type' => 'daily', 'date_hired' => null, 'rest_days' => '7',
                'hours_per_day' => null, 'sss_amount' => '0.00', 'philhealth_amount' => '0.00', 'pagibig_amount' => '0.00', 'tax_amount' => '0.00',
                'status' => 'Active'];
-        self::db()->prepare("INSERT INTO employees (emp_id, full_name, position, branch, base_salary, salary_type, date_hired, rest_days,
-                             hours_per_day, sss_amount, philhealth_amount, pagibig_amount, tax_amount, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-            ->execute([$e['emp_id'], $e['full_name'], $e['position'], $e['branch'], $e['base_salary'], $e['salary_type'], $e['date_hired'],
+        [$first, $last] = self::splitName($e['full_name']);
+        self::db()->prepare("INSERT INTO employees (employee_code, first_name, last_name, position_id, branch_id, base_salary, salary_type, date_hired, rest_days,
+                             hours_per_day, sss_amount, philhealth_amount, pagibig_amount, tax_amount, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+            ->execute([$e['emp_id'], $first, $last, self::lookup('positions', 'title', $e['position']), self::lookup('branches', 'name', $e['branch']),
+                       $e['base_salary'], $e['salary_type'], $e['date_hired'],
                        $e['rest_days'], $e['hours_per_day'], $e['sss_amount'], $e['philhealth_amount'], $e['pagibig_amount'], $e['tax_amount'], $e['status']]);
         return $e['emp_id'];
+    }
+
+    /** "Juan dela Cruz" -> ['Juan', 'dela Cruz']: the last word is the last name (full_name is first_name + last_name again) */
+    public static function splitName(string $name): array
+    {
+        $name = trim($name);
+        $at = strrpos($name, ' ');
+        return $at === false ? [$name, ''] : [substr($name, 0, $at), substr($name, $at + 1)];
+    }
+
+    /** id of the row of a lookup table (branches.name, positions.title) with this text - created when it is new; null for a blank text */
+    public static function lookup(string $table, string $col, ?string $text): ?int
+    {
+        $text = trim((string)$text);
+        if ($text === '') return null;
+        $db = self::db();
+        $db->prepare("INSERT IGNORE INTO $table ($col) VALUES (?)")->execute([$text]);
+        $st = $db->prepare("SELECT id FROM $table WHERE $col = ?");
+        $st->execute([$text]);
+        return (int)$st->fetchColumn();
     }
 
     /** create a pay period through api/create-period.php; returns its id */
@@ -80,7 +103,8 @@ final class Fixtures
     /** payroll rows of a period keyed by emp_id (DECIMAL columns come back as exact strings) */
     public static function payroll(int $periodId): array
     {
-        $st = self::db()->prepare('SELECT * FROM payroll WHERE period_id = ? ORDER BY emp_id');
+        $st = self::db()->prepare('SELECT ' . PAY_LINE_COLUMNS . ' FROM payroll p ' . PAY_LINE_JOINS . '
+                                    WHERE p.period_id = ? ORDER BY e.employee_code');
         $st->execute([$periodId]);
         $out = [];
         foreach ($st->fetchAll() as $r) $out[$r['emp_id']] = $r;
@@ -90,8 +114,9 @@ final class Fixtures
     public static function leave(string $empId, string $from, string $to, string $status = 'Approved'): int
     {
         $db = self::db();
-        $db->prepare("INSERT INTO leave_requests (emp_id, emp_name, leave_type, date_from, date_to, status) VALUES (?,?,?,?,?,?)")
-           ->execute([$empId, $empId, 'Vacation', $from, $to, $status]);
+        $db->prepare("INSERT INTO leave_requests (employee_id, leave_type, date_from, date_to, status)
+                      SELECT id, ?, ?, ?, ? FROM employees WHERE employee_code = ?")
+           ->execute(['Vacation', $from, $to, $status, $empId]);
         return (int)$db->lastInsertId();
     }
 
@@ -106,7 +131,7 @@ final class Fixtures
 
     public static function empRow(string $empId): array
     {
-        $st = self::db()->prepare('SELECT * FROM employees WHERE emp_id = ?');
+        $st = self::db()->prepare('SELECT ' . EMPLOYEE_COLUMNS . ' FROM employees e ' . EMPLOYEE_JOINS . ' WHERE e.employee_code = ?');
         $st->execute([$empId]);
         return $st->fetch();
     }

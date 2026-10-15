@@ -37,10 +37,8 @@ $ctx = [
 /* Record every generated document in the print audit trail. */
 function logPrintDoc(PDO $db, string $name, string $type = 'Physical Print', ?int $periodId = null): void {
     try {
-        if (session_status() === PHP_SESSION_NONE) session_start();
-        $who = trim($_SESSION['admin'] ?? '') ?: 'Admin';
-        $db->prepare('INSERT INTO print_log (document_name, document_type, period_id, printed_by) VALUES (?,?,?,?)')
-           ->execute([$name, $type, $periodId ?: null, $who]);
+        $db->prepare('INSERT INTO print_logs (document_name, document_type, period_id, printed_by) VALUES (?,?,?,?)')
+           ->execute([$name, $type, $periodId ?: null, currentUserId()]);
     } catch (PDOException $e) { /* auditing must never block a print */ }
 }
 
@@ -55,23 +53,21 @@ if ($doc === 'payslip') {
     $withSig   = ($_GET['sig'] ?? '1') !== '0';
 
     $select = "
-        SELECT p.*, pp.period_label, pp.period_start, pp.period_end,
-               e.position, e.branch,
+        SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date,
                (SELECT ps.signature_data
                   FROM payslip_signatures ps
                  WHERE ps.payroll_id = p.id
                AND (ps.net_signed IS NULL OR ABS(ps.net_signed - p.net_pay) < 0.005)
               ORDER BY ps.signed_at DESC LIMIT 1) AS signature_data
-          FROM payroll p
+          FROM payroll p " . PAY_LINE_JOINS . "
           JOIN payroll_periods pp ON pp.id = p.period_id
-     LEFT JOIN employees e        ON e.emp_id = p.emp_id
     ";
 
     if ($payrollId) {
         $st = $db->prepare($select . ' WHERE p.id = ?');
         $st->execute([$payrollId]);
     } else {
-        $st = $db->prepare($select . ' WHERE p.period_id = ? ORDER BY p.emp_name ASC');
+        $st = $db->prepare($select . ' WHERE p.period_id = ? ORDER BY e.full_name ASC');
         $st->execute([$periodId]);
     }
     $rows = $st->fetchAll();
@@ -104,7 +100,8 @@ if ($doc === 'summary') {
     $per->execute([$periodId]);
     $per = $per->fetch();
 
-    $st = $db->prepare('SELECT * FROM payroll WHERE period_id = ? ORDER BY emp_name ASC');
+    $st = $db->prepare('SELECT ' . PAY_LINE_COLUMNS . ' FROM payroll p ' . PAY_LINE_JOINS . '
+                         WHERE p.period_id = ? ORDER BY e.full_name ASC');
     $st->execute([$periodId]);
     $rows = $st->fetchAll();
 
@@ -126,8 +123,8 @@ if ($doc === "adjustment") {
     if (!in_array($copies, ["both", "employee", "company"], true)) $copies = "both";
 
     $st = $db->prepare("
-        SELECT h.*, pp.period_label
-          FROM bonus_deduction_history h
+        SELECT " . ADJ_LINE_COLUMNS . ", pp.period_label
+          FROM bonus_deductions h " . ADJ_LINE_JOINS . "
      LEFT JOIN payroll_periods pp ON pp.id = h.period_id
          WHERE h.id = ?
     ");
@@ -158,14 +155,14 @@ if ($doc === "adjustments") {
     $fRev    = ($_GET["rev"] ?? "") === "1";
 
     $where = "1=1"; $params = [];
-    if ($fEmp    !== "") { $where .= " AND h.emp_id = ?";     $params[] = $fEmp; }
+    if ($fEmp    !== "") { $where .= " AND e.employee_code = ?"; $params[] = $fEmp; }
     if ($fPeriod)        { $where .= " AND h.period_id = ?";  $params[] = $fPeriod; }
-    if ($fType   !== "") { $where .= " AND h.entry_type = ?"; $params[] = $fType; }
+    if ($fType   !== "") { $where .= " AND h.type = ?";       $params[] = $fType; }
     if ($fRev)           { $where .= " AND h.finalize_cycle > 0"; }
 
     $st = $db->prepare("
-        SELECT h.*, pp.period_label
-          FROM bonus_deduction_history h
+        SELECT " . ADJ_LINE_COLUMNS . ", pp.period_label
+          FROM bonus_deductions h " . ADJ_LINE_JOINS . "
      LEFT JOIN payroll_periods pp ON pp.id = h.period_id
          WHERE $where
       ORDER BY h.entry_date DESC, h.id DESC
@@ -222,10 +219,11 @@ if ($doc === "adjustments") {
  * ----------------------------------------------------------- */
 if ($doc === 'printlog') {
     $logs = $db->query("
-        SELECT pl.*, pp.period_label
-          FROM print_log pl
+        SELECT pl.id, pl.document_name, pl.document_type, pl.printed_at, pp.period_label, COALESCE(u.full_name, '') AS printed_by
+          FROM print_logs pl
      LEFT JOIN payroll_periods pp ON pl.period_id = pp.id
-      ORDER BY pl.log_datetime DESC
+     LEFT JOIN users u ON u.id = pl.printed_by
+      ORDER BY pl.printed_at DESC
          LIMIT 200
     ")->fetchAll();
 
@@ -233,7 +231,7 @@ if ($doc === 'printlog') {
     foreach ($logs as $i => $l) {
         $body .= '<tr>
             <td>' . ($i + 1) . '</td>
-            <td>' . birEsc(date('M j, Y g:i A', strtotime($l['log_datetime']))) . '</td>
+            <td>' . birEsc(date('M j, Y g:i A', strtotime($l['printed_at']))) . '</td>
             <td>' . birEsc($l['document_name']) . '</td>
             <td>' . birEsc($l['document_type']) . '</td>
             <td>' . birEsc($l['period_label'] ?? '') . '</td>
@@ -256,7 +254,8 @@ if ($doc === 'printlog') {
  * doc=leaves - leave request register
  * ----------------------------------------------------------- */
 if ($doc === 'leaves') {
-    $rows = $db->query("SELECT * FROM leave_requests ORDER BY created_at DESC LIMIT 300")->fetchAll();
+    $rows = $db->query("SELECT " . LEAVE_LINE_COLUMNS . " FROM leave_requests lr " . LEAVE_LINE_JOINS . "
+                         ORDER BY lr.created_at DESC LIMIT 300")->fetchAll();
 
     $body = '';
     foreach ($rows as $i => $r) {

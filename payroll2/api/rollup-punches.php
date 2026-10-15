@@ -42,7 +42,7 @@ if (!$period_id) {
 }
 
 /* ── Period window ────────────────────────────────────────────── */
-$pStmt = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
+$pStmt = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
 $pStmt->execute([$period_id]);
 $period = $pStmt->fetch();
 
@@ -50,8 +50,8 @@ if (!$period) {
     jsonResponse(['ok' => false, 'error' => 'Unknown period_id'], 404);
 }
 
-$startDate = $period['period_start'];
-$endDate   = $period['period_end'];
+$startDate = $period['start_date'];
+$endDate   = $period['end_date'];
 
 /* ── Shift rules ──────────────────────────────────────────────── */
 $shiftStart    = getSetting('shift_start',    '08:00');
@@ -62,13 +62,14 @@ $standardHours = (float)getSetting('standard_hours', '8');
 /* ── Employee lookup + terminal-number mapping ─────────────────── */
 $employees = [];
 $dayHours  = [];   /* emp_id => that employee's duty day (10 for a 10-hour shift) */
-foreach ($db->query("SELECT emp_id, full_name, hours_per_day FROM employees")->fetchAll() as $row) {
+foreach ($db->query("SELECT employee_code AS emp_id, full_name, hours_per_day FROM employees")->fetchAll() as $row) {
     $employees[(string)$row['emp_id']] = $row['full_name'];
     $dayHours[(string)$row['emp_id']]  = (float)$row['hours_per_day'] > 0 ? (float)$row['hours_per_day'] : $standardHours;
 }
 
 $map = [];
-foreach ($db->query("SELECT device_user_id, emp_id FROM biometric_employee_map")->fetchAll() as $row) {
+foreach ($db->query("SELECT m.device_user_id, e.employee_code AS emp_id FROM biometric_employee_map m
+                       JOIN employees e ON e.id = m.employee_id")->fetchAll() as $row) {
     $map[(string)$row['device_user_id']] = (string)$row['emp_id'];
 }
 
@@ -89,10 +90,10 @@ function resolveEmpId(string $deviceUserId, array $map, array $employees): ?stri
 
 /* ── Pull the period's punches ────────────────────────────────── */
 $punchStmt = $db->prepare(
-    "SELECT employee_id, punch_time, punch_state
+    "SELECT device_user_id, punch_time, punch_state
        FROM attendance_logs
       WHERE punch_time >= ? AND punch_time < DATE_ADD(?, INTERVAL 1 DAY)
-      ORDER BY employee_id, punch_time"
+      ORDER BY device_user_id, punch_time"
 );
 $punchStmt->execute([$startDate, $endDate]);
 
@@ -104,10 +105,10 @@ $punchCount  = 0;
 foreach ($punchStmt as $row) {
     $punchCount++;
 
-    $empId = resolveEmpId((string)$row['employee_id'], $map, $employees);
+    $empId = resolveEmpId((string)$row['device_user_id'], $map, $employees);
     if ($empId === null) {
         // Report it once, with a count, so the operator can add a mapping.
-        $key = (string)$row['employee_id'];
+        $key = (string)$row['device_user_id'];
         $unmatched[$key] = ($unmatched[$key] ?? 0) + 1;
         continue;
     }
@@ -194,8 +195,8 @@ foreach ($unmatched as $deviceUserId => $count) {
 jsonResponse([
     'ok'           => true,
     'period_id'    => $period_id,
-    'period_start' => $startDate,
-    'period_end'   => $endDate,
+    'start_date' => $startDate,
+    'end_date'   => $endDate,
     'punches'      => $punchCount,
     'days'         => count($rows),
     'rows'         => $rows,

@@ -35,6 +35,11 @@ A payroll system for a Philippine small business - built for **L&N Pharmacy** - 
 3. Copy `secrets.bat.example` to `secrets.bat` and fill in the database host, port, name, user and password (and put the CA certificate next to it as `ca.pem` if the host needs SSL).
 4. Double-click `launch.vbs` → <http://localhost:8765>. The first admin is created from `ADMIN_INITIAL_PASSWORD` (or the default, which the app makes you change at first sign-in and refuses in production).
 
+**A database from before 2026-10-15** has two updates to take, in this order; each keeps every record, and until they have run the app shows "The database needs a one-time update" and changes nothing (see the [changelog](CHANGELOG.md)):
+
+1. its tables carry the text `emp_id` instead of `employee_id` → run [`payroll2/sql/migrate-employee-id.sql`](payroll2/sql/migrate-employee-id.sql) in DBeaver - Part A, check its report, then Part B (instructions at the top of the file); [`rollback-employee-id.sql`](payroll2/sql/rollback-employee-id.sql) undoes it;
+2. then the **standard layout** (14 tables: `first_name` / `last_name`, lists of branches, departments and positions, `user_scopes`, `attendance_summary` ...) → run [`payroll2/sql/migrate-standard-schema.sql`](payroll2/sql/migrate-standard-schema.sql) in DBeaver (**Alt+X**, answer "Stop" to any error); it checks that every record and every peso arrived before it removes the old tables, and running it twice changes nothing.
+
 ## Deploy (Docker / Render)
 
 The [`Dockerfile`](Dockerfile) builds `php:8.2-apache` with the app as the web root, PHP errors hidden from visitors, and the code-only folders (`includes`, `sql`, `tools`) blocked. Set `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` and the CA certificate (Secret File `ca.pem`, or the text in `DB_SSL_CA_PEM`) on the host. Nothing private is in the repository.
@@ -47,7 +52,7 @@ tests\run-tests.bat --suite=13       one suite (13 = 13th month pay)
 tests\run-tests.bat --mutation-check inject bugs on purpose; the suite must catch each one
 ```
 
-* **~220 tests / ~1 million checks.** Every figure is compared with an independent integer-centavo ledger: the law's tables at every boundary (kept as the reference for the amounts you type), a thousand generated pay runs with random typed amounts, **your real timesheets** (the typed SSS and PhilHealth reproduce every deduction in all eight sheets to the centavo), the forecast models and the forecast **page** in a real browser DOM, what the upload page sends, and every entry point's limits.
+* **~236 tests / ~1 million checks.** Every figure is compared with an independent integer-centavo ledger: the law's tables at every boundary (kept as the reference for the amounts you type), a thousand generated pay runs with random typed amounts, **your real timesheets** (the typed SSS and PhilHealth reproduce every deduction in all eight sheets to the centavo), the forecast models and the forecast **page** in a real browser DOM, what the upload page sends, and every entry point's limits.
 * [`tests/AUDIT_FINDINGS.md`](tests/AUDIT_FINDINGS.md) - the QA / BIR / accountant audit (19 defects found and fixed, with the numbers).
 * [`tests/dbeaver_checks.sql`](tests/dbeaver_checks.sql) - 27 read-only queries to run on the **live** database in DBeaver: payslips that don't foot, months whose SSS / PhilHealth / Pag-IBIG / tax are not the employee's typed amount, impossible hours, bonuses over ₱90,000, overtime below the legal minimum, 13th month over-paid …
 
@@ -55,6 +60,7 @@ tests\run-tests.bat --mutation-check inject bugs on purpose; the suite must catc
 
 ```
 payroll2/      the application (PHP)        sql/database.sql  the base tables
+                                            sql/migrate-employee-id.sql / rollback-employee-id.sql  the 2026-10-15 database update
 agent/         biometric terminal → payroll sync agent (Python)
 docker/ Dockerfile docker-start.sh          deployment
 tests/         the test suite, the audit, the DBeaver queries

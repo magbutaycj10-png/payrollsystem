@@ -6,6 +6,7 @@ $activePage = 'leave';
 $db  = getDB();
 $e   = emp();
 $msg = null;
+$empPk = (int)(employeePk($db, (string)$e['id']) ?? 0);    /* employees.id - what leave requests point at */
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submit') {
     $type      = $_POST['leave_type'] ?? '';
@@ -20,12 +21,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
     $overlap = null;
     if ($isDate($date_from) && $isDate($date_to)) {
         $ov = $db->prepare("SELECT date_from, date_to, status FROM leave_requests
-                             WHERE emp_id = ? AND status IN ('Pending','Approved') AND date_from <= ? AND date_to >= ? LIMIT 1");
-        $ov->execute([$e['id'], $date_to, $date_from]);
+                             WHERE employee_id = ? AND status IN ('Pending','Approved') AND date_from <= ? AND date_to >= ? LIMIT 1");
+        $ov->execute([$empPk, $date_to, $date_from]);
         $overlap = $ov->fetch();
     }
 
-    if (!in_array($type, $validTypes) || !$date_from || !$date_to) {
+    if (!$empPk) {
+        $msg = ['type' => 'error', 'text' => 'Your employee record could not be found. Please ask the admin.'];
+    } elseif (!in_array($type, $validTypes) || !$date_from || !$date_to) {
         $msg = ['type' => 'error', 'text' => 'Please fill in all required fields.'];
     } elseif (!$isDate($date_from) || !$isDate($date_to)) {
         $msg = ['type' => 'error', 'text' => 'Please choose valid dates.'];
@@ -36,14 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'submi
               . date('M d', strtotime($overlap['date_from'])) . ($overlap['date_to'] !== $overlap['date_from'] ? '–' . date('M d, Y', strtotime($overlap['date_to'])) : ', ' . date('Y', strtotime($overlap['date_from'])))
               . ' that covers some of these days.'];
     } else {
-        $empName = $db->prepare("SELECT full_name FROM employees WHERE emp_id=?");
-        $empName->execute([$e['id']]);
-        $empName = $empName->fetchColumn();
-
         $db->prepare("
-            INSERT INTO leave_requests (emp_id, emp_name, leave_type, date_from, date_to, reason)
-            VALUES (?,?,?,?,?,?)
-        ")->execute([$e['id'], $empName, $type, $date_from, $date_to, $reason]);
+            INSERT INTO leave_requests (employee_id, leave_type, date_from, date_to, reason)
+            VALUES (?,?,?,?,?)
+        ")->execute([$empPk, $type, $date_from, $date_to, $reason]);
 
         $msg = ['type' => 'success', 'text' => 'Leave request submitted. Your manager will review it.'];
     }
@@ -67,18 +66,18 @@ $isDate   = fn($d) => $d !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d) === 1
 $dateFrom = $isDate($dateFrom) ? $dateFrom : '';
 $dateTo   = $isDate($dateTo)   ? $dateTo   : '';
 
-$where  = ['emp_id = ?'];
-$params = [$e['id']];
+$where  = ['lr.employee_id = ?'];
+$params = [$empPk];
 /* A request matches the range when its leave dates overlap it */
-if ($dateFrom !== '')  { $where[] = "date_to   >= ?"; $params[] = $dateFrom; }
-if ($dateTo   !== '')  { $where[] = "date_from <= ?"; $params[] = $dateTo; }
-if ($status !== 'All') { $where[] = "status = ?";     $params[] = $status; }
-if ($type   !== 'All') { $where[] = "leave_type = ?"; $params[] = $type; }
+if ($dateFrom !== '')  { $where[] = "lr.date_to   >= ?"; $params[] = $dateFrom; }
+if ($dateTo   !== '')  { $where[] = "lr.date_from <= ?"; $params[] = $dateTo; }
+if ($status !== 'All') { $where[] = "lr.status = ?";     $params[] = $status; }
+if ($type   !== 'All') { $where[] = "lr.leave_type = ?"; $params[] = $type; }
 
 $requests = $db->prepare("
-    SELECT * FROM leave_requests
+    SELECT " . LEAVE_LINE_COLUMNS . " FROM leave_requests lr " . LEAVE_LINE_JOINS . "
     WHERE " . implode(' AND ', $where) . "
-    ORDER BY created_at DESC
+    ORDER BY lr.created_at DESC
 ");
 $requests->execute($params);
 $requests = $requests->fetchAll();
@@ -86,7 +85,7 @@ $requests = $requests->fetchAll();
 $hasFilters = $dateFrom !== '' || $dateTo !== '' || $status !== 'All' || $type !== 'All';
 
 /* This employee's weekly day(s) off - leave on those days is not counted */
-$myRestDays = $db->prepare("SELECT rest_days FROM employees WHERE emp_id = ?");
+$myRestDays = $db->prepare("SELECT rest_days FROM employees WHERE employee_code = ?");
 $myRestDays->execute([$e['id']]);
 $myRestDays = $myRestDays->fetchColumn() ?: null;
 

@@ -9,15 +9,21 @@ T::suite('00 · Test rig', function () {
         $t->same('payroll_test', (string)getDB()->query('SELECT DATABASE()')->fetchColumn());
     });
 
-    T::test('the app created the rest of its schema (applySchemaPatches)', function (T $t) {
+    T::test('the database has the standard layout and the app is ready to use it (applySchemaPatches)', function (T $t) {
         $have = getDB()->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
-        foreach (['users', 'leave_requests', 'biometric_daily', 'period_audit', 'document_series', 'payslip_signatures'] as $tbl) {
+        foreach (['branches', 'departments', 'positions', 'employees', 'users', 'user_scopes', 'payroll_periods', 'biometric_daily', 'attendance_summary',
+                  'leave_requests', 'bonus_deductions', 'payroll', 'payslip_signatures', 'print_logs', 'period_audit', 'document_series'] as $tbl) {
             $t->ok(in_array($tbl, $have, true), "table $tbl exists");
         }
+        foreach (['employee_profiles', 'manager_employees', 'attendance', 'bonus_deduction_history', 'print_log'] as $tbl) {
+            $t->ok(!in_array($tbl, $have, true), "the older table $tbl is gone");
+        }
         $cols = getDB()->query("SHOW COLUMNS FROM payroll")->fetchAll(PDO::FETCH_COLUMN);
-        foreach (['undertime_hours', 'undertime_deduction', 'days_off', 'absent_deduction', 'revised_after_finalize'] as $c) {
+        foreach (['basic_pay', 'overtime_pay', 'bonus_pay', 'sss_deduction', 'tardy_undertime_deduction', 'absence_deduction', 'total_deductions', 'revised_after_finalize'] as $c) {
             $t->ok(in_array($c, $cols, true), "payroll.$c exists");
         }
+        $t->ok((bool)getDB()->query("SELECT 1 FROM users WHERE role = 'Admin'")->fetchColumn(), 'the admin account was created');
+        $t->same(null, schemaLayoutProblem(getDB()), 'the app finds no layout problem');
     });
 
     T::test('an endpoint can be called end to end (create period → upload a day → payroll row)', function (T $t) {

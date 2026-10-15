@@ -24,6 +24,14 @@ final class Scenario
     {
         $db = getDB();
         $n = ++self::$seq;
+
+        /* A scenario owns the dates of its runs. Many cases use the same dates, and a day belongs to EVERY pay period that holds its date,
+           so the periods (with their pay lines) and the days an earlier case left on these dates are cleared first. (The application refuses
+           overlapping periods; only a test that writes periods straight into the database can make them.) Other months stay. */
+        foreach ($spec['runs'] as $r) {
+            $db->prepare('DELETE FROM payroll_periods WHERE start_date <= ? AND end_date >= ?')->execute([$r['end'], $r['start']]);
+            $db->prepare('DELETE FROM biometric_daily WHERE att_date BETWEEN ? AND ?')->execute([$r['start'], $r['end']]);
+        }
         $cfg = ($spec['cfg'] ?? []) + ['ot_rate' => '45'];
         $cfg['timing'] = ($cfg['timing'] ?? []) + Ledger::TIMING;          // when each monthly amount is taken: first | split | second
 
@@ -40,21 +48,22 @@ final class Scenario
         $periods = [];
         $runs = [];
         foreach ($spec['runs'] as $i => $r) {
-            $db->prepare("INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES (?,?,?,?, 'Open')")
+            $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES (?,?,?,?, 'Open')")
                ->execute(["QA $n run $i", $r['start'], $r['end'], $r['type']]);
             $periods[$i] = (int)$db->lastInsertId();
             $runs[$i] = ['start' => $r['start'], 'end' => $r['end'], 'type' => $r['type']];
         }
 
-        // day rows, filed under the run that holds the date
-        $ins = $db->prepare("INSERT INTO biometric_daily (period_id, emp_id, emp_name, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, day_off)
-                             VALUES (?,?,?,?,?,?,?,?,?)");
+        // day rows: one per date, and only dates that a run holds (the run that holds the date picks it up)
+        $ins = $db->prepare("INSERT INTO biometric_daily (employee_id, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, is_day_off)
+                             VALUES (?,?,?,?,?,?,?)");
         foreach ($spec['days'] as $date => $d) {
             foreach ($runs as $i => $r) {
                 if ($date < $r['start'] || $date > $r['end']) continue;
                 $off = !empty($d['off']);
-                $ins->execute([$periods[$i], $empId, $emp['full_name'], $date, $off ? 0 : ($d['h'] ?? 0), $off ? 0 : ($d['ot'] ?? 0),
+                $ins->execute([(int)$emp['id'], $date, $off ? 0 : ($d['h'] ?? 0), $off ? 0 : ($d['ot'] ?? 0),
                                $off ? 0 : ($d['late'] ?? 0), $off ? null : ($d['under'] ?? null), $off ? 1 : 0]);
+                break;
             }
         }
         foreach (['Approved' => $spec['leave'] ?? [], 'Pending' => $spec['pending'] ?? [], 'Rejected' => $spec['rejected'] ?? []] as $status => $dates) {

@@ -15,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
         $pr = $pr->fetch();
 
         if ($pr) {
-            [$ok, $message] = savePayslipSignature($db, $pr, (string)($data['period_label'] ?? ''), (string)$data['signature_data']);
+            [$ok, $message] = savePayslipSignature($db, $pr, (string)$data['signature_data']);
             jsonResponse(['ok' => $ok, 'message' => $message], $ok ? 200 : 409);
         }
         jsonResponse(['ok' => false, 'message' => 'Payroll record not found.'], 404);
@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     jsonResponse(['ok' => false, 'message' => 'Invalid request.'], 400);
 }
 
-$periods  = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods  = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 $period_id = (int)($_GET['period'] ?? defaultPeriodId($db, $periods));
 $payroll_id = (int)($_GET['payroll_id'] ?? 0);
 
@@ -33,12 +33,12 @@ foreach ($periods as $p) { if ($p['id'] == $period_id) { $curPeriod = $p; break;
 $rows = [];
 if ($period_id) {
     $st = $db->prepare("
-        SELECT p.*, ps.id AS sig_id, ps.signed_at
-        FROM payroll p
+        SELECT " . PAY_LINE_COLUMNS . ", ps.id AS sig_id, ps.signed_at
+        FROM payroll p " . PAY_LINE_JOINS . "
         /* only a signature for the current net pay counts (see signatureCurrent) */
         LEFT JOIN payslip_signatures ps ON ps.payroll_id = p.id
              AND (ps.net_signed IS NULL OR ABS(ps.net_signed - p.net_pay) < 0.005)
-        WHERE p.period_id = ? ORDER BY p.emp_name ASC
+        WHERE p.period_id = ? ORDER BY e.full_name ASC
     ");
     $st->execute([$period_id]);
     $rows = $st->fetchAll();

@@ -33,7 +33,7 @@ $where  = [];
 $params = $scopeParams;
 
 if ($q !== '') {
-    $where[]  = "(lr.emp_name LIKE ? OR lr.emp_id LIKE ?)";
+    $where[]  = "(e.full_name LIKE ? OR e.employee_code LIKE ?)";
     $params[] = "%$q%";
     $params[] = "%$q%";
 }
@@ -46,9 +46,8 @@ if ($type   !== 'All') { $where[] = "lr.leave_type = ?"; $params[] = $type; }
 $whereSql = $where ? ' AND ' . implode(' AND ', $where) : '';
 
 $st = $db->prepare("
-    SELECT lr.*, e.branch, e.position, e.rest_days
-    FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    SELECT " . LEAVE_FULL_COLUMNS . "
+    FROM leave_requests lr " . LEAVE_FULL_JOINS . "
     WHERE 1=1 $scopeWhere $whereSql
     ORDER BY lr.date_from DESC, lr.id DESC
     LIMIT 500

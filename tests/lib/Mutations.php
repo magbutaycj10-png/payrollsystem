@@ -61,13 +61,13 @@ final class Mutations
 
             // ---- 13th month pay, the shared adjustment code, the Home page, the shipped schema
             'M37' => ['13th month: a half centavo rounds down',                  $h, "intdiv(2 * \$r['sum'] + 12, 24)", "intdiv(\$r['sum'], 12)", '13', 'fixed'],
-            'M38' => ['13th month: overtime counted as basic pay',               $h, "SUM(p.gross_pay - p.ot_late_adj) AS basic", "SUM(p.gross_pay) AS basic", '13', 'fixed'],
-            'M39' => ['13th month: payments already made are not counted',       $h, "WHERE h.entry_type = 'Bonus' AND h.reason LIKE '13th Month Pay%'", "WHERE h.entry_type = 'Deduction' AND h.reason LIKE '13th Month Pay%'", '13', 'fixed'],
+            'M38' => ['13th month: overtime counted as basic pay',               $h, "SUM(p.basic_pay) AS basic", "SUM(p.gross_pay) AS basic", '13', 'fixed'],
+            'M39' => ['13th month: payments already made are not counted',       $h, "WHERE h.type = 'Bonus' AND h.reason LIKE '13th Month Pay%'", "WHERE h.type = 'Deduction' AND h.reason LIKE '13th Month Pay%'", '13', 'fixed'],
             'M40' => ['13th month: more than the balance may be paid',           'thirteenth-month.php', "if (\$n > \$row['balance'] + 0.004)", "if (\$n > \$row['balance'] + 1000000000)", '13', 'fixed'],
             'M41' => ['13th month: divided by 13 instead of 12',                 $h, "intdiv(2 * \$r['sum'] + 12, 24)", "intdiv(2 * \$r['sum'] + 13, 26)", '13', 'fixed'],
-            'M42' => ['13th month: a month is the month a period ENDS in',       $h, "GROUP BY p.emp_id, MONTH(pp.period_start)", "GROUP BY p.emp_id, MONTH(pp.period_end)", '13', 'fixed'],
+            'M42' => ['13th month: a month is the month a period ENDS in',       $h, "GROUP BY e.id, e.employee_code, MONTH(pp.start_date)", "GROUP BY e.id, e.employee_code, MONTH(pp.end_date)", '13', 'fixed'],
             'M43' => ['Home page: a Locked period is not "finalized" (D-19)',    'home.php', "\$periodLocked = in_array(\$latestPeriod['status'] ?? '', ['Locked', 'Finalized'], true);", "\$periodLocked = (\$latestPeriod['status'] ?? '') === 'Finalized';", '13', 'fixed'],
-            'M44' => ['database.sql: a column differs from the tested schema',   'sql/database.sql', "hours_per_day     DECIMAL(4,2) NULL DEFAULT NULL,", "hours_per_day     DECIMAL(4,1) NULL DEFAULT NULL,", '13', 'fixed'],
+            'M44' => ['database.sql: a column differs from the tested schema',   'sql/database.sql', "hours_per_day      DECIMAL(4,2)  NULL DEFAULT NULL,", "hours_per_day      DECIMAL(4,1)  NULL DEFAULT NULL,", '13', 'fixed'],
             'M45' => ['The audit trail of a correction states the wrong total',   $h, "\"\$type totalling PHP \" . number_format(\$total, 2)", "\"\$type totalling PHP \" . number_format(\$total + 1, 2)", '13', 'fixed'],
 
             // ---- SSS / PhilHealth / Pag-IBIG / tax as the employee's own typed monthly amounts (2026-10-10)

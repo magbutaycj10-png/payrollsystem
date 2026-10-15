@@ -124,7 +124,7 @@ try {
         if ($per['status'] !== 'Open') {
             jsonResponse(['error' => $per['period_label'] . ' is finalized. Unlock it first, then recompute.'], 409);
         }
-        $days = $db->prepare('SELECT COUNT(*) FROM biometric_daily WHERE period_id = ?');
+        $days = $db->prepare('SELECT COUNT(*) FROM biometric_daily b JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date WHERE pp.id = ?');
         $days->execute([$period_id]);
         if ((int)$days->fetchColumn() === 0) {
             jsonResponse(['error' => $per['period_label'] . ' has no day-by-day records to recompute from (it was built from a totals file). Upload the file again instead.'], 400);

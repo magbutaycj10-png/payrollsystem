@@ -43,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /* Try admin login first */
-    $st = $db->prepare("SELECT id, full_name, password_hash FROM users WHERE email = ? AND role = 'admin' LIMIT 1");
+    $st = $db->prepare("SELECT id, full_name, password_hash FROM users WHERE email = ? AND role = 'Admin' LIMIT 1");
     $st->execute([$email]);
     $admin = $st->fetch();
 
@@ -73,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     /* Check if the credentials belong to a manager - log them in directly */
-    $st2 = $db->prepare("SELECT id, full_name, branch, password_hash FROM users WHERE email = ? AND role = 'manager' AND status = 'Active' LIMIT 1");
+    $st2 = $db->prepare("SELECT id, full_name, password_hash FROM users WHERE email = ? AND role = 'Manager' AND status = 'Active' LIMIT 1");
     $st2->execute([$email]);
     $mgr = $st2->fetch();
     if ($mgr && password_verify($password, $mgr['password_hash'])) {
@@ -83,13 +83,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['mgr_logged_in'] = true;
         $_SESSION['mgr_id']        = $mgr['id'];
         $_SESSION['mgr_name']      = $mgr['full_name'];
-        $_SESSION['mgr_branch']      = $mgr['branch'];
+        /* the branch the manager handles, for page headings (blank when it is not one branch) */
+        $bst = $db->prepare("SELECT b.name FROM user_scopes s JOIN branches b ON b.id = s.branch_id
+                              WHERE s.user_id = ? AND s.scope_type = 'Branch' ORDER BY s.id LIMIT 1");
+        $bst->execute([$mgr['id']]);
+        $_SESSION['mgr_branch']    = (string)($bst->fetchColumn() ?: '');
         header('Location: /manager/dashboard.php');
         exit;
     }
 
     /* Check if the credentials belong to an employee - log them in directly */
-    $st3 = $db->prepare("SELECT id, emp_id, full_name, password_hash FROM users WHERE email = ? AND role = 'earner' AND status = 'Active' LIMIT 1");
+    $st3 = $db->prepare("SELECT u.id, e.employee_code AS emp_id, u.full_name, u.password_hash FROM users u JOIN employees e ON e.id = u.employee_id
+                          WHERE u.email = ? AND u.role = 'Employee' AND u.status = 'Active' LIMIT 1");
     $st3->execute([$email]);
     $earner = $st3->fetch();
     if ($earner && password_verify($password, $earner['password_hash'])) {
@@ -98,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['last_seen']     = time();
         $_SESSION['emp_logged_in'] = true;
         $_SESSION['emp_id']        = $earner['emp_id'];
+        $_SESSION['emp_user_id']   = $earner['id'];
         $_SESSION['emp_name']      = $earner['full_name'];
         header('Location: /employee/dashboard.php');
         exit;

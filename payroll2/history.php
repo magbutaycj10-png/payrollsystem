@@ -5,8 +5,8 @@ requireAuth();
 $activePage = 'history';
 $db = getDB();
 
-$employees = $db->query("SELECT emp_id, full_name FROM employees ORDER BY full_name ASC")->fetchAll();
-$periods   = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$employees = $db->query("SELECT employee_code AS emp_id, full_name FROM employees ORDER BY full_name ASC")->fetchAll();
+$periods   = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 
 $fEmp    = $_GET['emp_id']    ?? '';
 $fPeriod = (int)($_GET['period_id'] ?? 0);
@@ -16,12 +16,13 @@ $fRev    = ($_GET['rev'] ?? '') === '1';
 
 $where  = '1=1';
 $params = [];
-if ($fEmp)    { $where .= ' AND emp_id = ?';      $params[] = $fEmp; }
-if ($fPeriod) { $where .= ' AND period_id = ?';   $params[] = $fPeriod; }
-if ($fType)   { $where .= ' AND entry_type = ?';  $params[] = $fType; }
-if ($fRev)    { $where .= ' AND finalize_cycle > 0'; }
+if ($fEmp)    { $where .= ' AND e.employee_code = ?'; $params[] = $fEmp; }
+if ($fPeriod) { $where .= ' AND h.period_id = ?';   $params[] = $fPeriod; }
+if ($fType)   { $where .= ' AND h.type = ?';        $params[] = $fType; }
+if ($fRev)    { $where .= ' AND h.finalize_cycle > 0'; }
 
-$st = $db->prepare("SELECT * FROM bonus_deduction_history WHERE $where ORDER BY entry_date DESC, id DESC LIMIT 300");
+$st = $db->prepare("SELECT " . ADJ_LINE_COLUMNS . " FROM bonus_deductions h " . ADJ_LINE_JOINS . "
+                     WHERE $where ORDER BY h.entry_date DESC, h.id DESC LIMIT 300");
 $st->execute($params);
 $history   = $st->fetchAll();
 $periodMap = array_column($periods, 'period_label', 'id');

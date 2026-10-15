@@ -121,7 +121,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money('1500.00', $row['bonus'], 'bonus 1,000.50 + 499.50');
         $t->money('200.25', $row['other_deductions'], 'deduction');
         $t->money($net0 + 150000 - 20025, $row['net_pay'], 'net = before + 1,500.00 − 200.25');
-        $st = getDB()->prepare("SELECT entry_type, amount FROM bonus_deduction_history WHERE emp_id = ? ORDER BY id");
+        $st = getDB()->prepare("SELECT h.type AS entry_type, h.amount FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                                 WHERE e.employee_code = ? ORDER BY h.id");
         $st->execute([$e]);
         $t->same([['Bonus', '1000.50'], ['Bonus', '499.50'], ['Deduction', '200.25']], array_map(fn($r) => [$r['entry_type'], $r['amount']], $st->fetchAll()), 'history keeps each entry');
     });
@@ -175,7 +176,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('tax-exempt', $r['body'], 'the page says why');
         $t->contains('Bonus Over', $r['body'], 'and for whom');
         $t->contains('Record anyway', $r['body'], 'and offers to record it anyway');
-        $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deduction_history WHERE emp_id = '$over'")->fetchColumn(), 'no history row for the held-back bonus');
+        $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                                          WHERE e.employee_code = '$over'")->fetchColumn(), 'no history row for the held-back bonus');
 
         // what the "Record anyway" button re-sends: ONLY the held-back employee, with the confirmation
         qa_adjust($p2, [$over], 'Bonus', '10000', ['confirm_over_exempt' => '1']);
@@ -183,7 +185,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money('10000.00', $apr[$over]['bonus'], 'confirmed: recorded');
         $t->money('10000.00', $apr[$under]['bonus'], 'nobody else got it twice');
         $t->money('10000.00', $apr[$exact]['bonus'], 'nobody else got it twice (exact)');
-        $t->same(2, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deduction_history WHERE emp_id = '$over'")->fetchColumn(), 'history: 85,000 and 10,000');
+        $t->same(2, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                                          WHERE e.employee_code = '$over'")->fetchColumn(), 'history: 85,000 and 10,000');
     });
 
     T::test('a deduction may not turn a payslip negative: it is held back and said so; one that fits is applied (same request)', function (T $t) {
@@ -202,7 +205,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money(Ledger::c($before[$big]['net_pay']) - 700000, $after[$big]['net_pay'], 'the ₱19,500 earner: net falls by ₱7,000');
         $t->contains('NOT applied', $r['body'], 'the page says it held one back');
         $t->contains('Small Net', $r['body']);
-        $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deduction_history WHERE entry_type = 'Deduction'")->fetchColumn(), 'only one history row');
+        $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM bonus_deductions WHERE type = 'Deduction'")->fetchColumn(), 'only one history row');
     });
 
     T::test('Adjustments refuse an amount that is not a real peso figure: 1e999, abc, zero, negative, or a typing error (₱99,999,999,999)', function (T $t) {
@@ -216,7 +219,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
             qa_adjust($pid, [$e], 'Bonus', $bad);
             $t->same($net, Fixtures::payroll($pid)[$e]['net_pay'], "amount \"$bad\" changed the payslip");
         }
-        $t->same(0, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deduction_history')->fetchColumn(), 'nothing was recorded');
+        $t->same(0, (int)getDB()->query('SELECT COUNT(*) FROM bonus_deductions')->fetchColumn(), 'nothing was recorded');
     });
 
     /* ================================================================== C · input limits */
@@ -316,8 +319,9 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::reset();
         $e = qa_worker('Manual Case', '2026-04-01', '2026-04-15');
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type) VALUES ('Mgr', ?, 'x', 'manager', '', 'branch')")->execute(['mgr11-' . uniqid() . '@test']);
+        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mgr', ?, 'x', 'Manager')")->execute(['mgr11-' . uniqid() . '@test']);
         $mid = (int)getDB()->lastInsertId();
+        getDB()->prepare("INSERT INTO user_scopes (user_id, scope_type) VALUES (?, 'Global')")->execute([$mid]);
         $enter = fn(string $date, array $hours) => Http::page('manager/manual-attendance.php',
             ['emp_id' => $e, 'att_date' => $date, 'day_status' => 'worked'] + $hours, [], Http::manager($mid, 'Mgr', ''));
         foreach ([['hours_worked' => '30'], ['hours_worked' => '8', 'overtime_hours' => '17'], ['hours_worked' => '12', 'overtime_hours' => '13'],
@@ -335,7 +339,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('Employee Management refuses a salary that is negative, absurd or not a number, and duty-day hours outside 1–24', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $post = fn(array $x) => Http::page('employee.php', $x + ['action' => 'add', 'full_name' => 'Limit Case', 'branch' => 'MAIN', 'salary_type' => 'daily']);
+        $post = fn(array $x) => Http::page('employee.php', $x + ['action' => 'add', 'first_name' => 'Limit Case', 'branch' => 'MAIN', 'salary_type' => 'daily']);
         foreach (['-500', '1e12', 'abc', '', '100001'] as $bad) {
             $post(['base_salary' => $bad]);
             $t->same(0, (int)getDB()->query("SELECT COUNT(*) FROM employees WHERE full_name = 'Limit Case'")->fetchColumn(), "daily rate \"$bad\" was saved");
@@ -345,15 +349,15 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('Not saved', $r['body']);
         $post(['base_salary' => '600', 'hours_per_day' => '']);
         $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM employees WHERE full_name = 'Limit Case' AND base_salary = 600")->fetchColumn(), 'a valid employee is added (blank duty hours = the standard day)');
-        Http::page('employee.php', ['action' => 'add', 'full_name' => 'Monthly Big', 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '9000000']);
+        Http::page('employee.php', ['action' => 'add', 'first_name' => 'Monthly Big', 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '9000000']);
         $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM employees WHERE full_name = 'Monthly Big'")->fetchColumn(), 'a ₱9,000,000 monthly salary is within the limit');
     });
 
     T::test('Employees: SSS, PhilHealth, Pag-IBIG and tax are optional monthly amounts - blank means none (0.00), typed amounts are saved as typed, negative / absurd / non-numeric ones are refused', function (T $t) {
         Fixtures::reset();
         $db  = getDB();
-        $add = fn(string $name, array $x) => Http::page('employee.php', $x + ['action' => 'add', 'full_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'daily', 'base_salary' => '500']);
-        $row = fn(string $name) => $db->query('SELECT * FROM employees WHERE full_name = ' . $db->quote($name))->fetch();
+        $add = fn(string $name, array $x) => Http::page('employee.php', $x + ['action' => 'add', 'first_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'daily', 'base_salary' => '500']);
+        $row = fn(string $name) => $db->query('SELECT *, employee_code AS emp_id FROM employees WHERE full_name = ' . $db->quote($name))->fetch();
         $none = ['sss_amount' => '0.00', 'philhealth_amount' => '0.00', 'pagibig_amount' => '0.00', 'tax_amount' => '0.00'];
 
         $add('Blank Boxes', ['sss_amount' => '', 'philhealth_amount' => '', 'pagibig_amount' => '', 'tax_amount' => '']);
@@ -533,8 +537,9 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::reset();
         $c = qa_refund_case('Refund Pages');
         [$e, $a, $b, $pb] = [$c['emp'], $c['a'], $c['b'], $c['pb']];
-        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type) VALUES ('Mgr', ?, 'x', 'manager', '', 'branch')")->execute(['mgr11p-' . uniqid() . '@test']);
+        getDB()->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mgr', ?, 'x', 'Manager')")->execute(['mgr11p-' . uniqid() . '@test']);
         $mid = (int)getDB()->lastInsertId();
+        getDB()->prepare("INSERT INTO user_scopes (user_id, scope_type) VALUES (?, 'Global')")->execute([$mid]);
         $pages = [
             'admin sign-payslip.php'   => Http::page('sign-payslip.php', [], ['period' => $b, 'payroll_id' => $pb['id']]),
             'manager sign-payslip.php' => Http::page('manager/sign-payslip.php', [], ['period' => $b, 'payroll_id' => $pb['id']], Http::manager($mid, 'Mgr', '')),
@@ -747,10 +752,10 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::reset();
         $db = getDB();
         $name = 'Added Today Case';
-        $r = Http::page('employee.php', ['action' => 'add', 'full_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '26000',
+        $r = Http::page('employee.php', ['action' => 'add', 'first_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '26000',
                                          'date_hired' => '2026-10-10', 'rest_days' => ['7'], 'sss_amount' => '900']);
         $t->contains('added', $r['body'], 'the employee is added');
-        $e = (string)$db->query('SELECT emp_id FROM employees WHERE full_name = ' . $db->quote($name))->fetchColumn();
+        $e = (string)$db->query('SELECT employee_code FROM employees WHERE full_name = ' . $db->quote($name))->fetchColumn();
         $t->ok($e !== '', 'the employee exists');
 
         // last month: worked Mon-Sat, the sheet marks the 9th OFF, the 14th is approved leave (no hours)
@@ -830,7 +835,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::days($pid, Fixtures::fullDays('Stale Case', '2026-04-01', '2026-04-15'));
         $t->money('400.00', Fixtures::payroll($pid)[$e]['sss'], 'the typed SSS is deducted');
         // the employee's typed amount changed behind the engine's back (the Employee page would have recomputed; this does not)
-        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE emp_id = ?")->execute([$e]);
+        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE employee_code = ?")->execute([$e]);
         $r = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $pid]);
         $t->same(409, $r['status'], $r['body']);
         $t->same('stale', $r['json']['error'] ?? null);
@@ -866,7 +871,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->contains('Banner Negative', $page);
         $t->contains('−₱', $page, 'the negative amount is printed signed');
         $t->contains('Recompute', $page, 'the Recompute button exists on an open period');
-        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE emp_id = ?")->execute([$n]);
+        getDB()->prepare("UPDATE employees SET sss_amount = 0 WHERE employee_code = ?")->execute([$n]);
         $t->contains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $p])['body'], 'a stale line is announced');
     });
 
@@ -883,7 +888,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $db->exec("UPDATE payroll_periods SET finalized_at = '2026-05-01 10:00:00' WHERE id = $a");
         $db->exec("UPDATE payroll_periods SET finalized_at = '2026-05-01 10:05:00' WHERE id = $b");
 
-        $db->prepare("UPDATE employees SET base_salary = 40000, philhealth_amount = 400 WHERE emp_id = ?")->execute([$e]);       // a raise and a higher PhilHealth, months later
+        $db->prepare("UPDATE employees SET base_salary = 40000, philhealth_amount = 400 WHERE employee_code = ?")->execute([$e]);       // a raise and a higher PhilHealth, months later
         $t->ok(settlementDrift($db, $b) !== [], 'by arithmetic alone cut-off 2 would now differ (PhilHealth ₱300 was taken, the employee now says ₱400)');
         $t->notContains('no longer settle the month correctly', Http::page('payroll.php', [], ['period' => $b])['body'], 'but April is history: no warning, no invitation to recompute it');
         $t->same(false, earlierRunChangedAfterFinalize($db, $b), 'nothing earlier in April changed after cut-off 2 was finalized');
@@ -908,7 +913,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
             $t->same(['decimal(12,2)', 'NO', '0.00'], [$c['ct'] ?? null, $c['nul'] ?? null, $c['def'] ?? null], "employees.$col is DECIMAL(12,2) NOT NULL DEFAULT 0");
         }
         // an employee row written without the new columns (as every row of an older database is) has none, and the engine deducts nothing
-        $db->exec("INSERT INTO employees (emp_id, full_name, base_salary, salary_type, branch) VALUES ('OLD-ROW', 'Old Row', 480, 'daily', 'MAIN')");
+        $db->exec("INSERT INTO employees (employee_code, first_name, last_name, base_salary, salary_type) VALUES ('OLD-ROW', 'Old', 'Row', 480, 'daily')");
         $row = Fixtures::empRow('OLD-ROW');
         $t->same(['0.00', '0.00', '0.00', '0.00'], [$row['sss_amount'], $row['philhealth_amount'], $row['pagibig_amount'], $row['tax_amount']], 'an existing employee starts with no amounts');
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');

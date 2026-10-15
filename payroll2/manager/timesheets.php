@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     /* One record - only if it belongs to this manager's employees */
     $mine = function (int $attId) use ($db, $scopeWhere, $scopeParams): bool {
-        $st = $db->prepare("SELECT a.id FROM attendance a JOIN employees e ON e.emp_id = a.emp_id
+        $st = $db->prepare("SELECT a.id FROM attendance_summary a JOIN employees e ON e.id = a.employee_id
                              WHERE a.id = ? $scopeWhere");
         $st->execute(array_merge([$attId], $scopeParams));
         return (bool)$st->fetchColumn();
@@ -23,8 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'approve_one') {
         $id = (int)$_POST['att_id'];
         if ($mine($id)) {
-            $db->prepare("UPDATE attendance SET manager_approved=1, approved_by=?, approved_at=NOW() WHERE id=?")
-               ->execute([$m['name'], $id]);
+            $db->prepare("UPDATE attendance_summary SET approval_status='Approved', approved_by=?, approved_at=NOW() WHERE id=?")
+               ->execute([$m['id'], $id]);
             $msg = ['type' => 'success', 'text' => 'Timesheet record approved.'];
         } else {
             $msg = ['type' => 'error', 'text' => 'That record does not belong to one of your employees.'];
@@ -33,12 +33,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'approve_all') {
         $period_id = (int)$_POST['period_id'];
-        $params = array_merge([$m['name'], $period_id], $scopeParams);
+        $params = array_merge([$m['id'], $period_id], $scopeParams);
         $db->prepare("
-            UPDATE attendance a
-            JOIN employees e ON e.emp_id = a.emp_id
-            SET a.manager_approved=1, a.approved_by=?, a.approved_at=NOW()
-            WHERE a.period_id=? AND a.manager_approved=0 $scopeWhere
+            UPDATE attendance_summary a
+            JOIN employees e ON e.id = a.employee_id
+            SET a.approval_status='Approved', a.approved_by=?, a.approved_at=NOW()
+            WHERE a.period_id=? AND a.approval_status='Pending' $scopeWhere
         ")->execute($params);
         $msg = ['type' => 'success', 'text' => 'All pending timesheets approved.'];
     }
@@ -46,8 +46,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'reject_one') {
         $id = (int)$_POST['att_id'];
         if ($mine($id)) {
-            $db->prepare("UPDATE attendance SET manager_approved=2, approved_by=?, approved_at=NOW() WHERE id=?")
-               ->execute([$m['name'], $id]);
+            $db->prepare("UPDATE attendance_summary SET approval_status='Flagged', approved_by=?, approved_at=NOW() WHERE id=?")
+               ->execute([$m['id'], $id]);
             $msg = ['type' => 'success', 'text' => 'Timesheet record flagged for review.'];
         } else {
             $msg = ['type' => 'error', 'text' => 'That record does not belong to one of your employees.'];
@@ -55,25 +55,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$periods = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 $period_id = (int)($_GET['period'] ?? defaultPeriodId($db, $periods));
 
 $rows = [];
 if ($period_id) {
     $params = array_merge([$period_id], $scopeParams);
     $st = $db->prepare("
-        SELECT a.*, e.full_name, e.branch
-        FROM attendance a
-        JOIN employees e ON e.emp_id = a.emp_id
+        SELECT a.id, a.period_id, a.employee_id, a.total_hours_worked AS hours_worked, a.total_overtime_hours AS overtime_hours,
+               a.total_late_hours AS late_hours, a.is_manually_entered, a.approval_status, a.approved_at,
+               e.employee_code AS emp_id, e.full_name, e.full_name AS emp_name, COALESCE(br.name, '') AS branch,
+               COALESCE(ab.full_name, '') AS approved_by, p.gross_pay, p.withholding_tax
+        FROM attendance_summary a
+        JOIN employees e ON e.id = a.employee_id
+        LEFT JOIN branches br ON br.id = e.branch_id
+        LEFT JOIN users ab ON ab.id = a.approved_by
+        LEFT JOIN payroll p ON p.period_id = a.period_id AND p.employee_id = a.employee_id
         WHERE a.period_id = ? $scopeWhere
-        ORDER BY a.manager_approved ASC, e.full_name ASC
+        ORDER BY FIELD(a.approval_status, 'Pending', 'Flagged', 'Approved'), e.full_name ASC
     ");
     $st->execute($params);
     $rows = $st->fetchAll();
 }
 
-$pendingCount  = count(array_filter($rows, fn($r) => $r['manager_approved'] == 0));
-$approvedCount = count(array_filter($rows, fn($r) => $r['manager_approved'] == 1));
+$pendingCount  = count(array_filter($rows, fn($r) => $r['approval_status'] === 'Pending'));
+$approvedCount = count(array_filter($rows, fn($r) => $r['approval_status'] === 'Approved'));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -149,24 +155,24 @@ $approvedCount = count(array_filter($rows, fn($r) => $r['manager_approved'] == 1
                         <td><?= number_format($r['late_hours'], 1) ?></td>
                         <td>₱<?= number_format($r['gross_pay'], 2) ?></td>
                         <td>
-                            <?php if ($r['manually_entered_by']): ?>
-                                <span style="color:#7c3aed;font-size:.8rem;">Manual: <?= htmlspecialchars($r['manually_entered_by']) ?></span>
+                            <?php if ($r['is_manually_entered']): ?>
+                                <span style="color:#7c3aed;font-size:.8rem;">Includes manual entry</span>
                             <?php else: ?>
                                 <span style="color:#6b7280;font-size:.8rem;">CSV Upload</span>
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if ($r['manager_approved'] == 1): ?>
+                            <?php if ($r['approval_status'] === 'Approved'): ?>
                                 <span class="badge badge-green">Approved</span>
                                 <br><small style="color:#9ca3af;font-size:.72rem;"><?= htmlspecialchars($r['approved_by']) ?></small>
-                            <?php elseif ($r['manager_approved'] == 2): ?>
+                            <?php elseif ($r['approval_status'] === 'Flagged'): ?>
                                 <span class="badge badge-red">Flagged</span>
                             <?php else: ?>
                                 <span class="badge badge-yellow">Pending</span>
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if ($r['manager_approved'] == 0): ?>
+                            <?php if ($r['approval_status'] === 'Pending'): ?>
                             <div style="display:flex;gap:6px;flex-wrap:wrap;">
                                 <form method="POST">
                                     <input type="hidden" name="action" value="approve_one">

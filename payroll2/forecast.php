@@ -18,7 +18,7 @@ $activePage = 'forecast';
 /* …read from the most recent period that has payroll (each period carries its own schedule); Settings only when it has none */
 $fcLast        = getDB()->query("SELECT pp.period_type FROM payroll_periods pp
                                   WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
-                                  ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1")->fetchColumn();
+                                  ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1")->fetchColumn();
 $fcPeriodType  = periodType($fcLast ?: null);
 $fcIsSplit     = $fcPeriodType !== 'Monthly';
 $fcPeriodWord  = $fcPeriodType === 'Weekly' ? 'week' : ($fcIsSplit ? 'cut-off' : 'month');

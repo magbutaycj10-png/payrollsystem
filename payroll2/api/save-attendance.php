@@ -35,13 +35,18 @@ uploadPeriodGuard($db, $period_id, $who);
  * away days recorded earlier - so the uploader is asked first, and only on
  * a confirmed replace are those days cleared along with the old totals.
  */
+$pp = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
+$pp->execute([$period_id]);
+$perRow  = $pp->fetch();
 $dayScope = '';
-$dayArgs  = [$period_id];
+$dayArgs  = [$perRow['start_date'], $perRow['end_date']];   /* a day belongs to the period that holds its date */
 if ($who['scope'] !== null) {
-    $dayScope = $who['scope'] ? ' AND emp_id IN (' . implode(',', array_fill(0, count($who['scope']), '?')) . ')' : ' AND 1 = 0';
+    $dayScope = $who['scope']
+        ? ' AND employee_id IN (SELECT id FROM employees WHERE employee_code IN (' . implode(',', array_fill(0, count($who['scope']), '?')) . '))'
+        : ' AND 1 = 0';
     $dayArgs  = array_merge($dayArgs, array_values($who['scope']));
 }
-$dc = $db->prepare("SELECT COUNT(*) FROM biometric_daily WHERE period_id = ?$dayScope");
+$dc = $db->prepare("SELECT COUNT(*) FROM biometric_daily WHERE att_date BETWEEN ? AND ?$dayScope");
 $dc->execute($dayArgs);
 $savedDays = (int)$dc->fetchColumn();
 if ($savedDays && empty($body['replace_days'])) {
@@ -52,7 +57,7 @@ saveBioLinks($db, $body['bio_links'] ?? [], $who);   /* device report -> employe
 
 /* Registered employees this uploader may write for: emp_id => full name */
 $names = [];
-foreach ($db->query("SELECT emp_id, full_name FROM employees")->fetchAll() as $e) {
+foreach ($db->query("SELECT employee_code AS emp_id, full_name FROM employees")->fetchAll() as $e) {
     $names[(string)$e['emp_id']] = $e['full_name'];
 }
 $scope = $who['scope'] === null ? $names : array_intersect_key($names, array_flip($who['scope']));
@@ -68,10 +73,7 @@ $matched    = [];
 $invalid    = [];   /* lines whose hours cannot be right (negative, text, more than the period holds) - not saved, reported */
 
 /* How many calendar days the period holds: the most hours a line can honestly carry */
-$pp = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
-$pp->execute([$period_id]);
-$perRow     = $pp->fetch();
-$periodDays = $perRow ? (int)round((strtotime($perRow['period_end']) - strtotime($perRow['period_start'])) / 86400) + 1 : 31;
+$periodDays = $perRow ? (int)round((strtotime($perRow['end_date']) - strtotime($perRow['start_date'])) / 86400) + 1 : 31;
 
 foreach ($rows as $r) {
     $name = trim((string)($r['emp_name'] ?? ''));
@@ -144,7 +146,7 @@ $ctx = payContext($db, $period_id);
 
 /* Each employee as the pay computation reads them (rate, type, duty hours, monthly contribution and tax amounts) */
 $empData = [];
-foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $empData[$er['emp_id']] = payEmployee($er);
+foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $empData[$er['employee_code']] = payEmployee($er);
 
 try {
     $attRows = [];
@@ -172,9 +174,10 @@ try {
         ['gross' => $gross, 'tax' => $tax, 'ot_late_adj' => $otLate,
          'sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag, 'net' => $net] = $pay;
 
-        $attRows[] = [$period_id, $emp_id, $emp_name, $hours, $ot, $late, $gross, $tax];
-        $payRows[] = [$period_id, $emp_id, $emp_name, $hours, $ot, $late,
-                      $gross, $tax, $otLate, $sss, $ph, $pag, 0, 0, $net];
+        /* a totals file has no days, so no undertime, absences, leave or days off to judge */
+        $attRows[] = [$period_id, $emp_id, $hours, $ot, $late, 0, 0, 0, 0, 0];
+        $payRows[] = [$period_id, $emp_id, $pay['basic'], $pay['overtime_pay'], $gross, $sss, $ph, $pag, $tax,
+                      round($pay['late_deduction'] + $pay['undertime_deduction'], 2), $pay['absent_deduction'], $net];
         $count++;
     }
 
@@ -185,7 +188,7 @@ try {
     /* Confirmed replace: the period's day records go too, or the next daily
        upload would bring them back and overwrite these totals */
     if ($savedDays) {
-        $db->prepare("DELETE FROM biometric_daily WHERE period_id = ?$dayScope")->execute($dayArgs);
+        $db->prepare("DELETE FROM biometric_daily WHERE att_date BETWEEN ? AND ?$dayScope")->execute($dayArgs);
     }
 
     /* Later cut-offs of the month settle their contributions and tax against

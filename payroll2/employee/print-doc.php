@@ -3,8 +3,8 @@
  * employee/print-doc.php - the print endpoint for the employee portal.
  *
  * Serves the very same payslip & acknowledgement receipt as the
- * admin side, but the WHERE clause is pinned to the signed-in employee's
- * emp_id, so an employee can only ever print their own pay records. The
+ * admin side, but the WHERE clause is pinned to the signed-in employee,
+ * so an employee can only ever print their own pay records. The
  * payroll_id in the query string is checked against that, never trusted.
  *
  * Query string
@@ -45,26 +45,24 @@ $ctx = [
 ];
 
 $select = "
-    SELECT p.*, pp.period_label, pp.period_start, pp.period_end,
-           e.position, e.branch,
+    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date,
            (SELECT ps.signature_data
               FROM payslip_signatures ps
              WHERE ps.payroll_id = p.id
                AND (ps.net_signed IS NULL OR ABS(ps.net_signed - p.net_pay) < 0.005)
           ORDER BY ps.signed_at DESC LIMIT 1) AS signature_data
-      FROM payroll p
+      FROM payroll p " . PAY_LINE_JOINS . "
       JOIN payroll_periods pp ON pp.id = p.period_id
- LEFT JOIN employees e        ON e.emp_id = p.emp_id
-     WHERE p.emp_id = ?
+     WHERE e.employee_code = ?
 ";
 
-/* emp_id is always in the WHERE clause, so a guessed payroll_id
+/* The employee is always in the WHERE clause, so a guessed payroll_id
    belonging to somebody else simply returns nothing. */
 if ($payrollId) {
     $st = $db->prepare($select . ' AND p.id = ?');
     $st->execute([$e['id'], $payrollId]);
 } else {
-    $st = $db->prepare($select . ' ORDER BY pp.period_start DESC, pp.id DESC');
+    $st = $db->prepare($select . ' ORDER BY pp.start_date DESC, pp.id DESC');
     $st->execute([$e['id']]);
 }
 $rows = $st->fetchAll();
@@ -78,7 +76,7 @@ $ctx['period_label'] = $rows[0]['period_label'] ?? '';
 
 /* Same print audit trail the admin portal writes to. */
 try {
-    $db->prepare('INSERT INTO print_log (document_name, document_type, period_id, printed_by)
+    $db->prepare('INSERT INTO print_logs (document_name, document_type, period_id, printed_by)
                   VALUES (?,?,?,?)')
        ->execute([
            $payrollId
@@ -86,7 +84,7 @@ try {
                : 'Payslips (All) - ' . ($e['name'] ?: $e['id']),
            'Employee Self-Service',
            $payrollId ? (int)($rows[0]['period_id'] ?? 0) ?: null : null,
-           $e['name'] ?: $e['id'],
+           currentUserId(),
        ]);
 } catch (PDOException $ex) { /* auditing must never block a print */ }
 

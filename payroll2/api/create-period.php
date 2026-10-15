@@ -26,20 +26,20 @@ try {
     // Two periods covering the same days would pay those days twice
     if ($clash = overlappingPeriod($db, $start, $end)) {
         $kind = periodTypeLabel($clash);
-        $same = $clash['period_start'] === $start && $clash['period_end'] === $end;
+        $same = $clash['start_date'] === $start && $clash['end_date'] === $end;
         jsonResponse([
             'error' => ($same ? "{$clash['period_label']} already exists with these exact dates"
                               : "These dates overlap {$clash['period_label']}")
-                     . " ({$clash['period_start']} to {$clash['period_end']}, $kind schedule)."
+                     . " ({$clash['start_date']} to {$clash['end_date']}, $kind schedule)."
                      . " Use that period, or pick dates outside it.",
             'clash' => ['id' => (int)$clash['id'], 'label' => $clash['period_label'], 'kind' => $kind, 'same' => $same],
         ], 409);
     }
-    $st = $db->prepare("INSERT INTO payroll_periods (period_label,period_start,period_end,period_type,status) VALUES (?,?,?,?,'Open')");
-    $st->execute([$label,$start,$end,$type]);
+    $st = $db->prepare("INSERT INTO payroll_periods (period_label,start_date,end_date,period_type,status,created_by) VALUES (?,?,?,?,'Open',?)");
+    $st->execute([$label,$start,$end,$type,currentUserId()]);
     $id = (int)$db->lastInsertId();
     jsonResponse(['success'=>true,'id'=>$id,'type'=>$type,
-                  'type_label'=>periodTypeLabel(['period_type'=>$type,'period_start'=>$start])]);
+                  'type_label'=>periodTypeLabel(['period_type'=>$type,'start_date'=>$start])]);
 } catch (PDOException $e) {
     jsonResponse(['error' => friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'], 500);
 }

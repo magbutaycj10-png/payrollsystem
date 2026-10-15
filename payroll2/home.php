@@ -19,12 +19,12 @@ $latestPeriod = currentPeriod($db);   /* the period holding today, else the late
 $pendingLeave = (int)$db->query("SELECT COUNT(*) FROM leave_requests WHERE status='Pending'")->fetchColumn();
 
 /* Attendance activity - tells the admin whether this cycle has been started */
-$lastUpload  = $db->query("SELECT MAX(upload_date) FROM attendance")->fetchColumn();
+$lastUpload  = $db->query("SELECT MAX(uploaded_at) FROM attendance_summary")->fetchColumn();
 $periodRows  = 0;
 $periodNet   = 0.0;
 $payrollRows = 0;
 if ($latestPeriod) {
-    $st = $db->prepare("SELECT COUNT(*) FROM attendance WHERE period_id = ?");
+    $st = $db->prepare("SELECT COUNT(*) FROM attendance_summary WHERE period_id = ?");
     $st->execute([$latestPeriod['id']]);
     $periodRows = (int)$st->fetchColumn();
 

@@ -3,10 +3,19 @@ require_once __DIR__ . '/errors.php';   // friendly errors everywhere - load fir
 require_once __DIR__ . '/db.php';
 
 /*
+ * The layout of the database this version of the app reads and writes (sql/database.sql). It is part of the fingerprint
+ * applySchemaPatches() keeps, so a new layout is looked at once on the first page load.
+ */
+const SCHEMA_LAYOUT = 'standard-2026-10-15';
+
+/*
  * applySchemaPatches()
- * Creates any tables that may be missing and seeds the admin user
- * on first-ever run.  Safe to call on every request - the static
- * guard ensures it only executes once per PHP process.
+ * Gets the database ready for this version of the app and seeds the admin account on the first-ever run:
+ *   1. a database with no payroll tables yet is built from sql/database.sql - a fresh install needs nothing else
+ *   2. a database still in an older layout stops the app, with what to do about it (schemaLayoutProblem)
+ *   3. $patches: changes made to the standard layout after it was introduced, oldest first (none so far)
+ * Safe to call on every request: a static guard runs it once per PHP process, and a fingerprint kept in settings means a
+ * normal page load costs one query.
  */
 function applySchemaPatches(): void {
     static $done = false;
@@ -15,390 +24,31 @@ function applySchemaPatches(): void {
 
     $db = getDB();
 
-    $patches = [
-        // Attendance audit columns (added in v2 - ALTER is harmless if already present)
-        "ALTER TABLE attendance ADD COLUMN manually_entered_by VARCHAR(150) NULL AFTER upload_date",
-        "ALTER TABLE attendance ADD COLUMN manager_approved    TINYINT(1)  DEFAULT 0  AFTER manually_entered_by",
-        "ALTER TABLE attendance ADD COLUMN approved_by         VARCHAR(150) NULL       AFTER manager_approved",
-        "ALTER TABLE attendance ADD COLUMN approved_at         TIMESTAMP   NULL        AFTER approved_by",
-
-        // salary_type column on employees (monthly vs daily wager)
-        "ALTER TABLE employees ADD COLUMN salary_type ENUM('monthly','daily') NOT NULL DEFAULT 'monthly' AFTER base_salary",
-
-        // 'kinsenas' - paid twice a month, base_salary stated per kinsena
-        // (half-month) rather than per month. MODIFY widens the enum in place
-        // and is harmless once the value is already there.
-        "ALTER TABLE employees MODIFY COLUMN salary_type ENUM('monthly','kinsenas','daily') NOT NULL DEFAULT 'monthly'",
-
-        // department -> branch rename (v3). Fails harmlessly once already renamed.
-        "ALTER TABLE employees RENAME COLUMN department TO branch",
-        "ALTER TABLE users     RENAME COLUMN department TO branch",
-        // Fallback for installs that never had a department column at all
-        "ALTER TABLE employees ADD COLUMN branch VARCHAR(100) DEFAULT '' AFTER position",
-        "ALTER TABLE users     ADD COLUMN branch VARCHAR(100) DEFAULT '' AFTER emp_id",
-
-        // How a manager's employee set is resolved: whole branch, or a picked list
-        "ALTER TABLE users ADD COLUMN scope_type ENUM('branch','custom') NOT NULL DEFAULT 'branch' AFTER branch",
-
-        // Unified auth table - all three roles (admin / manager / earner) live here.
-        // Passwords are stored as bcrypt hashes only.
-        "CREATE TABLE IF NOT EXISTS users (
-            id            INT          NOT NULL AUTO_INCREMENT,
-            full_name     VARCHAR(150) NOT NULL,
-            email         VARCHAR(150) NOT NULL,
-            password_hash VARCHAR(255) NOT NULL,
-            role          ENUM('admin','manager','earner') NOT NULL DEFAULT 'earner',
-            emp_id        VARCHAR(20)  DEFAULT NULL,
-            branch        VARCHAR(100) DEFAULT '',
-            scope_type    ENUM('branch','custom') NOT NULL DEFAULT 'branch',
-            status        ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
-            last_login    TIMESTAMP    NULL DEFAULT NULL,
-            created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_email (email)
-        )",
-
-        // Supplemental tables that may not exist on older installs
-        "CREATE TABLE IF NOT EXISTS employee_profiles (
-            id                 INT          NOT NULL AUTO_INCREMENT,
-            emp_id             VARCHAR(20)  NOT NULL,
-            address            TEXT         DEFAULT NULL,
-            phone              VARCHAR(30)  DEFAULT NULL,
-            emergency_name     VARCHAR(150) DEFAULT NULL,
-            emergency_phone    VARCHAR(30)  DEFAULT NULL,
-            emergency_relation VARCHAR(80)  DEFAULT NULL,
-            updated_at         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                            ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_profile_emp (emp_id)
-        )",
-        "CREATE TABLE IF NOT EXISTS leave_requests (
-            id          INT          NOT NULL AUTO_INCREMENT,
-            emp_id      VARCHAR(20)  NOT NULL,
-            emp_name    VARCHAR(150) DEFAULT '',
-            leave_type  ENUM('Vacation','Sick Leave','Emergency','Other') NOT NULL,
-            date_from   DATE         NOT NULL,
-            date_to     DATE         NOT NULL,
-            reason      TEXT         DEFAULT NULL,
-            status      ENUM('Pending','Approved','Rejected') NOT NULL DEFAULT 'Pending',
-            reviewed_by VARCHAR(150) DEFAULT NULL,
-            review_note VARCHAR(255) DEFAULT NULL,
-            reviewed_at TIMESTAMP    NULL DEFAULT NULL,
-            created_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id)
-        )",
-        // Raw daily biometric attendance records - one row per employee per day
-        "CREATE TABLE IF NOT EXISTS biometric_daily (
-            id             INT          NOT NULL AUTO_INCREMENT,
-            period_id      INT          NOT NULL,
-            emp_id         VARCHAR(20)  NOT NULL,
-            emp_name       VARCHAR(150) NOT NULL DEFAULT '',
-            att_date       DATE         NOT NULL,
-            hours_worked   DECIMAL(6,2) NOT NULL DEFAULT 0,
-            overtime_hours DECIMAL(6,2) NOT NULL DEFAULT 0,
-            late_hours     DECIMAL(6,2) NOT NULL DEFAULT 0,
-            uploaded_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
-                                        ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_daily (period_id, emp_id, att_date)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // Explicit manager -> employee assignments (used when scope_type = 'custom')
-        "CREATE TABLE IF NOT EXISTS manager_employees (
-            id         INT         NOT NULL AUTO_INCREMENT,
-            manager_id INT         NOT NULL,
-            emp_id     VARCHAR(20) NOT NULL,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_mgr_emp (manager_id, emp_id),
-            KEY idx_mgr (manager_id)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        "CREATE TABLE IF NOT EXISTS payslip_signatures (
-            id             INT          NOT NULL AUTO_INCREMENT,
-            payroll_id     INT          NOT NULL,
-            emp_id         VARCHAR(20)  NOT NULL,
-            emp_name       VARCHAR(150) DEFAULT '',
-            period_id      INT          DEFAULT NULL,
-            period_label   VARCHAR(80)  DEFAULT '',
-            signature_data LONGTEXT     NOT NULL,
-            signed_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id)
-        )",
-
-        // Document numbering. document_series holds one counter per document
-        // type; document_serials binds an allocated number to the record it was
-        // issued for, so a reprint reproduces the same number instead of
-        // burning a new one. Numbers never restart - the series runs straight
-        // through every month and every payroll run.
-        "CREATE TABLE IF NOT EXISTS document_series (
-            series  VARCHAR(20) NOT NULL,
-            next_no BIGINT      NOT NULL DEFAULT 1,
-            PRIMARY KEY (series)
-        )",
-        "CREATE TABLE IF NOT EXISTS document_serials (
-            series    VARCHAR(20) NOT NULL,
-            ref_id    INT         NOT NULL,
-            serial_no BIGINT      NOT NULL,
-            issued_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (series, ref_id),
-            UNIQUE KEY uq_series_no (series, serial_no)
-        )",
-
-        // When a period was last finalized, and how many times. Lets the UI say
-        // "Re-finalize" after an unlock instead of pretending it is the first time.
-        "ALTER TABLE payroll_periods ADD COLUMN finalized_at   TIMESTAMP NULL DEFAULT NULL",
-        "ALTER TABLE payroll_periods ADD COLUMN finalize_count INT NOT NULL DEFAULT 0",
-
-        // One signature per payroll row - makes the ON DUPLICATE KEY UPDATE in
-        // sign-payslip.php actually replace instead of piling up duplicates, so
-        // the acknowledgement receipt always prints the current signature.
-        "ALTER TABLE payslip_signatures ADD UNIQUE KEY uq_sig_payroll (payroll_id)",
-
-        // ---- Revision tracking -------------------------------------------
-        // A period can be finalized, re-opened, corrected and finalized again.
-        // Everything below records that history in the database so the pages
-        // can say *which* figures were touched after a finalize instead of
-        // showing a corrected period as if it had never been closed.
-
-        // How many times a period has been re-opened, and when it last was.
-        "ALTER TABLE payroll_periods ADD COLUMN reopen_count INT NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll_periods ADD COLUMN reopened_at  TIMESTAMP NULL DEFAULT NULL",
-
-        // Each period carries its own pay schedule (Monthly / Semi-Monthly /
-        // Weekly), so a kinsenas cut-off and a monthly run can sit side by
-        // side. NULL = older period: falls back to Settings → payroll_period.
-        "ALTER TABLE payroll_periods ADD COLUMN period_type VARCHAR(20) NULL DEFAULT NULL AFTER period_end",
-
-        // Undertime for a day as the timesheet states it (whole hours short of
-        // a full day). NULL = not given; it is then worked out from the hours.
-        "ALTER TABLE biometric_daily ADD COLUMN undertime_hours DECIMAL(6,2) NULL DEFAULT NULL AFTER late_hours",
-
-        // Who typed a day in by hand (Manual Attendance). NULL = it came from
-        // an uploaded file; a later upload of that day clears it again.
-        "ALTER TABLE biometric_daily ADD COLUMN entered_by VARCHAR(150) NULL DEFAULT NULL AFTER undertime_hours",
-
-        // Which government contributions are deducted for this employee
-        // (all on by default, as the law requires for regular employees).
-        "ALTER TABLE employees ADD COLUMN deduct_sss        TINYINT(1) NOT NULL DEFAULT 1",
-        "ALTER TABLE employees ADD COLUMN deduct_philhealth TINYINT(1) NOT NULL DEFAULT 1",
-        "ALTER TABLE employees ADD COLUMN deduct_pagibig    TINYINT(1) NOT NULL DEFAULT 1",
-
-        // The employee's own MONTHLY SSS, PhilHealth, Pag-IBIG and withholding-tax
-        // amounts, typed in by the admin when adding or editing the employee.
-        // Payroll deducts exactly these (Settings → Contribution Schedule says on
-        // which cut-off) - nothing is worked out from the month's pay any more.
-        // 0 = this employee has none. The deduct_* switches above are no longer
-        // read: a zero amount is how an employee is left out.
-        "ALTER TABLE employees ADD COLUMN sss_amount        DECIMAL(12,2) NOT NULL DEFAULT 0",
-        "ALTER TABLE employees ADD COLUMN philhealth_amount DECIMAL(12,2) NOT NULL DEFAULT 0",
-        "ALTER TABLE employees ADD COLUMN pagibig_amount    DECIMAL(12,2) NOT NULL DEFAULT 0",
-        "ALTER TABLE employees ADD COLUMN tax_amount        DECIMAL(12,2) NOT NULL DEFAULT 0",
-
-        // finalize_cycle = the period's finalize_count at the moment the entry
-        // was recorded. 0 = recorded during the first, normal pass.
-        // >0 = recorded after the period had already been finalized once, i.e.
-        // this entry is a correction made during re-open cycle N.
-        "ALTER TABLE bonus_deduction_history ADD COLUMN finalize_cycle INT NOT NULL DEFAULT 0",
-        // entry_date is only a DATE; keep the exact moment too.
-        "ALTER TABLE bonus_deduction_history ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
-
-        // Per-employee revision flag: this payroll row's money changed after
-        // the period had been finalized at least once.
-        "ALTER TABLE payroll ADD COLUMN revised_after_finalize TINYINT(1) NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll ADD COLUMN revised_at TIMESTAMP NULL DEFAULT NULL",
-
-        // Weekly day(s) off, as ISO weekday numbers (1 = Mon … 7 = Sun), e.g.
-        // "7" or "6,7"; '' = no fixed day off. Sunday matches what the pay
-        // computation always assumed before this was configurable.
-        "ALTER TABLE employees ADD COLUMN rest_days VARCHAR(20) NOT NULL DEFAULT '7'",
-
-        // What the day-by-day computation found: unexcused absent days (and
-        // what they cost a salaried employee) and approved, paid leave days.
-        "ALTER TABLE payroll ADD COLUMN absent_days      DECIMAL(5,1)  NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll ADD COLUMN leave_days       DECIMAL(5,1)  NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll ADD COLUMN absent_deduction DECIMAL(12,2) NOT NULL DEFAULT 0",
-
-        // One payroll / attendance line per employee per period, however many
-        // times the period's file is uploaded again.
-        "ALTER TABLE payroll    ADD UNIQUE KEY uq_payroll_period_emp    (period_id, emp_id)",
-        "ALTER TABLE attendance ADD UNIQUE KEY uq_attendance_period_emp (period_id, emp_id)",
-
-        // An employee's regular duty day in hours (e.g. 10 for a 10-hour
-        // shift). NULL = Settings' standard. A daily-rate employee earns their
-        // rate per duty day, so undertime costs rate ÷ these hours an hour.
-        "ALTER TABLE employees ADD COLUMN hours_per_day DECIMAL(4,2) NULL DEFAULT NULL",
-
-        // gross_pay now holds everything earned (basic + overtime − late),
-        // as payslips, reports and the pharmacy's timesheets mean it; it used
-        // to hold basic pay only. Old rows are converted ONCE: the flag marks
-        // a converted row, new rows are written with it set, and only then
-        // does the column default flip to 1 - so the UPDATE can never touch
-        // a row twice however often this list runs.
-        "ALTER TABLE payroll ADD COLUMN gross_incl_ot TINYINT(1) NOT NULL DEFAULT 0",
-        "UPDATE payroll SET gross_pay = gross_pay + ot_late_adj, gross_incl_ot = 1 WHERE gross_incl_ot = 0",
-        "ALTER TABLE payroll ALTER COLUMN gross_incl_ot SET DEFAULT 1",
-        "ALTER TABLE attendance ADD COLUMN gross_incl_ot TINYINT(1) NOT NULL DEFAULT 0",
-        "UPDATE attendance a JOIN payroll p ON p.period_id = a.period_id AND p.emp_id = a.emp_id
-            SET a.gross_pay = p.gross_pay, a.gross_incl_ot = 1
-          WHERE a.gross_incl_ot = 0 AND p.gross_incl_ot = 1",
-        "ALTER TABLE attendance ALTER COLUMN gross_incl_ot SET DEFAULT 1",
-
-        // biometric_daily was created with the server default collation while
-        // every other table uses utf8mb4_unicode_ci, so joins on emp_id failed.
-        "ALTER TABLE biometric_daily CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-
-        // Periods created before each kept its own schedule fell back to the
-        // Settings default, so a whole-month "March 2026" was paid as a half
-        // month. Give them the schedule their dates describe (only NULLs).
-        "UPDATE payroll_periods SET period_type = CASE
-            WHEN DAY(period_start) = 1 AND period_end = LAST_DAY(period_start) THEN 'Monthly'
-            WHEN DATEDIFF(period_end, period_start) <= 7 THEN 'Weekly'
-            ELSE 'Semi-Monthly' END
-          WHERE period_type IS NULL",
-
-        // A day the timesheet marks OFF (a rotating day off): no duty that day,
-        // so it is neither worked nor absent, and never deducted.
-        "ALTER TABLE biometric_daily ADD COLUMN day_off TINYINT(1) NOT NULL DEFAULT 0 AFTER entered_by",
-
-        // What each pay line found besides absences: undertime (hours short of
-        // full duty days, and what they cost) and days off in the period.
-        "ALTER TABLE payroll ADD COLUMN undertime_hours     DECIMAL(6,2)  NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll ADD COLUMN undertime_deduction DECIMAL(12,2) NOT NULL DEFAULT 0",
-        "ALTER TABLE payroll ADD COLUMN days_off            DECIMAL(5,1)  NOT NULL DEFAULT 0",
-
-        // The net pay a payslip signature acknowledged. A later correction
-        // changes the net, and then the old signature no longer applies.
-        "ALTER TABLE payslip_signatures ADD COLUMN net_signed DECIMAL(12,2) NULL DEFAULT NULL",
-
-        // Sign-in attempts, to slow down password guessing (see loginBlocked()).
-        "CREATE TABLE IF NOT EXISTS login_attempts (
-            id           INT          NOT NULL AUTO_INCREMENT,
-            ip           VARCHAR(45)  NOT NULL DEFAULT '',
-            email        VARCHAR(150) NOT NULL DEFAULT '',
-            ok           TINYINT(1)   NOT NULL DEFAULT 0,
-            attempted_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_email (email, attempted_at),
-            KEY idx_ip (ip, attempted_at)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // The finalize / re-open trail itself - who did what, when, and why.
-        "CREATE TABLE IF NOT EXISTS period_audit (
-            id           INT          NOT NULL AUTO_INCREMENT,
-            period_id    INT          NOT NULL,
-            action       ENUM('Finalized','Reopened','Revised') NOT NULL,
-            cycle        INT          NOT NULL DEFAULT 0,
-            performed_by VARCHAR(150) DEFAULT NULL,
-            note         VARCHAR(255) DEFAULT NULL,
-            created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            KEY idx_period (period_id)
-        )",
-
-        // The branch list, managed in Settings. employees.branch and
-        // users.branch still store the branch NAME rather than an id, so a
-        // rename has to carry across to those columns - settings.php does
-        // that inside one transaction.
-        //
-        // The collation is pinned to match employees/users: those names are
-        // compared against this column, and MySQL refuses to compare two
-        // different collations. Without this the table would inherit the
-        // server default (utf8mb4_0900_ai_ci on MySQL 8) and every join
-        // would fail with "Illegal mix of collations".
-        "CREATE TABLE IF NOT EXISTS branches (
-            id         INT          NOT NULL AUTO_INCREMENT,
-            name       VARCHAR(100) NOT NULL,
-            created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_branch_name (name)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // Repairs a branches table created before the collation was pinned.
-        "ALTER TABLE branches CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
-
-        // ── Biometric ingest staging (mirrors sql/001_attendance_logs.sql) ──
-        // Raw punches from the EPH A6, pushed by the desktop agent.
-        // uq_punch is the duplicate guard: one person cannot punch twice in
-        // the same second, so every re-sync is idempotent.
-        "CREATE TABLE IF NOT EXISTS attendance_logs (
-            id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            employee_id VARCHAR(32) NOT NULL,
-            punch_time  DATETIME    NOT NULL,
-            punch_state TINYINT     NOT NULL DEFAULT 0,
-            verify_mode TINYINT     NOT NULL DEFAULT 0,
-            device_id   VARCHAR(40) NOT NULL DEFAULT '',
-            source      VARCHAR(16) NOT NULL DEFAULT 'serial',
-            processed   TINYINT(1)  NOT NULL DEFAULT 0,
-            received_at TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_punch (employee_id, punch_time),
-            KEY idx_unprocessed (processed, punch_time),
-            KEY idx_punch_time (punch_time)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // Terminal user number -> payroll emp_id. Collation is pinned because
-        // emp_id is compared against employees.emp_id.
-        "CREATE TABLE IF NOT EXISTS biometric_employee_map (
-            device_user_id VARCHAR(32) NOT NULL,
-            emp_id         VARCHAR(20) NOT NULL,
-            device_id      VARCHAR(40) NOT NULL DEFAULT '',
-            created_at     TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (device_user_id),
-            KEY idx_emp (emp_id)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // Which PC currently holds the terminal, and when it last reported.
-        "CREATE TABLE IF NOT EXISTS biometric_agent_state (
-            device_id       VARCHAR(40)  NOT NULL,
-            agent_host      VARCHAR(100) NOT NULL DEFAULT '',
-            agent_version   VARCHAR(20)  NOT NULL DEFAULT '',
-            last_punch_time DATETIME     NULL DEFAULT NULL,
-            last_sync_at    TIMESTAMP    NULL DEFAULT NULL,
-            punches_total   INT UNSIGNED NOT NULL DEFAULT 0,
-            PRIMARY KEY (device_id)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // One API key per client PC, stored as a SHA-256 hash so the key
-        // itself never sits in the database.
-        "CREATE TABLE IF NOT EXISTS biometric_api_keys (
-            id           INT          NOT NULL AUTO_INCREMENT,
-            key_hash     CHAR(64)     NOT NULL,
-            label        VARCHAR(100) NOT NULL DEFAULT '',
-            device_id    VARCHAR(40)  NOT NULL DEFAULT '',
-            active       TINYINT(1)   NOT NULL DEFAULT 1,
-            last_used_at TIMESTAMP    NULL DEFAULT NULL,
-            created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id),
-            UNIQUE KEY uq_key_hash (key_hash)
-        ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-    ];
+    /* Each statement must be safe on a database that already has it - a failure is ignored */
+    $patches = [];
 
     /*
-     * Run the list only when it has changed since the last run. The database
-     * is in the cloud (~350 ms a round trip), so firing ~45 statements on
-     * every page load cost 10+ seconds and could stall the single-threaded
-     * local server. A fingerprint of the list is kept in settings; a normal
-     * page load now costs one query.
+     * Run only when something has changed since the last run. The database is in the cloud (~350 ms a round trip), so
+     * checking on every page load would cost seconds. A fingerprint of the layout and the patch list is kept in settings.
      */
-    $version = md5(implode("\n", $patches));
+    $version = md5(SCHEMA_LAYOUT . "\n" . implode("\n", $patches));
     try {
         $st = $db->prepare("SELECT setting_value FROM settings WHERE setting_key = 'schema_version'");
         $st->execute();
         if ($st->fetchColumn() === $version) return;
-    } catch (PDOException $e) { /* fresh install: no settings table yet - run everything */ }
+    } catch (PDOException $e) { /* no settings table: a fresh install, or an older layout - looked at below */ }
+
+    installSchemaIfEmpty($db);
+
+    /* A database from an older layout would fail on the first query that reads it: say what to do instead, and remember
+       nothing, so the next page load looks again (it costs a couple of queries until the update has been run). */
+    if (($problem = schemaLayoutProblem($db)) !== null) {
+        showAppError($problem, '', 503);
+    }
 
     foreach ($patches as $sql) {
         try { $db->exec($sql); } catch (PDOException $e) {}
     }
-
-    // Adopt whatever branch names the employee rows already use, so an
-    // existing install starts with a populated list instead of an empty one.
-    // INSERT IGNORE against the unique key makes this safe to repeat.
-    try {
-        $db->exec("INSERT IGNORE INTO branches (name)
-                   SELECT DISTINCT TRIM(branch) FROM employees
-                    WHERE branch IS NOT NULL AND TRIM(branch) <> ''");
-    } catch (PDOException $e) {}
 
     // Seed the admin user on first-ever run. The first password comes from
     // the ADMIN_INITIAL_PASSWORD environment variable. Without it, a local
@@ -406,18 +56,203 @@ function applySchemaPatches(): void {
     // sign-in); the live site creates no admin at all rather than one anybody
     // could guess. After this runs once, credentials live only in users.
     try {
-        $count = (int)$db->query("SELECT COUNT(*) FROM users WHERE role='admin'")->fetchColumn();
+        $count = (int)$db->query("SELECT COUNT(*) FROM users WHERE role = 'Admin'")->fetchColumn();
         $first = (string)(getenv('ADMIN_INITIAL_PASSWORD') ?: '');
         if ($count === 0 && ($first !== '' || APP_ENV !== 'production')) {
             $email = getSetting('admin_email', 'admin@lnpharmacy.com') ?: 'admin@lnpharmacy.com';
             $db->prepare("INSERT INTO users (full_name, email, password_hash, role)
-                          VALUES ('Admin', ?, ?, 'admin')")
+                          VALUES ('Admin', ?, ?, 'Admin')")
                ->execute([$email, password_hash($first !== '' ? $first : DEFAULT_ADMIN_PASSWORD, PASSWORD_BCRYPT)]);
         }
     } catch (PDOException $e) {}
 
-    /* Done - remember this list so the next page load skips it */
+    /* Done - remember this layout so the next page load skips all of it */
     try { setSetting('schema_version', $version); } catch (PDOException $e) {}
+}
+
+/*
+ * A database with none of the payroll tables is built from sql/database.sql. If any of them exists nothing is built, so a
+ * database in an older layout is never built over.
+ */
+function installSchemaIfEmpty(PDO $db): void {
+    try {
+        $n = (int)$db->query("SELECT COUNT(*) FROM information_schema.TABLES
+                               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ('settings', 'employees', 'users', 'payroll')")->fetchColumn();
+    } catch (PDOException $e) {
+        return;
+    }
+    $file = __DIR__ . '/../sql/database.sql';
+    if ($n > 0 || !is_file($file)) return;
+    foreach (splitSqlStatements((string)file_get_contents($file)) as $stmt) {
+        $db->exec($stmt);
+    }
+}
+
+/* The statements of a .sql file, in order, without comments: split on ";" outside quotes and comments */
+function splitSqlStatements(string $sql): array {
+    $out = [];
+    $cur = '';
+    $n   = strlen($sql);
+    for ($i = 0; $i < $n; $i++) {
+        $c    = $sql[$i];
+        $next = $i + 1 < $n ? $sql[$i + 1] : '';
+        if ($c === '-' && $next === '-' && ($i + 2 >= $n || in_array($sql[$i + 2], [' ', "\t", "\r", "\n"], true))) {
+            while ($i < $n && $sql[$i] !== "\n") $i++;               /* "-- " comment to the end of the line */
+            $cur .= "\n";
+            continue;
+        }
+        if ($c === '/' && $next === '*') {
+            $end = strpos($sql, '*/', $i + 2);
+            $i   = $end === false ? $n : $end + 1;
+            $cur .= ' ';
+            continue;
+        }
+        if ($c === "'" || $c === '"' || $c === '`') {
+            $q = $c;
+            $cur .= $c;
+            for ($i++; $i < $n; $i++) {
+                $d = $sql[$i];
+                $cur .= $d;
+                if ($d === '\\' && $q !== '`' && $i + 1 < $n) { $cur .= $sql[++$i]; continue; }
+                if ($d === $q) {
+                    if ($i + 1 < $n && $sql[$i + 1] === $q) { $cur .= $sql[++$i]; continue; }
+                    break;
+                }
+            }
+            continue;
+        }
+        if ($c === ';') {
+            if (trim($cur) !== '') $out[] = trim($cur);
+            $cur = '';
+            continue;
+        }
+        $cur .= $c;
+    }
+    if (trim($cur) !== '') $out[] = trim($cur);
+    return $out;
+}
+
+/*
+ * Null when the database is in the layout this version reads. Otherwise it still has an older one (emp_id in employees,
+ * attendance, employee_profiles ...) and the answer is what to do: sql/migrate-standard-schema.sql converts it and keeps
+ * every record. A layout older than 2026-10-15 (no employee_id) needs sql/migrate-employee-id.sql first.
+ */
+function schemaLayoutProblem(PDO $db): ?string {
+    try {
+        $st = $db->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+                           WHERE TABLE_SCHEMA = DATABASE()
+                             AND ((TABLE_NAME = 'employees' AND COLUMN_NAME IN ('emp_id', 'employee_code'))
+                               OR (TABLE_NAME = 'payroll'   AND COLUMN_NAME IN ('employee_id', 'emp_id')))");
+        $have = [];
+        foreach ($st->fetchAll() as $r) $have[$r['TABLE_NAME'] . '.' . $r['COLUMN_NAME']] = true;
+    } catch (PDOException $e) {
+        return null;    /* cannot tell - let the page try */
+    }
+    if (!isset($have['employees.emp_id'])) return null;
+    $steps = isset($have['payroll.emp_id'])
+           ? 'Run sql/migrate-employee-id.sql and then sql/migrate-standard-schema.sql'
+           : 'Run sql/migrate-standard-schema.sql';
+    return 'The database needs a one-time update before this version of the payroll can open it: it is still in the older layout '
+         . '(emp_id, employee_profiles, attendance, bonus_deductions ...). '
+         . $steps . ' on the database (in DBeaver; it keeps every record), then reload this page.';
+}
+
+/*
+ * employees.id for an employee code as people see it (EMP-004), or null when there is no such employee. Tables store
+ * employee_id = employees.id, while forms, files, sessions and payslips carry the code - which this app calls emp_id in its
+ * own arrays, forms and URLs and which is the employee_code column; this is where one becomes the other.
+ */
+function employeePk(PDO $db, string $empId): ?int {
+    return employeePks($db, [$empId])[$empId] ?? null;
+}
+
+/* The same for many codes in one query: emp_id => employees.id, for those that exist (compared the way MySQL compares them) */
+function employeePks(PDO $db, array $empIds): array {
+    $empIds = array_values(array_unique(array_map('strval', $empIds)));
+    if (!$empIds) return [];
+    $st = $db->prepare("SELECT id, employee_code FROM employees WHERE employee_code IN (" . implode(',', array_fill(0, count($empIds), '?')) . ")");
+    $st->execute($empIds);
+    $out = [];
+    foreach ($st->fetchAll() as $e) {
+        $out[(string)$e['employee_code']] = (int)$e['id'];
+        /* a code typed in another letter case or with a trailing space still finds its employee, as it did in SQL */
+        foreach ($empIds as $asked) {
+            if (!isset($out[$asked]) && strcasecmp(rtrim($asked), rtrim((string)$e['employee_code'])) === 0) $out[$asked] = (int)$e['id'];
+        }
+    }
+    return $out;
+}
+
+/*
+ * The employee list in the form every page and the pay computation reads it: the employee_code as emp_id, the position and
+ * branch NAMES (they are rows in positions and branches), and the department. Use it wherever an employee's own columns are
+ * needed together with those names:
+ *     SELECT e.*, ... FROM employees e [EMPLOYEE_JOINS] ...
+ * EMPLOYEE_COLUMNS adds emp_id, position, branch and department to e.* .
+ */
+const EMPLOYEE_COLUMNS = "e.*, e.employee_code AS emp_id, COALESCE(pos.title, '') AS `position`, COALESCE(br.name, '') AS branch, COALESCE(dep.name, '') AS department";
+const EMPLOYEE_JOINS   = "LEFT JOIN branches br ON br.id = e.branch_id LEFT JOIN positions pos ON pos.id = e.position_id LEFT JOIN departments dep ON dep.id = pos.department_id";
+
+/*
+ * A pay line in the shape the payslips, the register, the reports and the employee portal read it: every payroll column, plus
+ *   emp_id, emp_name, branch, position           from employees (and its branch and position)
+ *   hours_worked, overtime_hours, late_hours, undertime_hours, absent_days, leave_days, days_off    from attendance_summary
+ *   sss, philhealth, pagibig, bonus               the short names of sss_deduction, philhealth_deduction, pagibig_deduction, bonus_pay
+ *   ot_late_adj                                   gross_pay - basic_pay: overtime pay less what lateness cost
+ *   absent_deduction, undertime_deduction         absence_deduction and tardy_undertime_deduction
+ * Use with PAY_LINE_JOINS and the payroll table aliased p:
+ *     SELECT PAY_LINE_COLUMNS, pp.period_label FROM payroll p PAY_LINE_JOINS JOIN payroll_periods pp ON pp.id = p.period_id
+ */
+const PAY_LINE_COLUMNS = "p.*, e.employee_code AS emp_id, e.full_name AS emp_name, COALESCE(br.name, '') AS branch, COALESCE(pos.title, '') AS `position`,
+        p.sss_deduction AS sss, p.philhealth_deduction AS philhealth, p.pagibig_deduction AS pagibig, p.bonus_pay AS bonus,
+        p.gross_pay - p.basic_pay AS ot_late_adj, p.absence_deduction AS absent_deduction, p.tardy_undertime_deduction AS undertime_deduction,
+        COALESCE(s.total_hours_worked, 0) AS hours_worked, COALESCE(s.total_overtime_hours, 0) AS overtime_hours,
+        COALESCE(s.total_late_hours, 0) AS late_hours, COALESCE(s.total_undertime_hours, 0) AS undertime_hours,
+        COALESCE(s.absent_days, 0) AS absent_days, COALESCE(s.leave_days, 0) AS leave_days, COALESCE(s.days_off, 0) AS days_off";
+const PAY_LINE_JOINS = "JOIN employees e ON e.id = p.employee_id
+        LEFT JOIN branches br ON br.id = e.branch_id LEFT JOIN positions pos ON pos.id = e.position_id
+        LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id";
+
+/*
+ * A bonus / deduction entry as the history pages and receipts read it: entry_type (the type column), the employee's emp_id and
+ * emp_name, and processed_by as the NAME of the account that recorded it. Table aliased h:
+ *     SELECT ADJ_LINE_COLUMNS FROM bonus_deductions h ADJ_LINE_JOINS
+ */
+const ADJ_LINE_COLUMNS = "h.id, h.employee_id, h.period_id, h.type AS entry_type, h.amount, h.reason, h.entry_date, h.finalize_cycle, h.created_at,
+        e.employee_code AS emp_id, e.full_name AS emp_name, COALESCE(u.full_name, '') AS processed_by";
+const ADJ_LINE_JOINS   = "JOIN employees e ON e.id = h.employee_id LEFT JOIN users u ON u.id = h.processed_by";
+
+/*
+ * A leave request as the leave pages read it: the employee's emp_id and emp_name, and reviewed_by as the NAME of the account that
+ * decided it. Table aliased lr:
+ *     SELECT LEAVE_LINE_COLUMNS FROM leave_requests lr LEAVE_LINE_JOINS
+ */
+const LEAVE_LINE_COLUMNS = "lr.id, lr.employee_id, lr.leave_type, lr.date_from, lr.date_to, lr.reason, lr.status, lr.review_note, lr.reviewed_at, lr.created_at,
+        e.employee_code AS emp_id, e.full_name AS emp_name, COALESCE(ru.full_name, '') AS reviewed_by";
+const LEAVE_LINE_JOINS   = "JOIN employees e ON e.id = lr.employee_id LEFT JOIN users ru ON ru.id = lr.reviewed_by";
+/* the same, with the employee's branch, position and day-off schedule (the leave pages' detail dialogs) */
+const LEAVE_FULL_COLUMNS = LEAVE_LINE_COLUMNS . ", COALESCE(br.name, '') AS branch, COALESCE(pos.title, '') AS `position`, e.rest_days";
+const LEAVE_FULL_JOINS   = LEAVE_LINE_JOINS . " LEFT JOIN branches br ON br.id = e.branch_id LEFT JOIN positions pos ON pos.id = e.position_id";
+
+/* positions.id for a typed position title: the existing one (compared the way MySQL does, so another letter case is the same), or a new one. null for a blank title. */
+function positionId(PDO $db, string $title): ?int {
+    $title = trim($title);
+    if ($title === '') return null;
+    $st = $db->prepare("SELECT id FROM positions WHERE title = ? LIMIT 1");
+    $st->execute([$title]);
+    if ($id = $st->fetchColumn()) return (int)$id;
+    $db->prepare("INSERT INTO positions (title) VALUES (?)")->execute([mb_substr($title, 0, 100)]);
+    return (int)$db->lastInsertId();
+}
+
+/* branches.id for a branch name, or null when the name is blank or is not in the list */
+function branchId(PDO $db, string $name): ?int {
+    $name = trim($name);
+    if ($name === '') return null;
+    $st = $db->prepare("SELECT id FROM branches WHERE name = ? LIMIT 1");
+    $st->execute([$name]);
+    $id = $st->fetchColumn();
+    return $id ? (int)$id : null;
 }
 
 /*
@@ -873,11 +708,13 @@ function employeeDayHours(array $emp, array $ctx): float {
 }
 
 /*
- * A row of the employees table, as the pay computation reads it.
+ * A row of the employees table, as the pay computation reads it. The employee code is employee_code in the table and
+ * emp_id in this app's own arrays (EMPLOYEE_COLUMNS adds the alias); either is accepted.
  */
 function payEmployee(array $e): array {
     return [
-        'emp_id'            => (string)$e['emp_id'],
+        'id'                => (int)($e['id'] ?? 0),        /* employees.id - what payroll rows store as employee_id */
+        'emp_id'            => (string)($e['emp_id'] ?? $e['employee_code'] ?? ''),
         'full_name'         => (string)($e['full_name'] ?? ''),
         'base_salary'       => (float)($e['base_salary'] ?? 0),
         'salary_type'       => $e['salary_type'] ?? 'monthly',
@@ -955,8 +792,9 @@ function dayUndertime(array $d, float $dayHours): float {
  * contributionBreakdown) - they do not depend on what was earned. Net pay is
  * gross less those four.
  *
- * Returns gross, basic, ot_late_adj, sss, philhealth, pagibig, tax, net,
- * absent_deduction, undertime_hours, undertime_deduction.
+ * Returns gross, basic, overtime_pay, late_deduction, ot_late_adj (overtime pay - late deduction), sss, philhealth,
+ * pagibig, tax, net, absent_deduction, undertime_hours, undertime_deduction.
+ * (payroll.basic_pay, overtime_pay, tardy_undertime_deduction = late_deduction + undertime_deduction, absence_deduction.)
  */
 function computePayLine(array $emp, float $paidHours, float $ot, float $late, bool $perDay, array $ctx, array $abs = []): array {
     $rate      = (float)$emp['base_salary'];
@@ -1001,6 +839,7 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
     $net = round($gross - ($tax + $sss + $ph + $pag), 2);
 
     return ['gross' => $gross, 'basic' => $basic, 'tax' => $tax, 'ot_late_adj' => $otLate,
+            'overtime_pay' => $otPay, 'late_deduction' => $lateDeduction,
             'sss' => $sss, 'philhealth' => $ph, 'pagibig' => $pag, 'net' => $net,
             'absent_deduction' => $absentDed, 'undertime_hours' => round($under, 2),
             'undertime_deduction' => $underDed];
@@ -1067,15 +906,16 @@ function attendanceCalendar(PDO $db, array $empIds, string $from, string $to): a
     if (!$empIds) return [];
     $in  = implode(',', array_fill(0, count($empIds), '?'));
     $cal = [];
-    $st  = $db->prepare("SELECT * FROM employees WHERE emp_id IN ($in)");
+    $st  = $db->prepare("SELECT " . EMPLOYEE_COLUMNS . " FROM employees e " . EMPLOYEE_JOINS . " WHERE e.employee_code IN ($in)");
     $st->execute($empIds);
     foreach ($st->fetchAll() as $e) {
         $cal[$e['emp_id']] = ['rest' => restDayList($e['rest_days'] ?? null),
                               'branch' => (string)($e['branch'] ?? ''), 'leave' => []];
     }
     $rank = ['Rejected' => 1, 'Pending' => 2, 'Approved' => 3];
-    $st = $db->prepare("SELECT emp_id, leave_type, date_from, date_to, status FROM leave_requests
-                         WHERE emp_id IN ($in) AND date_from <= ? AND date_to >= ?");
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, lr.leave_type, lr.date_from, lr.date_to, lr.status
+                          FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id
+                         WHERE e.employee_code IN ($in) AND lr.date_from <= ? AND lr.date_to >= ?");
     $st->execute(array_merge($empIds, [$to, $from]));
     foreach ($st->fetchAll() as $l) {
         if (!isset($cal[$l['emp_id']])) continue;
@@ -1117,7 +957,7 @@ function dayStatus(?array $cal, string $date, bool $worked, bool $markedOff = fa
  */
 function defaultPeriodId(PDO $db, array $periods): int {
     $ids  = array_map('intval', array_column($periods, 'id'));
-    $last = (int)$db->query("SELECT period_id FROM payroll ORDER BY created_at DESC, id DESC LIMIT 1")->fetchColumn();
+    $last = (int)$db->query("SELECT period_id FROM payroll ORDER BY updated_at DESC, id DESC LIMIT 1")->fetchColumn();
     return ($last && in_array($last, $ids, true)) ? $last : ($ids[0] ?? 0);
 }
 
@@ -1131,7 +971,7 @@ function periodType(?string $stored): string {
 function periodTypeLabel(array $period): string {
     $type = periodType($period['period_type'] ?? null);
     if ($type !== 'Semi-Monthly') return $type;
-    return 'Semi-Monthly · ' . ((int)date('j', strtotime($period['period_start'])) <= 15 ? '1st half' : '2nd half');
+    return 'Semi-Monthly · ' . ((int)date('j', strtotime($period['start_date'])) <= 15 ? '1st half' : '2nd half');
 }
 
 /*
@@ -1140,34 +980,28 @@ function periodTypeLabel(array $period): string {
  * touches no database, so it can be checked against sample timesheets.
  */
 function payContext(PDO $db, int $periodId): array {
-    try {
-        $st = $db->prepare("SELECT period_start, period_end, period_type FROM payroll_periods WHERE id = ?");
-        $st->execute([$periodId]);
-    } catch (PDOException $e) {
-        /* period_type not added yet (pages add it on load) - use the default */
-        $st = $db->prepare("SELECT period_start, period_end, NULL AS period_type FROM payroll_periods WHERE id = ?");
-        $st->execute([$periodId]);
-    }
-    $row   = $st->fetch() ?: ['period_start' => date('Y-m-01'), 'period_end' => date('Y-m-t'), 'period_type' => null];
-    $start = $row['period_start'];
+    $st = $db->prepare("SELECT start_date, end_date, period_type FROM payroll_periods WHERE id = ?");
+    $st->execute([$periodId]);
+    $row   = $st->fetch() ?: ['start_date' => date('Y-m-01'), 'end_date' => date('Y-m-t'), 'period_type' => null];
+    $start = $row['start_date'];
 
     /*
      * Contributions and tax are settled per calendar MONTH. What earlier pay
      * runs of this same month already earned, deducted and withheld, per
      * employee - each cut-off then only takes what is still due.
-     * gross_pay holds everything earned (basic + overtime − late), so basic
-     * pay is gross_pay − ot_late_adj.
+     * (basic_pay is the basic pay of the run; gross_pay also holds overtime and the late deduction.)
      */
     $monthStart  = date('Y-m-01', strtotime($start));
     $earlier     = [];
     $earlierRuns = 0;
     try {
         $st = $db->prepare("
-            SELECT p.emp_id, SUM(p.gross_pay) g, SUM(p.gross_pay - p.ot_late_adj) basic,
-                   SUM(p.sss) s, SUM(p.philhealth) ph, SUM(p.pagibig) pg, SUM(p.withholding_tax) tax
+            SELECT e.employee_code AS emp_id, SUM(p.gross_pay) g, SUM(p.basic_pay) basic,
+                   SUM(p.sss_deduction) s, SUM(p.philhealth_deduction) ph, SUM(p.pagibig_deduction) pg, SUM(p.withholding_tax) tax
               FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
-             WHERE pp.id <> ? AND pp.period_start >= ? AND pp.period_end < ?
-             GROUP BY p.emp_id");
+              JOIN employees e ON e.id = p.employee_id
+             WHERE pp.id <> ? AND pp.start_date >= ? AND pp.end_date < ?
+             GROUP BY e.id, e.employee_code");
         /* only runs that ENDED before this one began - an overlapping period
            (e.g. an old whole-month period over the same days) is not history */
         $st->execute([$periodId, $monthStart, $start]);
@@ -1175,7 +1009,7 @@ function payContext(PDO $db, int $periodId): array {
             $earlier[$r['emp_id']] = ['g' => (float)$r['g'], 'basic' => (float)$r['basic'], 'sss' => (float)$r['s'],
                                       'philhealth' => (float)$r['ph'], 'pagibig' => (float)$r['pg'], 'tax' => (float)$r['tax']];
         }
-        $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND period_start >= ? AND period_end < ?");
+        $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND start_date >= ? AND end_date < ?");
         $st->execute([$periodId, $monthStart, $start]);
         $earlierRuns = (int)$st->fetchColumn();
     } catch (PDOException $e) { /* older database: no history, each run stands alone */ }
@@ -1184,12 +1018,12 @@ function payContext(PDO $db, int $periodId): array {
 }
 
 /*
- * The pay context for a period row (period_start, period_end, period_type),
+ * The pay context for a period row (start_date, end_date, period_type),
  * given what earlier runs of the month carried (emp_id => EARLIER_NONE shape).
  */
 function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 0): array {
-    $start = $period['period_start'];
-    $end   = $period['period_end'] ?? $start;
+    $start = $period['start_date'];
+    $end   = $period['end_date'] ?? $start;
     $type  = periodType($period['period_type'] ?? null);
 
     /* The month's last pay run - where the month is settled in full */
@@ -1322,7 +1156,7 @@ function nameKey(string $name): string {
 function employeeResolver(PDO $db): callable {
     $ids    = [];
     $byName = [];
-    foreach ($db->query("SELECT emp_id, full_name FROM employees")->fetchAll() as $e) {
+    foreach ($db->query("SELECT employee_code AS emp_id, full_name FROM employees")->fetchAll() as $e) {
         $id       = (string)$e['emp_id'];
         $ids[$id] = true;
         $byName[nameKey($e['full_name'])][] = $id;
@@ -1382,7 +1216,7 @@ function uploadPeriodGuard(PDO $db, int $periodId, array $who): void {
 }
 
 /*
- * Brings a period's attendance + payroll rows in line with freshly computed
+ * Brings a period's attendance_summary + payroll rows in line with freshly computed
  * ones. Uploads repeat - today's file, then tomorrow's, or the same sheet
  * again with one more line per person - so this must be safe to run any
  * number of times:
@@ -1398,39 +1232,47 @@ function uploadPeriodGuard(PDO $db, int $periodId, array $who): void {
  *     New days mean new hours, and those go back to Pending for review;
  *   - in a period that was already finalized once (and re-opened), a line
  *     whose net pay changes is flagged Revised.
- * Attendance tuples: period, emp, name, hours, ot, late, gross, tax.
- * Payroll tuples: period, emp, name, hours, ot, late, gross, tax, ot_late_adj,
- * sss, philhealth, pagibig, bonus [12], deductions [13], net [14] (before
- * bonus and deductions), absent days [15], leave days [16], absence
- * deduction [17], undertime hours [18], undertime deduction [19], days off
- * [20] - the last six 0 when left out (a totals file has no days to judge).
+ * Attendance tuples (attendance_summary): period, emp, total hours worked, overtime hours, late hours, undertime hours,
+ *   absent days, leave days, days off, manually entered (0/1).
+ * Payroll tuples: period, emp, basic pay, overtime pay, gross pay, SSS, PhilHealth, Pag-IBIG, withholding tax,
+ *   tardy + undertime deduction, absence deduction, net pay (before bonus and deductions).
+ * "emp" is the emp_id (EMP-004, the employee_code column); the rows are stored under that employee's employees.id.
+ * A tuple for an emp_id that is not an employee is left out.
  */
 function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, array $payRows): void {
     $st = $db->prepare("SELECT finalize_count FROM payroll_periods WHERE id = ?");
     $st->execute([$periodId]);
     $reopened = (int)$st->fetchColumn() > 0 ? 1 : 0;
 
-    foreach ($payRows as &$p) {
-        $p += [15 => 0, 16 => 0, 17 => 0, 18 => 0, 19 => 0, 20 => 0];
-        $p[12] = 0; $p[13] = 0;                  /* a new line starts without adjustments */
-        ksort($p);
-    }
-    unset($p);
+    /* emp_id -> employees.id in every tuple */
+    $pk = employeePks($db, array_merge(array_column($attRows, 1), array_column($payRows, 1)));
+    $toPk = function (array $rows) use ($pk): array {
+        $out = [];
+        foreach ($rows as $r) {
+            if (!isset($pk[(string)$r[1]])) continue;
+            $r[1] = $pk[(string)$r[1]];
+            $out[] = $r;
+        }
+        return $out;
+    };
+    $attRows = $toPk($attRows);
+    $payRows = $toPk($payRows);
 
     $db->beginTransaction();
     try {
         /* Lines of employees (in scope) who are no longer in the period */
-        $keep = array_map(fn($p) => (string)$p[1], $payRows);
-        foreach (['attendance', 'payroll'] as $table) {
+        $keep = array_map(fn($p) => (int)$p[1], $payRows);
+        foreach (['attendance_summary', 'payroll'] as $table) {
             $sql  = "DELETE FROM $table WHERE period_id = ?";
             $args = [$periodId];
             if ($who['scope'] !== null) {
                 if (!$who['scope']) continue;
-                $sql .= ' AND emp_id IN (' . implode(',', array_fill(0, count($who['scope']), '?')) . ')';
+                $sql .= ' AND employee_id IN (SELECT id FROM employees WHERE employee_code IN ('
+                      . implode(',', array_fill(0, count($who['scope']), '?')) . '))';
                 $args = array_merge($args, array_values($who['scope']));
             }
             if ($keep) {
-                $sql .= ' AND emp_id NOT IN (' . implode(',', array_fill(0, count($keep), '?')) . ')';
+                $sql .= ' AND employee_id NOT IN (' . implode(',', array_fill(0, count($keep), '?')) . ')';
                 $args = array_merge($args, $keep);
             }
             $db->prepare($sql)->execute($args);
@@ -1438,41 +1280,38 @@ function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, a
 
         /* Approval survives only while the hours are unchanged. MySQL applies
            the SET list left to right, so the checks come before the hours. */
-        $same = "hours_worked = VALUES(hours_worked) AND overtime_hours = VALUES(overtime_hours)
-                 AND late_hours = VALUES(late_hours)";
+        $same = "total_hours_worked = VALUES(total_hours_worked) AND total_overtime_hours = VALUES(total_overtime_hours)
+                 AND total_late_hours = VALUES(total_late_hours)";
         bulkInsert($db,
-            "INSERT INTO attendance (period_id,emp_id,emp_name,hours_worked,overtime_hours,late_hours,gross_pay,withholding_tax,gross_incl_ot) VALUES",
-            "(?,?,?,?,?,?,?,?,1)", $attRows,
+            "INSERT INTO attendance_summary (period_id,employee_id,total_hours_worked,total_overtime_hours,total_late_hours,
+                                             total_undertime_hours,absent_days,leave_days,days_off,is_manually_entered) VALUES",
+            "(?,?,?,?,?,?,?,?,?,?)", $attRows,
             "ON DUPLICATE KEY UPDATE
-                manager_approved = IF($same, manager_approved, 0),
-                approved_by      = IF($same, approved_by, NULL),
-                approved_at      = IF($same, approved_at, NULL),
-                emp_name = VALUES(emp_name), hours_worked = VALUES(hours_worked),
-                overtime_hours = VALUES(overtime_hours), late_hours = VALUES(late_hours),
-                gross_pay = VALUES(gross_pay), withholding_tax = VALUES(withholding_tax), gross_incl_ot = 1");
+                approval_status = IF($same, approval_status, 'Pending'),
+                approved_by     = IF($same, approved_by, NULL),
+                approved_at     = IF($same, approved_at, NULL),
+                total_hours_worked = VALUES(total_hours_worked), total_overtime_hours = VALUES(total_overtime_hours),
+                total_late_hours = VALUES(total_late_hours), total_undertime_hours = VALUES(total_undertime_hours),
+                absent_days = VALUES(absent_days), leave_days = VALUES(leave_days), days_off = VALUES(days_off),
+                is_manually_entered = VALUES(is_manually_entered)");
 
         /* The new net keeps the row's own bonus and deductions. Revised is
            decided before net_pay is overwritten (left-to-right again). */
-        $newNet  = "(VALUES(net_pay) + bonus - other_deductions)";
+        $newNet  = "(VALUES(net_pay) + bonus_pay - other_deductions)";
         $changed = "($reopened = 1 AND ABS(net_pay - $newNet) >= 0.005)";
         bulkInsert($db,
-            "INSERT INTO payroll (period_id,emp_id,emp_name,hours_worked,overtime_hours,late_hours,
-                                  gross_pay,withholding_tax,ot_late_adj,sss,philhealth,pagibig,
-                                  bonus,other_deductions,net_pay,absent_days,leave_days,absent_deduction,
-                                  undertime_hours,undertime_deduction,days_off,status,gross_incl_ot) VALUES",
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Draft',1)", $payRows,
+            "INSERT INTO payroll (period_id,employee_id,basic_pay,overtime_pay,gross_pay,sss_deduction,philhealth_deduction,
+                                  pagibig_deduction,withholding_tax,tardy_undertime_deduction,absence_deduction,net_pay,status) VALUES",
+            "(?,?,?,?,?,?,?,?,?,?,?,?,'Draft')", $payRows,
             "ON DUPLICATE KEY UPDATE
                 revised_at = IF($changed, NOW(), revised_at),
                 revised_after_finalize = IF($changed, 1, revised_after_finalize),
                 net_pay = $newNet,
-                emp_name = VALUES(emp_name), hours_worked = VALUES(hours_worked),
-                overtime_hours = VALUES(overtime_hours), late_hours = VALUES(late_hours),
-                gross_pay = VALUES(gross_pay), withholding_tax = VALUES(withholding_tax),
-                ot_late_adj = VALUES(ot_late_adj), sss = VALUES(sss), philhealth = VALUES(philhealth),
-                pagibig = VALUES(pagibig), absent_days = VALUES(absent_days), leave_days = VALUES(leave_days),
-                absent_deduction = VALUES(absent_deduction), undertime_hours = VALUES(undertime_hours),
-                undertime_deduction = VALUES(undertime_deduction), days_off = VALUES(days_off),
-                status = 'Draft', gross_incl_ot = 1, created_at = CURRENT_TIMESTAMP");
+                basic_pay = VALUES(basic_pay), overtime_pay = VALUES(overtime_pay), gross_pay = VALUES(gross_pay),
+                sss_deduction = VALUES(sss_deduction), philhealth_deduction = VALUES(philhealth_deduction),
+                pagibig_deduction = VALUES(pagibig_deduction), withholding_tax = VALUES(withholding_tax),
+                tardy_undertime_deduction = VALUES(tardy_undertime_deduction), absence_deduction = VALUES(absence_deduction),
+                status = 'Draft', updated_at = CURRENT_TIMESTAMP");
         $db->commit();
     } catch (PDOException $e) {
         $db->rollBack();
@@ -1481,7 +1320,7 @@ function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, a
 }
 
 /*
- * Rebuilds a period's attendance + payroll from every day saved for it in
+ * Rebuilds a period's attendance + payroll from every day saved inside its dates in
  * biometric_daily - earlier uploads, today's upload and manual entries alike.
  * This is what lets days accumulate: each save adds or replaces only its own
  * days, then the whole period is summed again. A manager recomputes only
@@ -1490,34 +1329,33 @@ function rewritePeriodRows(PDO $db, int $periodId, array $who, array $attRows, a
 function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     $ctx = payContext($db, $periodId);
 
-    $pr = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
+    $pr = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
     $pr->execute([$periodId]);
     $per = $pr->fetch();
 
     $emps = [];
-    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['emp_id']] = payEmployee($er);
+    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['employee_code']] = payEmployee($er);
     $inScope = fn($id) => $who['scope'] === null || in_array((string)$id, array_map('strval', $who['scope']), true);
 
-    /* Every day saved for the period. Only the period's own dates count -
-       rows an old upload left outside them are ignored. */
-    $st = $db->prepare("SELECT emp_id, att_date, hours_worked, overtime_hours, late_hours, undertime_hours, day_off
-                          FROM biometric_daily WHERE period_id = ? AND att_date BETWEEN ? AND ?");
-    $st->execute([$periodId, $per['period_start'], $per['period_end']]);
+    /* Every day saved inside the period's dates (a day belongs to the period that holds its date) */
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours, b.undertime_hours, b.is_day_off, b.entered_by
+                          FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
+                         WHERE b.att_date BETWEEN ? AND ?");
+    $st->execute([$per['start_date'], $per['end_date']]);
     $byEmp   = [];   /* emp_id => that employee's day rows */
     $worked  = [];   /* emp_id => [date => true]: days with hours */
     $offDay  = [];   /* emp_id => [date => true]: days the timesheet marks OFF */
     $covered = [];   /* emp_id => last date any record covers (worked, off or a 0-hour day) */
+    $manual  = [];   /* emp_id => true: a day was typed in by hand (Manual Attendance) */
     foreach ($st->fetchAll() as $d) {
         $byEmp[$d['emp_id']][] = $d;
         if ((float)$d['hours_worked'] > 0) $worked[$d['emp_id']][$d['att_date']] = true;
-        elseif ((int)$d['day_off'] === 1)  $offDay[$d['emp_id']][$d['att_date']] = true;
+        elseif ((int)$d['is_day_off'] === 1) $offDay[$d['emp_id']][$d['att_date']] = true;
         $covered[$d['emp_id']] = max($covered[$d['emp_id']] ?? '', $d['att_date']);
+        if ($d['entered_by'] !== null) $manual[$d['emp_id']] = true;
     }
 
-    /* One line per employee ID: one person spelled two ways is still one line.
-       Days filed under a biometric number by an older upload (not a registered
-       employee) have no rate, so no payroll line. Nor does someone whose only
-       records are days off. */
+    /* One line per employee: someone whose only records are days off gets no payroll line. */
     $lines = [];
     foreach ($byEmp as $id => $days) {
         if (isset($emps[$id]) && $inScope($id) && (isset($worked[$id]) || count($days) > count($offDay[$id] ?? []))) {
@@ -1541,15 +1379,15 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
      * to the latest day any record of the employee's branch covers.
      */
     /* Someone on approved leave with no hours at all still gets a line */
-    $st = $db->prepare("SELECT DISTINCT emp_id FROM leave_requests
-                         WHERE status = 'Approved' AND date_from <= ? AND date_to >= ?");
-    $st->execute([$per['period_end'], $per['period_start']]);
+    $st = $db->prepare("SELECT DISTINCT e.employee_code FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id
+                         WHERE lr.status = 'Approved' AND lr.date_from <= ? AND lr.date_to >= ?");
+    $st->execute([$per['end_date'], $per['start_date']]);
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
         if (isset($emps[$id]) && $inScope($id)) $lines[$id] = true;
     }
 
     $cal = attendanceCalendar($db, array_merge(array_keys($lines), array_keys($covered)),
-                              $per['period_start'], $per['period_end']);
+                              $per['start_date'], $per['end_date']);
     $judgedTo = [];   /* branch => last day the uploads cover */
     foreach ($covered as $id => $last) {
         $b = $cal[$id]['branch'] ?? '';
@@ -1563,11 +1401,11 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
         $absent = $leave = $off = 0;
         $upTo   = $judgedTo[$cal[$id]['branch'] ?? ''] ?? '';
         $salary = $emp['salary_type'] !== 'daily';
-        for ($d = $per['period_start']; $d <= $per['period_end']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+        for ($d = $per['start_date']; $d <= $per['end_date']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
             $s = dayStatus($cal[$id] ?? null, $d, isset($worked[$id][$d]), isset($offDay[$id][$d]));
             if ($s === 'leave')                    $leave++;
             if ($s === 'off'    && $d <= $upTo)    $off++;
-            /* A working day the file does not account for is unpaid on a salary (absent_days / absent_deduction, one day's rate each),
+            /* A working day the file does not account for is unpaid on a salary (absent_days / absence_deduction, one day's rate each),
                however far the uploads have got; for a daily rate it is only shown, up to the last uploaded day */
             if ($s === 'absent' && ($salary || $d <= $upTo)) $absent++;
         }
@@ -1582,26 +1420,15 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
         $pay = computePayLine($emp, $paid, $t['ot'], $t['late'], true, $ctx, [
             'absent'       => $absent,
             'undertime'    => $t['under'],
-            'working_days' => workingDaysInMonth($per['period_start'], $cal[$id]['rest'] ?? [7]),
+            'working_days' => workingDaysInMonth($per['start_date'], $cal[$id]['rest'] ?? [7]),
         ]);
 
-        $attRows[] = [$periodId, $id, $emp['full_name'], $t['hours'], $t['ot'], $t['late'], $pay['gross'], $pay['tax']];
-        $payRows[] = [$periodId, $id, $emp['full_name'], $t['hours'], $t['ot'], $t['late'],
-                      $pay['gross'], $pay['tax'], $pay['ot_late_adj'], $pay['sss'], $pay['philhealth'],
-                      $pay['pagibig'], 0, 0, $pay['net'], $absent, $leave, $pay['absent_deduction'],
-                      $pay['undertime_hours'], $pay['undertime_deduction'], $off];
+        $attRows[] = [$periodId, $id, $t['hours'], $t['ot'], $t['late'], $pay['undertime_hours'], $absent, $leave, $off, empty($manual[$id]) ? 0 : 1];
+        $payRows[] = [$periodId, $id, $pay['basic'], $pay['overtime_pay'], $pay['gross'], $pay['sss'], $pay['philhealth'], $pay['pagibig'], $pay['tax'],
+                      round($pay['late_deduction'] + $pay['undertime_deduction'], 2), $pay['absent_deduction'], $pay['net']];
     }
 
     rewritePeriodRows($db, $periodId, $who, $attRows, $payRows);
-
-    /* Timesheets show which lines include a hand-entered day (and stop
-       saying so once an upload has replaced those days) */
-    $db->prepare("UPDATE attendance a
-               LEFT JOIN (SELECT emp_id, MAX(entered_by) eb FROM biometric_daily
-                           WHERE period_id = ? AND entered_by IS NOT NULL GROUP BY emp_id) d
-                      ON a.emp_id = d.emp_id
-                     SET a.manually_entered_by = d.eb
-                   WHERE a.period_id = ?")->execute([$periodId, $periodId]);
     return count($payRows);
 }
 
@@ -1615,7 +1442,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
  */
 function decideLeave(PDO $db, int $id, string $action, string $note, ?array $scope): array {
     if (!in_array($action, ['approve', 'reject'], true)) return ['type' => 'error', 'text' => 'Unknown action.'];
-    $st = $db->prepare("SELECT * FROM leave_requests WHERE id = ?");
+    $st = $db->prepare("SELECT lr.*, e.employee_code AS emp_id FROM leave_requests lr JOIN employees e ON e.id = lr.employee_id WHERE lr.id = ?");
     $st->execute([$id]);
     $lr = $st->fetch();
     if (!$lr || ($scope !== null && !in_array($lr['emp_id'], $scope, true))) {
@@ -1623,7 +1450,7 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
     }
     $status = $action === 'approve' ? 'Approved' : 'Rejected';
     $db->prepare("UPDATE leave_requests SET status = ?, reviewed_by = ?, review_note = ?, reviewed_at = NOW() WHERE id = ?")
-       ->execute([$status, currentActor(), $note, $id]);
+       ->execute([$status, currentUserId(), $note, $id]);
 
     $text = "Leave request {$status}.";
     try {
@@ -1638,7 +1465,7 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
     }
     /* A finalized period is never changed behind the admin's back */
     $st = $db->prepare("SELECT period_label FROM payroll_periods
-                         WHERE status <> 'Open' AND period_start <= ? AND period_end >= ?");
+                         WHERE status <> 'Open' AND start_date <= ? AND end_date >= ?");
     $st->execute([$lr['date_to'], $lr['date_from']]);
     if ($locked = $st->fetchAll(PDO::FETCH_COLUMN)) {
         $text .= ' ' . implode(', ', $locked) . ' is finalized, so its payroll was not changed - '
@@ -1655,8 +1482,8 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
  */
 function recomputeEmployeeOpenPeriods(PDO $db, string $empId, string $from, string $to): array {
     $st = $db->prepare("SELECT p.id FROM payroll_periods p
-                         WHERE p.status = 'Open' AND p.period_start <= ? AND p.period_end >= ?
-                           AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.period_id = p.id)");
+                         WHERE p.status = 'Open' AND p.start_date <= ? AND p.end_date >= ?
+                           AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.att_date BETWEEN p.start_date AND p.end_date)");
     $st->execute([$to, $from]);
     $ids = [];
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
@@ -1667,7 +1494,7 @@ function recomputeEmployeeOpenPeriods(PDO $db, string $empId, string $from, stri
 
     /* oldest first: each cut-off settles the month against the ones before it */
     $in = implode(',', array_fill(0, count($ids), '?'));
-    $st = $db->prepare("SELECT id, period_label FROM payroll_periods WHERE id IN ($in) ORDER BY period_start");
+    $st = $db->prepare("SELECT id, period_label FROM payroll_periods WHERE id IN ($in) ORDER BY start_date");
     $st->execute(array_keys($ids));
     $done = [];
     foreach ($st->fetchAll() as $p) {
@@ -1684,15 +1511,15 @@ function recomputeEmployeeOpenPeriods(PDO $db, string $empId, string $from, stri
  * period changes they have to be recomputed as well.
  */
 function laterPeriodsInMonth(PDO $db, int $periodId): array {
-    $st = $db->prepare("SELECT period_start, period_end FROM payroll_periods WHERE id = ?");
+    $st = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
     $st->execute([$periodId]);
     $p = $st->fetch();
     if (!$p) return [];
     $st = $db->prepare("SELECT l.id FROM payroll_periods l
-                         WHERE l.status = 'Open' AND l.id <> ? AND l.period_start > ? AND l.period_start <= ?
-                           AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.period_id = l.id)
-                         ORDER BY l.period_start");
-    $st->execute([$periodId, $p['period_end'], date('Y-m-t', strtotime($p['period_start']))]);
+                         WHERE l.status = 'Open' AND l.id <> ? AND l.start_date > ? AND l.start_date <= ?
+                           AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.att_date BETWEEN l.start_date AND l.end_date)
+                         ORDER BY l.start_date");
+    $st->execute([$periodId, $p['end_date'], date('Y-m-t', strtotime($p['start_date']))]);
     return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
 }
 
@@ -1720,17 +1547,19 @@ function recomputeMonthFrom(PDO $db, int $periodId, array $who): int {
 function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
     $ctx ??= payContext($db, $periodId);
     $emps = [];
-    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['emp_id']] = payEmployee($er);
-    $st = $db->prepare("SELECT * FROM payroll WHERE period_id = ?");
+    foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['employee_code']] = payEmployee($er);
+    $st = $db->prepare("SELECT p.*, e.employee_code AS emp_id FROM payroll p JOIN employees e ON e.id = p.employee_id WHERE p.period_id = ?");
     $st->execute([$periodId]);
     $out = [];
+    /* the answer is keyed by the short names; the payroll columns are the *_deduction ones */
+    $column = ['sss' => 'sss_deduction', 'philhealth' => 'philhealth_deduction', 'pagibig' => 'pagibig_deduction', 'withholding_tax' => 'withholding_tax'];
     foreach ($st->fetchAll() as $r) {
-        $emp   = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
-        $gross = (float)$r['gross_pay'];
-        $c     = contributionBreakdown($emp, $gross - (float)$r['ot_late_adj'], $ctx);
+        $emp = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
+        $c   = contributionBreakdown($emp, (float)$r['basic_pay'], $ctx);
         $now = ['sss' => $c['ee']['sss'], 'philhealth' => $c['ee']['philhealth'], 'pagibig' => $c['ee']['pagibig'], 'withholding_tax' => $c['tax']];
-        foreach ($now as $col => $v) {
-            if (abs($v - (float)$r[$col]) >= 0.005) $out[$r['emp_id']][$col] = [(float)$r[$col], $v];
+        foreach ($now as $key => $v) {
+            $stored = (float)$r[$column[$key]];
+            if (abs($v - $stored) >= 0.005) $out[$r['emp_id']][$key] = [$stored, $v];
         }
     }
     return $out;
@@ -1742,14 +1571,14 @@ function settlementDrift(PDO $db, int $periodId, ?array $ctx = null): array {
  * months afterwards does not make last month's payroll wrong - and "recomputing" it would rewrite history.
  */
 function earlierRunChangedAfterFinalize(PDO $db, int $periodId): bool {
-    $st = $db->prepare("SELECT period_start, finalized_at FROM payroll_periods WHERE id = ?");
+    $st = $db->prepare("SELECT start_date, finalized_at FROM payroll_periods WHERE id = ?");
     $st->execute([$periodId]);
     $p = $st->fetch();
     if (!$p) return false;
     $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods e
-                         WHERE e.id <> ? AND e.period_start >= ? AND e.period_end < ?
+                         WHERE e.id <> ? AND e.start_date >= ? AND e.end_date < ?
                            AND (e.status = 'Open' OR (? IS NOT NULL AND e.finalized_at >= ?))");
-    $st->execute([$periodId, date('Y-m-01', strtotime($p['period_start'])), $p['period_start'], $p['finalized_at'], $p['finalized_at']]);
+    $st->execute([$periodId, date('Y-m-01', strtotime($p['start_date'])), $p['start_date'], $p['finalized_at'], $p['finalized_at']]);
     return (int)$st->fetchColumn() > 0;
 }
 
@@ -1762,7 +1591,8 @@ function pesoFmt($n, int $decimals = 2): string {
 /* Payroll lines whose net pay is below zero - the employee's monthly contribution and tax amounts or a deduction exceed what was earned.
    [['emp_id','emp_name','net_pay'], …] */
 function negativeNetLines(PDO $db, int $periodId): array {
-    $st = $db->prepare("SELECT emp_id, emp_name, net_pay FROM payroll WHERE period_id = ? AND net_pay < 0 ORDER BY emp_name");
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, e.full_name AS emp_name, p.net_pay FROM payroll p JOIN employees e ON e.id = p.employee_id
+                         WHERE p.period_id = ? AND p.net_pay < 0 ORDER BY e.full_name");
     $st->execute([$periodId]);
     return $st->fetchAll();
 }
@@ -1789,19 +1619,21 @@ function negativeNetLines(PDO $db, int $periodId): array {
  */
 function thirteenthMonthData(PDO $db, int $year): array {
     $names = [];
-    foreach ($db->query("SELECT emp_id, full_name, status, branch FROM employees")->fetchAll() as $e) $names[$e['emp_id']] = $e;
+    foreach ($db->query("SELECT e.employee_code AS emp_id, e.full_name, e.status, COALESCE(br.name, '') AS branch
+                           FROM employees e LEFT JOIN branches br ON br.id = e.branch_id")->fetchAll() as $e) $names[$e['emp_id']] = $e;
 
     $cents = fn($v): int => (int)round((float)$v * 100);
     $rows  = [];
 
-    $st = $db->prepare("SELECT p.emp_id, MAX(p.emp_name) AS emp_name, MONTH(pp.period_start) AS m, SUM(p.gross_pay - p.ot_late_adj) AS basic
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, MONTH(pp.start_date) AS m, SUM(p.basic_pay) AS basic
                           FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
-                         WHERE YEAR(pp.period_start) = ?
-                         GROUP BY p.emp_id, MONTH(pp.period_start)");
+                          JOIN employees e ON e.id = p.employee_id
+                         WHERE YEAR(pp.start_date) = ?
+                         GROUP BY e.id, e.employee_code, MONTH(pp.start_date)");
     $st->execute([$year]);
     foreach ($st->fetchAll() as $r) {
         $id = (string)$r['emp_id'];
-        $rows[$id] ??= ['emp_id' => $id, 'full_name' => $names[$id]['full_name'] ?? $r['emp_name'], 'status' => $names[$id]['status'] ?? 'Removed',
+        $rows[$id] ??= ['emp_id' => $id, 'full_name' => $names[$id]['full_name'] ?? $id, 'status' => $names[$id]['status'] ?? 'Removed',
                         'branch' => trim((string)($names[$id]['branch'] ?? '')), 'cents' => array_fill(1, 12, 0), 'sum' => 0];
         $rows[$id]['cents'][(int)$r['m']] += $cents($r['basic']);
         $rows[$id]['sum']                 += $cents($r['basic']);
@@ -1809,14 +1641,16 @@ function thirteenthMonthData(PDO $db, int $year): array {
 
     /* bonuses recorded for that year: all of them, and the 13th-month ones among them (a history row with no period counts in the year it was entered) */
     $paid = $bonus = [];
-    $st = $db->prepare("SELECT p.emp_id, SUM(p.bonus) AS b FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
-                         WHERE YEAR(pp.period_start) = ? GROUP BY p.emp_id");
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, SUM(p.bonus_pay) AS b FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
+                          JOIN employees e ON e.id = p.employee_id
+                         WHERE YEAR(pp.start_date) = ? GROUP BY e.id, e.employee_code");
     $st->execute([$year]);
     foreach ($st->fetchAll() as $r) $bonus[(string)$r['emp_id']] = $cents($r['b']);
-    $st = $db->prepare("SELECT h.emp_id, SUM(h.amount) AS a FROM bonus_deduction_history h LEFT JOIN payroll_periods pp ON pp.id = h.period_id
-                         WHERE h.entry_type = 'Bonus' AND h.reason LIKE '13th Month Pay%'
-                           AND COALESCE(YEAR(pp.period_start), YEAR(h.entry_date)) = ?
-                         GROUP BY h.emp_id");
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, SUM(h.amount) AS a FROM bonus_deductions h LEFT JOIN payroll_periods pp ON pp.id = h.period_id
+                          JOIN employees e ON e.id = h.employee_id
+                         WHERE h.type = 'Bonus' AND h.reason LIKE '13th Month Pay%'
+                           AND COALESCE(YEAR(pp.start_date), YEAR(h.entry_date)) = ?
+                         GROUP BY e.id, e.employee_code");
     $st->execute([$year]);
     foreach ($st->fetchAll() as $r) $paid[(string)$r['emp_id']] = $cents($r['a']);
 
@@ -1841,9 +1675,9 @@ function thirteenthMonthData(PDO $db, int $year): array {
     foreach ($monthSum as $m => $c) $totals['accrual'][$m] = intdiv(2 * $c + 12, 24) / 100;
     foreach (['basic', 'due', 'paid', 'balance'] as $k) $totals[$k] /= 100;
 
-    $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(pp.status = 'Open'), 0) AS open_n, MAX(pp.period_end) AS last_end
+    $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(pp.status = 'Open'), 0) AS open_n, MAX(pp.end_date) AS last_end
                           FROM payroll_periods pp
-                         WHERE YEAR(pp.period_start) = ? AND EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)");
+                         WHERE YEAR(pp.start_date) = ? AND EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)");
     $st->execute([$year]);
     $meta = $st->fetch();
     return ['year' => $year, 'rows' => $out, 'periods' => (int)$meta['n'], 'open_periods' => (int)$meta['open_n'],
@@ -1854,7 +1688,7 @@ function thirteenthMonthData(PDO $db, int $year): array {
  * recordAdjustments() - add bonuses or deductions to the payroll lines of ONE open period. The single code path behind the
  * Adjustments page and the 13th Month Pay page, so both obey the same rules and leave the same trail.
  *
- *   $period  a payroll_periods row (id, period_start, finalize_count) - the caller has checked that it is Open
+ *   $period  a payroll_periods row (id, start_date, finalize_count) - the caller has checked that it is Open
  *   $lines   emp_id => amount (pesos, > 0): one entry per employee
  *   $type    'Bonus' | 'Deduction'
  *
@@ -1871,25 +1705,26 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
     $periodId   = (int)$period['id'];
     $cycle      = (int)($period['finalize_count'] ?? 0);
     $isRevision = $cycle > 0;          /* finalized, re-opened and now being corrected: stamped on the history row and the payroll row */
-    $who        = currentActor();
-    $periodYear = (int)date('Y', strtotime($period['period_start']));
+    $who        = currentUserId();
+    $periodYear = (int)date('Y', strtotime($period['start_date']));
 
     $getPR = $db->prepare(
-        "SELECT id, emp_id, emp_name, gross_pay, withholding_tax, ot_late_adj,
-                sss, philhealth, pagibig, bonus, other_deductions
-           FROM payroll WHERE period_id = ? AND emp_id = ?"
+        "SELECT p.id, p.employee_id, e.employee_code AS emp_id, e.full_name AS emp_name, p.gross_pay, p.withholding_tax,
+                p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.bonus_pay, p.other_deductions
+           FROM payroll p JOIN employees e ON e.id = p.employee_id
+          WHERE p.period_id = ? AND e.employee_code = ?"
     );
     /* status stays Draft: the period is open, so these rows are not final */
-    $updPR    = $db->prepare("UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft' WHERE id = ?");
-    $updPRrev = $db->prepare("UPDATE payroll SET bonus = ?, other_deductions = ?, net_pay = ?, status = 'Draft',
+    $updPR    = $db->prepare("UPDATE payroll SET bonus_pay = ?, other_deductions = ?, net_pay = ?, status = 'Draft' WHERE id = ?");
+    $updPRrev = $db->prepare("UPDATE payroll SET bonus_pay = ?, other_deductions = ?, net_pay = ?, status = 'Draft',
                                      revised_after_finalize = 1, revised_at = NOW() WHERE id = ?");
-    $histIns  = $db->prepare("INSERT INTO bonus_deduction_history
-                              (entry_date, emp_id, emp_name, entry_type, amount, reason, processed_by, period_id, finalize_cycle)
-                              VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?)");
+    $histIns  = $db->prepare("INSERT INTO bonus_deductions
+                              (entry_date, employee_id, type, amount, reason, processed_by, period_id, finalize_cycle)
+                              VALUES (CURDATE(), ?, ?, ?, ?, ?, ?, ?)");
     /* Bonuses already on this employee's payroll rows in the period's calendar year (this row included) */
-    $ytdBonus = $db->prepare("SELECT COALESCE(SUM(p.bonus), 0) FROM payroll p
+    $ytdBonus = $db->prepare("SELECT COALESCE(SUM(p.bonus_pay), 0) FROM payroll p
                                 JOIN payroll_periods pp ON pp.id = p.period_id
-                               WHERE p.emp_id = ? AND YEAR(pp.period_start) = ?");
+                               WHERE p.employee_id = ? AND YEAR(pp.start_date) = ?");
 
     $applied = [];
     $skipped = $negative = $over = $overIds = [];
@@ -1905,13 +1740,13 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
             $row = $getPR->fetch();
             if (!$row) { $skipped[] = $eid; continue; }
 
-            $bonus = (float)$row['bonus'];
+            $bonus = (float)$row['bonus_pay'];
             $ded   = (float)$row['other_deductions'];
             if ($type === 'Bonus') $bonus += $amount; else $ded += $amount;
 
             /* net = gross (overtime already in it) + bonus − (tax + SSS + PhilHealth + Pag-IBIG + deductions) */
             $net = ((float)$row['gross_pay'] + $bonus)
-                 - ((float)$row['withholding_tax'] + (float)$row['sss'] + (float)$row['philhealth'] + (float)$row['pagibig'] + $ded);
+                 - ((float)$row['withholding_tax'] + (float)$row['sss_deduction'] + (float)$row['philhealth_deduction'] + (float)$row['pagibig_deduction'] + $ded);
 
             if ($type === 'Deduction' && round($net, 2) < 0) {
                 $negative[] = $row['emp_name'] . ' (net pay would be −₱' . number_format(-$net, 2) . ')';
@@ -1920,7 +1755,7 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
 
             /* This system does not withhold on a bonus, so one that crosses the ceiling needs a person's decision first. */
             if ($type === 'Bonus' && !$confirmOverExempt) {
-                $ytdBonus->execute([$eid, $periodYear]);
+                $ytdBonus->execute([$row['employee_id'], $periodYear]);
                 $ytd = (float)$ytdBonus->fetchColumn() + $amount;      /* the row's own bonus is already in the sum */
                 if ($ytd > BIR_EXEMPT_BENEFITS + 0.004) {
                     $over[]    = $row['emp_name'] . ' (' . $periodYear . ' bonuses would be ₱' . number_format($ytd, 2)
@@ -1931,7 +1766,7 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
             }
 
             ($isRevision ? $updPRrev : $updPR)->execute([$bonus, $ded, round($net, 2), $row['id']]);
-            $histIns->execute([$eid, $row['emp_name'], $type, $amount, $reason, $who, $periodId, $cycle]);
+            $histIns->execute([$row['employee_id'], $type, $amount, $reason, $who, $periodId, $cycle]);
             $applied[$eid] = $amount;
             $total += $amount;
         }
@@ -1960,69 +1795,35 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
  * Returns period_id => ['sss','ec','philhealth','pagibig','total'] in pesos.
  */
 function employerSharesByPeriod(PDO $db): array {
-    $periods = $db->query("SELECT id, period_start, period_end FROM payroll_periods ORDER BY period_start, id")->fetchAll();
+    $periods = $db->query("SELECT id, start_date, end_date FROM payroll_periods ORDER BY start_date, id")->fetchAll();
     $lines = [];
-    foreach ($db->query("SELECT period_id, emp_id, gross_pay, ot_late_adj, sss, philhealth, pagibig FROM payroll")->fetchAll() as $r) {
+    foreach ($db->query("SELECT period_id, employee_id, gross_pay, basic_pay, sss_deduction AS sss, philhealth_deduction AS philhealth, pagibig_deduction AS pagibig FROM payroll")->fetchAll() as $r) {
         $lines[$r['period_id']][] = $r;
     }
     $out = [];
     foreach ($periods as $p) {
-        $monthStart = date('Y-m-01', strtotime($p['period_start']));
+        $monthStart = date('Y-m-01', strtotime($p['start_date']));
         $earlier = [];
         foreach ($periods as $q) {      /* runs of the same month that ended before this one began (as payContext() does) */
-            if ((int)$q['id'] === (int)$p['id'] || $q['period_start'] < $monthStart || $q['period_end'] >= $p['period_start']) continue;
+            if ((int)$q['id'] === (int)$p['id'] || $q['start_date'] < $monthStart || $q['end_date'] >= $p['start_date']) continue;
             foreach ($lines[$q['id']] ?? [] as $r) {
-                $e = &$earlier[$r['emp_id']];
+                $e = &$earlier[$r['employee_id']];
                 $e ??= EARLIER_NONE;
-                $e['basic'] += (float)$r['gross_pay'] - (float)$r['ot_late_adj'];
+                $e['basic'] += (float)$r['basic_pay'];
                 $e['sss']   += (float)$r['sss'];
                 unset($e);
             }
         }
         $tot = ['sss' => 0.0, 'ec' => 0.0, 'philhealth' => 0.0, 'pagibig' => 0.0];
         foreach ($lines[$p['id']] ?? [] as $r) {
-            $prev = $earlier[$r['emp_id']] ?? EARLIER_NONE;
+            $prev = $earlier[$r['employee_id']] ?? EARLIER_NONE;
             $b    = employerShare(['sss' => (float)$r['sss'], 'philhealth' => (float)$r['philhealth'], 'pagibig' => (float)$r['pagibig']],
-                                  $prev, $prev['basic'] + (float)$r['gross_pay'] - (float)$r['ot_late_adj']);
+                                  $prev, $prev['basic'] + (float)$r['basic_pay']);
             foreach ($tot as $k => $_) $tot[$k] += $b[$k];
         }
         $row = array_map(fn($v) => round($v, 2), $tot);
         $row['total'] = round(array_sum($row), 2);
         $out[(int)$p['id']] = $row;
-    }
-    return $out;
-}
-
-/*
- * Of the given "emp_id|YYYY-MM-DD" days, the ones already saved in ANOTHER
- * period that covers that date, as key => that period's label. A day
- * belongs to one pay period only, or it would be paid twice.
- */
-function dailyDaysElsewhere(PDO $db, int $periodId, array $keys): array {
-    if (!$keys) return [];
-    $ids   = [];
-    $dates = [];
-    foreach ($keys as $k) {
-        [$id, $date] = explode('|', $k, 2);
-        $ids[$id] = true;
-        $dates[]  = $date;
-    }
-    $ids = array_keys($ids);
-    $in  = implode(',', array_fill(0, count($ids), '?'));
-    $st  = $db->prepare("
-        SELECT b.emp_id, b.att_date, p.period_label
-          FROM biometric_daily b
-          JOIN payroll_periods p ON p.id = b.period_id
-         WHERE b.period_id <> ? AND b.emp_id IN ($in)
-           AND b.att_date BETWEEN ? AND ?
-           AND b.att_date BETWEEN p.period_start AND p.period_end");
-    $st->execute(array_merge([$periodId], $ids, [min($dates), max($dates)]));
-
-    $want = array_flip($keys);
-    $out  = [];
-    foreach ($st->fetchAll() as $d) {
-        $key = $d['emp_id'] . '|' . $d['att_date'];
-        if (isset($want[$key])) $out[$key] = $d['period_label'];
     }
     return $out;
 }
@@ -2041,17 +1842,18 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
     $end   = date('Y-m-t', strtotime($start));
     $std   = max(1, (float)getSetting('standard_hours', '8'));
 
-    $empSql  = "SELECT emp_id, full_name, branch, hours_per_day FROM employees WHERE status = 'Active'";
+    $empSql  = "SELECT e.employee_code AS emp_id, e.full_name, COALESCE(br.name, '') AS branch, e.hours_per_day
+                  FROM employees e LEFT JOIN branches br ON br.id = e.branch_id WHERE e.status = 'Active'";
     $dayScope = '';
     $args     = [];
     if ($scope !== null) {
         if (!$scope) $scope = [''];
         $in       = implode(',', array_fill(0, count($scope), '?'));
-        $empSql  .= " AND emp_id IN ($in)";
-        $dayScope = " AND b.emp_id IN ($in)";
+        $empSql  .= " AND e.employee_code IN ($in)";
+        $dayScope = " AND b.employee_id IN (SELECT id FROM employees WHERE employee_code IN ($in))";
         $args     = array_values($scope);
     }
-    $st = $db->prepare($empSql . ' ORDER BY full_name');
+    $st = $db->prepare($empSql . ' ORDER BY e.full_name');
     $st->execute($args);
     $emps = [];
     foreach ($st->fetchAll() as $e) {
@@ -2061,13 +1863,17 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
                                'manual' => 0, 'last' => null, 'covered' => '', 'gross' => null, 'net' => null];
     }
 
+    /* a day belongs to the pay period that holds its date (a day outside every period does not count) */
     $st = $db->prepare("
-        SELECT b.emp_id, b.emp_name, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours,
-               b.undertime_hours, b.day_off, b.entered_by, p.period_label
+        SELECT e.employee_code AS emp_id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours,
+               b.undertime_hours, b.is_day_off, ub.full_name AS entered_by, p.period_label
           FROM biometric_daily b
-          JOIN payroll_periods p ON p.id = b.period_id
-         WHERE b.att_date BETWEEN ? AND ?
-           AND b.att_date BETWEEN p.period_start AND p.period_end $dayScope
+          JOIN employees e ON e.id = b.employee_id
+          JOIN payroll_periods p ON p.id = (SELECT p2.id FROM payroll_periods p2
+                                             WHERE b.att_date BETWEEN p2.start_date AND p2.end_date
+                                             ORDER BY p2.start_date, p2.id LIMIT 1)
+          LEFT JOIN users ub ON ub.id = b.entered_by
+         WHERE b.att_date BETWEEN ? AND ? $dayScope
          ORDER BY b.att_date");
     $st->execute(array_merge([$start, $end], $args));
     $last = null;
@@ -2078,7 +1884,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
         $under = $h > 0 ? dayUndertime($d, $emps[$id]['std']) : 0.0;
         $emps[$id]['days'][(int)substr($d['att_date'], 8, 2)] = [
             'hours' => $h, 'ot' => (float)$d['overtime_hours'], 'late' => (float)$d['late_hours'],
-            'under' => $under, 'off' => $h <= 0 && (int)$d['day_off'] === 1,
+            'under' => $under, 'off' => $h <= 0 && (int)$d['is_day_off'] === 1,
             'manual' => $d['entered_by'], 'period' => $d['period_label'],
         ];
         if ($h > 0) {
@@ -2137,16 +1943,17 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
     unset($e);
 
     /* Pay periods that fall inside the month, and their payroll so far */
-    $pst = $db->prepare("SELECT id, period_label, period_start, period_end, status FROM payroll_periods
-                          WHERE period_start <= ? AND period_end >= ? ORDER BY period_start");
+    $pst = $db->prepare("SELECT id, period_label, start_date, end_date, status FROM payroll_periods
+                          WHERE start_date <= ? AND end_date >= ? ORDER BY start_date");
     $pst->execute([$end, $start]);
     $periods = $pst->fetchAll();
 
     if ($withPay && $periods) {
         $ids = array_column($periods, 'id');
-        $st  = $db->prepare("SELECT emp_id, SUM(gross_pay) g, SUM(net_pay) n FROM payroll
-                              WHERE period_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
-                              GROUP BY emp_id");
+        $st  = $db->prepare("SELECT e.employee_code AS emp_id, SUM(p.gross_pay) g, SUM(p.net_pay) n
+                               FROM payroll p JOIN employees e ON e.id = p.employee_id
+                              WHERE p.period_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
+                              GROUP BY e.id, e.employee_code");
         $st->execute($ids);
         foreach ($st->fetchAll() as $p) {
             if (!isset($emps[$p['emp_id']])) continue;
@@ -2194,11 +2001,11 @@ function leaveDaysLabel(string $from, string $to, ?string $restDays): string {
 function currentPeriod(PDO $db, bool $openOnly = false): ?array {
     $open  = $openOnly ? " AND status = 'Open'" : '';
     $today = date('Y-m-d');
-    $st = $db->prepare("SELECT * FROM payroll_periods WHERE period_start <= ? AND period_end >= ?$open
-                         ORDER BY period_start DESC LIMIT 1");
+    $st = $db->prepare("SELECT * FROM payroll_periods WHERE start_date <= ? AND end_date >= ?$open
+                         ORDER BY start_date DESC LIMIT 1");
     $st->execute([$today, $today]);
     if ($p = $st->fetch()) return $p;
-    $st = $db->query("SELECT * FROM payroll_periods WHERE 1 = 1$open ORDER BY period_start DESC, id DESC LIMIT 1");
+    $st = $db->query("SELECT * FROM payroll_periods WHERE 1 = 1$open ORDER BY start_date DESC, id DESC LIMIT 1");
     return $st->fetch() ?: null;
 }
 
@@ -2207,9 +2014,9 @@ function currentPeriod(PDO $db, bool $openOnly = false): ?array {
  * covering the same days would pay those days twice.
  */
 function overlappingPeriod(PDO $db, string $start, string $end, int $exceptId = 0): ?array {
-    $st = $db->prepare("SELECT id, period_label, period_start, period_end, period_type FROM payroll_periods
-                         WHERE period_start <= ? AND period_end >= ? AND id <> ?
-                         ORDER BY period_start LIMIT 1");
+    $st = $db->prepare("SELECT id, period_label, start_date, end_date, period_type FROM payroll_periods
+                         WHERE start_date <= ? AND end_date >= ? AND id <> ?
+                         ORDER BY start_date LIMIT 1");
     $st->execute([$end, $start, $exceptId]);
     return $st->fetch() ?: null;
 }
@@ -2223,17 +2030,18 @@ function overlappingPeriod(PDO $db, string $start, string $end, int $exceptId = 
 function saveBioLinks(PDO $db, $links, array $who): void {
     if (!is_array($links) || !$links) return;
     $scope = $who['scope'] === null ? null : array_flip($who['scope']);
-    $known = $db->prepare("SELECT COUNT(*) FROM employees WHERE emp_id = ?");
-    $save  = $db->prepare("INSERT INTO biometric_employee_map (device_user_id, emp_id) VALUES (?, ?)
-                           ON DUPLICATE KEY UPDATE emp_id = VALUES(emp_id)");
+    $known = $db->prepare("SELECT id FROM employees WHERE employee_code = ?");
+    $save  = $db->prepare("INSERT INTO biometric_employee_map (device_user_id, employee_id) VALUES (?, ?)
+                           ON DUPLICATE KEY UPDATE employee_id = VALUES(employee_id)");
     foreach ($links as $deviceId => $empId) {
         $deviceId = substr(trim((string)$deviceId), 0, 32);
         $empId    = trim((string)$empId);
         if ($deviceId === '' || $empId === '') continue;
         if ($scope !== null && !isset($scope[$empId])) continue;
         $known->execute([$empId]);
-        if (!$known->fetchColumn()) continue;
-        $save->execute([$deviceId, $empId]);
+        $pk = $known->fetchColumn();
+        if (!$pk) continue;
+        $save->execute([$deviceId, (int)$pk]);
     }
 }
 
@@ -2245,13 +2053,14 @@ function saveBioLinks(PDO $db, $links, array $who): void {
  */
 function uploadPageScript(PDO $db, ?array $scope): string {
     $emps = [];
-    foreach ($db->query("SELECT emp_id, full_name FROM employees ORDER BY full_name")->fetchAll() as $e) {
+    foreach ($db->query("SELECT employee_code AS emp_id, full_name FROM employees ORDER BY full_name")->fetchAll() as $e) {
         if ($scope === null || in_array($e['emp_id'], $scope, true)) {
             $emps[] = ['emp_id' => $e['emp_id'], 'full_name' => $e['full_name']];
         }
     }
     $map = [];
-    foreach ($db->query("SELECT device_user_id, emp_id FROM biometric_employee_map")->fetchAll() as $m) {
+    foreach ($db->query("SELECT m.device_user_id, e.employee_code AS emp_id FROM biometric_employee_map m
+                           JOIN employees e ON e.id = m.employee_id")->fetchAll() as $m) {
         $map[$m['device_user_id']] = $m['emp_id'];
     }
     $shift = [
@@ -2342,7 +2151,7 @@ function signatureCurrent($netSigned, $netNow): bool {
  * longer change, and stamped with the net pay it acknowledges.
  * Returns [ok, message].
  */
-function savePayslipSignature(PDO $db, array $payrollRow, string $periodLabel, string $signatureData): array {
+function savePayslipSignature(PDO $db, array $payrollRow, string $signatureData): array {
     if (!preg_match('#^data:image/png;base64,[A-Za-z0-9+/]+={0,2}$#', $signatureData) || strlen($signatureData) > 2000000) {
         return [false, 'That signature could not be read. Clear the pad and sign again.'];
     }
@@ -2352,17 +2161,18 @@ function savePayslipSignature(PDO $db, array $payrollRow, string $periodLabel, s
         return [false, 'This pay period is still open, so its figures can still change. '
                      . 'Finalize it in Payroll Processing first, then collect the signature.'];
     }
+    /* the employee, the period and their names are found through the pay line; signed_by_user is whoever collected the signature */
     $db->prepare("
-        INSERT INTO payslip_signatures (payroll_id, emp_id, emp_name, period_id, period_label, signature_data, net_signed)
-        VALUES (?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), net_signed = VALUES(net_signed), signed_at = NOW()
-    ")->execute([$payrollRow['id'], $payrollRow['emp_id'], $payrollRow['emp_name'],
-                 $payrollRow['period_id'], $periodLabel, $signatureData, $payrollRow['net_pay']]);
+        INSERT INTO payslip_signatures (payroll_id, signature_data, net_signed, signed_by_user)
+        VALUES (?,?,?,?)
+        ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), net_signed = VALUES(net_signed),
+                                signed_by_user = VALUES(signed_by_user), signed_at = NOW()
+    ")->execute([$payrollRow['id'], $signatureData, $payrollRow['net_pay'], currentUserId()]);
     return [true, 'Signature saved.'];
 }
 
 /*
- * currentActor() - the human name to stamp on an audit row.
+ * currentActor() - the human name to show for whoever is signed in (a message, a greeting).
  * Works from any portal: admin, manager or employee session.
  */
 function currentActor(): string {
@@ -2372,6 +2182,19 @@ function currentActor(): string {
         if ($v !== '') return $v;
     }
     return 'Admin';
+}
+
+/*
+ * currentUserId() - users.id of whoever is signed in, to stamp on an audit row (processed, reviewed, approved, printed,
+ * entered, signed by). Null when there is no session (a command-line run, a test without one).
+ */
+function currentUserId(): ?int {
+    if (session_status() === PHP_SESSION_NONE) session_start();
+    foreach (['admin_id', 'mgr_id', 'emp_user_id'] as $k) {
+        $v = (int)($_SESSION[$k] ?? 0);
+        if ($v > 0) return $v;
+    }
+    return null;
 }
 
 /*
@@ -2388,7 +2211,7 @@ function logPeriodAudit(int $periodId, string $action, int $cycle = 0, string $n
         getDB()->prepare(
             'INSERT INTO period_audit (period_id, action, cycle, performed_by, note)
              VALUES (?,?,?,?,?)'
-        )->execute([$periodId, $action, $cycle, currentActor(), $note !== '' ? $note : null]);
+        )->execute([$periodId, $action, $cycle, currentUserId(), $note !== '' ? $note : null]);
     } catch (PDOException $e) { /* never block the caller */ }
 }
 
@@ -2423,7 +2246,7 @@ function periodRevisionInfo(int $periodId): array {
         $st->execute([$periodId]);
         $out['revised'] = (int)$st->fetchColumn();
 
-        $st = $db->prepare('SELECT COUNT(*) FROM bonus_deduction_history
+        $st = $db->prepare('SELECT COUNT(*) FROM bonus_deductions
                              WHERE period_id = ? AND finalize_cycle > 0');
         $st->execute([$periodId]);
         $out['entries'] = (int)$st->fetchColumn();

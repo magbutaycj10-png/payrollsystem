@@ -20,7 +20,7 @@ $empCount = (int)$empCount->fetchColumn();
 
 $leaveSt = $db->prepare("
     SELECT COUNT(*) FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    JOIN employees e ON e.id = lr.employee_id
     WHERE lr.status='Pending' $scopeWhere
 ");
 $leaveSt->execute($scopeParams);
@@ -31,9 +31,9 @@ $openPeriod = currentPeriod($db, true);   /* the open period holding today, else
 $pendingTimesheets = 0;
 if ($openPeriod) {
     $atSt = $db->prepare("
-        SELECT COUNT(*) FROM attendance a
-        JOIN employees e ON e.emp_id = a.emp_id
-        WHERE a.period_id = ? AND a.manager_approved = 0 $scopeWhere
+        SELECT COUNT(*) FROM attendance_summary a
+        JOIN employees e ON e.id = a.employee_id
+        WHERE a.period_id = ? AND a.approval_status = 'Pending' $scopeWhere
     ");
     $atSt->execute(array_merge([$openPeriod['id']], $scopeParams));
     $pendingTimesheets = (int)$atSt->fetchColumn();

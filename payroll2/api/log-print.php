@@ -13,9 +13,8 @@ if (!$doc) jsonResponse(['error'=>'Missing document name'],400);
 
 try {
     $db = getDB();
-    $who = trim($_SESSION['admin'] ?? '') ?: 'Admin';
-    $st = $db->prepare("INSERT INTO print_log (document_name,document_type,period_id,printed_by) VALUES (?,?,?,?)");
-    $st->execute([$doc,$type,$pid ?: null,$who]);
+    $st = $db->prepare("INSERT INTO print_logs (document_name,document_type,period_id,printed_by) VALUES (?,?,?,?)");
+    $st->execute([$doc,$type,$pid ?: null,currentUserId()]);
     jsonResponse(['success'=>true]);
 } catch (PDOException $e) {
     jsonResponse(['error' => friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'], 500);

@@ -52,41 +52,41 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
         qa_sql_dataset();
         $db = getDB();
         $byId = array_column(qa_sql_checks(), null, 'id');
-        $emp = fn(string $like) => (string)$db->query("SELECT emp_id FROM employees ORDER BY id LIMIT 1 OFFSET " . (int)$like)->fetchColumn();
+        $emp = fn(string $like) => (string)$db->query("SELECT employee_code FROM employees ORDER BY id LIMIT 1 OFFSET " . (int)$like)->fetchColumn();
         // the employees were created in the order jan feb mar apr may jun jul aug sep
         [$jan, $feb, $mar, $apr, $may, $jun, $jul, $aug, $sep] = array_map($emp, range(0, 8));
-        $line = fn(string $e, int $nth = 0) => (int)$db->query("SELECT p.id FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id WHERE p.emp_id = '$e' ORDER BY pp.period_start LIMIT 1 OFFSET $nth")->fetchColumn();
-        $lastLine = fn(string $e) => (int)$db->query("SELECT p.id FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id WHERE p.emp_id = '$e' ORDER BY pp.period_start DESC LIMIT 1")->fetchColumn();
+        $line = fn(string $e, int $nth = 0) => (int)$db->query("SELECT p.id FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.id = p.employee_id WHERE e.employee_code = '$e' ORDER BY pp.start_date LIMIT 1 OFFSET $nth")->fetchColumn();
+        $lastLine = fn(string $e) => (int)$db->query("SELECT p.id FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.id = p.employee_id WHERE e.employee_code = '$e' ORDER BY pp.start_date DESC LIMIT 1")->fetchColumn();
+        $pk = fn(string $e) => (int)$db->query("SELECT id FROM employees WHERE employee_code = '$e'")->fetchColumn();     /* employees.id - what the tables store */
 
         $damage = [
             // check => [SQL statements that damage the data, a way to say how the finding is recognised]
             'C01' => ["UPDATE payroll SET net_pay = net_pay + 0.01 WHERE id = {$line($mar)}"],
             'C02' => ["UPDATE payroll SET net_pay = -25.50 WHERE id = {$line($mar)}"],
-            'C03' => ["UPDATE payroll SET sss = -1 WHERE id = {$line($mar)}"],
+            'C03' => ["UPDATE payroll SET sss_deduction = -1 WHERE id = {$line($mar)}"],
             'C04' => ["UPDATE payroll SET withholding_tax = -10 WHERE id = {$line($mar)}"],
-            'C05' => ["UPDATE attendance SET gross_pay = gross_pay + 1 WHERE emp_id = '$mar'"],
-            'C06' => ["UPDATE payroll SET status = 'Draft' WHERE emp_id = '$jan'"],
-            'C10' => ["UPDATE payroll SET sss = sss + 0.01 WHERE id = {$lastLine($jul)}"],
-            'C11' => ["UPDATE payroll SET philhealth = philhealth + 0.01 WHERE id = {$lastLine($mar)}"],
-            'C12' => ["UPDATE payroll SET pagibig = pagibig + 0.01 WHERE id = {$lastLine($mar)}"],
+            'C05' => ["DELETE FROM attendance_summary WHERE employee_id = {$pk($mar)} LIMIT 1"],
+            'C06' => ["UPDATE payroll SET status = 'Draft' WHERE employee_id = {$pk($jan)}"],
+            'C10' => ["UPDATE payroll SET sss_deduction = sss_deduction + 0.01 WHERE id = {$lastLine($jul)}"],
+            'C11' => ["UPDATE payroll SET philhealth_deduction = philhealth_deduction + 0.01 WHERE id = {$lastLine($mar)}"],
+            'C12' => ["UPDATE payroll SET pagibig_deduction = pagibig_deduction + 0.01 WHERE id = {$lastLine($mar)}"],
             'C13' => ["UPDATE payroll SET withholding_tax = withholding_tax + 0.01 WHERE id = {$lastLine($jul)}"],
-            'C20' => ["UPDATE biometric_daily SET hours_worked = 30 WHERE emp_id = '$feb' LIMIT 1"],
-            'C21' => ["UPDATE payroll SET hours_worked = 9999 WHERE id = {$line($mar)}"],
-            'C22' => ["INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES ('Dup', '2026-02-01', '2026-02-14', 'Semi-Monthly', 'Open')",
-                      "INSERT INTO biometric_daily (period_id, emp_id, emp_name, att_date, hours_worked) SELECT LAST_INSERT_ID(), emp_id, emp_name, att_date, hours_worked FROM biometric_daily WHERE emp_id = '$feb' LIMIT 1"],
-            'C23' => ["INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES ('Overlap', '2026-03-10', '2026-03-20', 'Semi-Monthly', 'Open')"],
-            'C30' => ["UPDATE employees SET base_salary = -500 WHERE emp_id = '$feb'"],
+            'C20' => ["UPDATE biometric_daily SET hours_worked = 30 WHERE employee_id = {$pk($feb)} LIMIT 1"],
+            'C21' => ["UPDATE attendance_summary a JOIN payroll p ON p.period_id = a.period_id AND p.employee_id = a.employee_id SET a.total_hours_worked = 9999 WHERE p.id = {$line($mar)}"],
+            'C22' => ["INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Dup', '2026-02-01', '2026-02-14', 'Semi-Monthly', 'Open')"],
+            'C23' => ["INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Overlap', '2026-03-10', '2026-03-20', 'Semi-Monthly', 'Open')"],
+            'C30' => ["UPDATE employees SET base_salary = -500 WHERE employee_code = '$feb'"],
             'C31' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('overtime_rate', '-45') ON DUPLICATE KEY UPDATE setting_value = '-45'"],
             'C31 timing' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('contribution_timing_tax', 'weekly') ON DUPLICATE KEY UPDATE setting_value = 'weekly'"],
-            'C30 amount' => ["UPDATE employees SET sss_amount = 999999 WHERE emp_id = '$mar'"],
-            'C30 negative' => ["UPDATE employees SET tax_amount = -5 WHERE emp_id = '$mar'"],
-            'C40' => ["UPDATE payroll SET bonus = bonus + 5 WHERE id = {$line($mar)}"],
-            'C41' => ["INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), '$mar', 'x', 'Bonus', 0, 'x', NULL)"],
-            'C42' => ["UPDATE payroll SET bonus = 95000 WHERE id = {$line($mar)}"],
+            'C30 amount' => ["UPDATE employees SET sss_amount = 999999 WHERE employee_code = '$mar'"],
+            'C30 negative' => ["UPDATE employees SET tax_amount = -5 WHERE employee_code = '$mar'"],
+            'C40' => ["UPDATE payroll SET bonus_pay = bonus_pay + 5 WHERE id = {$line($mar)}"],
+            'C41' => ["INSERT INTO bonus_deductions (entry_date, employee_id, type, amount, reason, period_id) VALUES (CURDATE(), {$pk($mar)}, 'Bonus', 0, 'x', NULL)"],
+            'C42' => ["UPDATE payroll SET bonus_pay = 95000 WHERE id = {$line($mar)}"],
             'C50' => [],                                                              // the dataset pays a flat ₱45 an hour: flagged as it is
-            'C60' => ["INSERT INTO bonus_deduction_history (entry_date, emp_id, emp_name, entry_type, amount, reason, period_id) VALUES (CURDATE(), '$mar', 'x', 'Bonus', 99999999, '13th Month Pay 2026', NULL)"],
-            'C51' => ["UPDATE employees SET date_hired = '2026-03-20' WHERE emp_id = '$mar'"],
-            'C52' => ["UPDATE employees SET date_hired = '2030-01-01' WHERE emp_id = '$mar'"],
+            'C60' => ["INSERT INTO bonus_deductions (entry_date, employee_id, type, amount, reason, period_id) VALUES (CURDATE(), {$pk($mar)}, 'Bonus', 99999999, '13th Month Pay 2026', NULL)"],
+            'C51' => ["UPDATE employees SET date_hired = '2026-03-20' WHERE employee_code = '$mar'"],
+            'C52' => ["UPDATE employees SET date_hired = '2030-01-01' WHERE employee_code = '$mar'"],
         ];
         foreach ($damage as $id => $sqls) {
             if (!$sqls) continue;                                                     // C50: checked below (nothing to damage)

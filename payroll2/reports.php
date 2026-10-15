@@ -4,7 +4,7 @@ requireAuth();
 
 $activePage  = 'reports';
 $db          = getDB();
-$periods     = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods     = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 $period_id   = (int)($_GET['period'] ?? defaultPeriodId($db, $periods));
 $curPeriod   = null;
 
@@ -14,7 +14,8 @@ foreach ($periods as $p) {
 
 $rows = [];
 if ($period_id) {
-    $st = $db->prepare("SELECT * FROM payroll WHERE period_id=? ORDER BY emp_id");
+    $st = $db->prepare("SELECT " . PAY_LINE_COLUMNS . " FROM payroll p " . PAY_LINE_JOINS . "
+                         WHERE p.period_id=? ORDER BY e.employee_code");
     $st->execute([$period_id]);
     $rows = $st->fetchAll();
 }

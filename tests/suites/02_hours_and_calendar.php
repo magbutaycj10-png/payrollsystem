@@ -137,26 +137,26 @@ T::suite('02 · Hours & calendar primitives', function () {
             ['Weekly',       '2026-04-15', '2026-04-21', false],
         ];
         foreach ($cases as [$type, $start, $end, $final]) {
-            $ctx = buildPayContext(['period_start' => $start, 'period_end' => $end, 'period_type' => $type]);
+            $ctx = buildPayContext(['start_date' => $start, 'end_date' => $end, 'period_type' => $type]);
             $t->same($final, $ctx['final'], "$type $start → $end");
             $t->same($final, Ledger::isFinal($type, $start, $end), "ledger agrees for $type $start → $end");
         }
     });
 
     T::test('period context: fraction of a month, half of the month, working days, standard hours', function (T $t) {
-        $a = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
+        $a = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
         $t->eq(0.5, $a['fraction']);
         $t->same(1, $a['half']);
         $t->same(26, $a['working_days']);
         $t->eq(8.0, $a['standard']);
-        $b = buildPayContext(['period_start' => '2026-04-16', 'period_end' => '2026-04-30', 'period_type' => 'Semi-Monthly']);
+        $b = buildPayContext(['start_date' => '2026-04-16', 'end_date' => '2026-04-30', 'period_type' => 'Semi-Monthly']);
         $t->same(2, $b['half']);
-        $w = buildPayContext(['period_start' => '2026-04-06', 'period_end' => '2026-04-12', 'period_type' => 'Weekly']);
+        $w = buildPayContext(['start_date' => '2026-04-06', 'end_date' => '2026-04-12', 'period_type' => 'Weekly']);
         $t->eq(12 / 52, $w['fraction'], 'a week is 12/52 of a month');
-        $m = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-30', 'period_type' => 'Monthly']);
+        $m = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-30', 'period_type' => 'Monthly']);
         $t->eq(1.0, $m['fraction']);
         // a period with no stored type falls back to the Settings default (Semi-Monthly here)
-        $d = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => null]);
+        $d = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-15', 'period_type' => null]);
         $t->same('Semi-Monthly', $d['period_type']);
     });
 
@@ -180,10 +180,10 @@ T::suite('02 · Hours & calendar primitives', function () {
     });
 
     T::test('which pay run takes what: the month\'s last run always settles; "first" waits for no one; "split" takes a share; "second" waits', function (T $t) {
-        $semi1 = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
-        $semi2 = buildPayContext(['period_start' => '2026-04-16', 'period_end' => '2026-04-30', 'period_type' => 'Semi-Monthly'], [], 1);
-        $mon   = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-30', 'period_type' => 'Monthly']);
-        $week2 = buildPayContext(['period_start' => '2026-04-08', 'period_end' => '2026-04-14', 'period_type' => 'Weekly'], [], 1);
+        $semi1 = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
+        $semi2 = buildPayContext(['start_date' => '2026-04-16', 'end_date' => '2026-04-30', 'period_type' => 'Semi-Monthly'], [], 1);
+        $mon   = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-30', 'period_type' => 'Monthly']);
+        $week2 = buildPayContext(['start_date' => '2026-04-08', 'end_date' => '2026-04-14', 'period_type' => 'Weekly'], [], 1);
         $t->same(['rest', 'share', 'none'], [contributionTake('first', $semi1), contributionTake('split', $semi1), contributionTake('second', $semi1)], '1st cut-off');
         $t->same(['rest', 'rest', 'rest'],  [contributionTake('first', $semi2), contributionTake('split', $semi2), contributionTake('second', $semi2)], 'last cut-off');
         $t->same(['rest', 'rest', 'rest'],  [contributionTake('first', $mon),   contributionTake('split', $mon),   contributionTake('second', $mon)],   'a monthly run takes everything');

@@ -17,14 +17,25 @@ final class Http
 {
     private static int $n = 0;
 
+    /** the signed-in admin - admin_id is the id of the Admin account in users, which the audit columns (processed_by ...) point at */
     public static function admin(): array
     {
-        return ['logged_in' => true, 'admin' => 'QA Admin', 'last_seen' => time()];
+        static $id = null;
+        if ($id === null) {
+            try { $id = (int)getDB()->query("SELECT id FROM users WHERE role = 'Admin' ORDER BY id LIMIT 1")->fetchColumn(); } catch (Throwable $e) { $id = 0; }
+        }
+        return ['logged_in' => true, 'admin' => 'QA Admin', 'admin_id' => $id ?: null, 'last_seen' => time()];
     }
 
     public static function manager(int $id, string $name = 'QA Manager', string $branch = ''): array
     {
         return ['mgr_logged_in' => true, 'mgr_id' => $id, 'mgr_name' => $name, 'mgr_branch' => $branch, 'last_seen' => time()];
+    }
+
+    /** the signed-in employee portal user: emp_id is the employee code, user_id the id of the Employee account */
+    public static function employee(string $empId, int $userId = 0, string $name = 'QA Employee'): array
+    {
+        return ['emp_logged_in' => true, 'emp_id' => $empId, 'emp_name' => $name, 'emp_user_id' => $userId ?: null, 'last_seen' => time()];
     }
 
     public static function api(string $endpoint, array $json = [], ?array $session = null): array

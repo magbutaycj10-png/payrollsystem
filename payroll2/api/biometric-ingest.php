@@ -116,11 +116,11 @@ $agentHost    = substr(trim((string)($body['host']          ?? '')), 0, 100);
 $agentVersion = substr(trim((string)($body['agent_version'] ?? '')), 0, 20);
 
 /* ── Stage the punches ────────────────────────────────────────────
-   INSERT IGNORE leans on uq_punch (employee_id, punch_time): a repeat
+   INSERT IGNORE leans on uq_attendance_logs_punch (device_user_id, punch_time): a repeat
    send is a no-op, so the agent can retry as often as it likes.      */
 $insert = $db->prepare(
     "INSERT IGNORE INTO attendance_logs
-        (employee_id, punch_time, punch_state, verify_mode, device_id, source)
+        (device_user_id, punch_time, punch_state, verify_mode, device_id, source)
      VALUES (?, ?, ?, ?, ?, ?)"
 );
 

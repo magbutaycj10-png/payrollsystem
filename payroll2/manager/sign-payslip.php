@@ -6,20 +6,20 @@ $activePage = 'sign-payslip';
 $db  = getDB();
 $m   = mgr();
 
-[$scopeWhere, $scopeParams] = mgrScopeWhere('p');
+[$scopeWhere, $scopeParams] = mgrScopeWhere('e');
 
 // Handle signature save (AJAX POST)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
     $data = json_decode(file_get_contents('php://input'), true);
     if ($data && isset($data['payroll_id'], $data['signature_data'])) {
-        $pr = $db->prepare("SELECT p.* FROM payroll p
-                            JOIN employees e ON e.emp_id = p.emp_id
+        $pr = $db->prepare("SELECT p.*, e.employee_code AS emp_id FROM payroll p
+                            JOIN employees e ON e.id = p.employee_id
                             WHERE p.id = ? $scopeWhere");
         $pr->execute(array_merge([(int)$data['payroll_id']], $scopeParams));
         $pr = $pr->fetch();
 
         if ($pr) {
-            [$ok, $message] = savePayslipSignature($db, $pr, (string)($data['period_label'] ?? ''), (string)$data['signature_data']);
+            [$ok, $message] = savePayslipSignature($db, $pr, (string)$data['signature_data']);
             jsonResponse(['ok' => $ok, 'message' => $message], $ok ? 200 : 409);
         }
         jsonResponse(['ok' => false, 'message' => 'Payroll record not found.'], 404);
@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
     jsonResponse(['ok' => false, 'message' => 'Invalid request.'], 400);
 }
 
-$periods   = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods   = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 $period_id  = (int)($_GET['period']    ?? defaultPeriodId($db, $periods));
 $payroll_id = (int)($_GET['payroll_id'] ?? 0);
 
@@ -38,14 +38,13 @@ $rows = [];
 if ($period_id) {
     $params = array_merge([$period_id], $scopeParams);
     $st = $db->prepare("
-        SELECT p.*, ps.id AS sig_id, ps.signed_at
-        FROM payroll p
-        JOIN employees e ON e.emp_id = p.emp_id
+        SELECT " . PAY_LINE_COLUMNS . ", ps.id AS sig_id, ps.signed_at
+        FROM payroll p " . PAY_LINE_JOINS . "
         /* only a signature for the current net pay counts (see signatureCurrent) */
         LEFT JOIN payslip_signatures ps ON ps.payroll_id = p.id
              AND (ps.net_signed IS NULL OR ABS(ps.net_signed - p.net_pay) < 0.005)
         WHERE p.period_id = ? $scopeWhere
-        ORDER BY p.emp_name ASC
+        ORDER BY e.full_name ASC
     ");
     $st->execute($params);
     $rows = $st->fetchAll();

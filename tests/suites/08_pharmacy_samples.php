@@ -96,7 +96,7 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
             $p = $S->periods[$i];
             // a raise takes effect with its period: set the rate the sheet states (earlier periods are already locked)
             foreach ($p['by'] as $code => $b) {
-                getDB()->prepare('UPDATE employees SET base_salary = ? WHERE emp_id = ?')->execute([$b['rate'], $S->emp[$code]]);
+                getDB()->prepare('UPDATE employees SET base_salary = ? WHERE employee_code = ?')->execute([$b['rate'], $S->emp[$code]]);
             }
             Fixtures::setting('overtime_rate', array_values($p['by'])[0]['ot']);
             $table = BrowserSim::readFlatTable(BrowserSim::readCsv($p['path']));
@@ -239,7 +239,7 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
             $t->money(Ledger::fmt($sum), $d['total_net'], "period {$d['label']} net");
             $series[] = $d['total_net'];
         }
-        $t->same(['2026-02-01', '2026-02-16', '2026-03-01', '2026-03-16', '2026-04-01', '2026-04-16', '2026-05-01', '2026-05-16'], array_column($res['json']['data'], 'period_start'));
+        $t->same(['2026-02-01', '2026-02-16', '2026-03-01', '2026-03-16', '2026-04-01', '2026-04-16', '2026-05-01', '2026-05-16'], array_column($res['json']['data'], 'start_date'));
         $S->series = $series;
     });
 

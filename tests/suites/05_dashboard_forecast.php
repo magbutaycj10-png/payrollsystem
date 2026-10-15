@@ -21,11 +21,12 @@ function qa_history(array $series, int $startMonth = 1): array
         $start = sprintf('%d-%02d-%02d', $y, $mm, $a);
         $end   = $b ? sprintf('%d-%02d-%02d', $y, $mm, $b) : date('Y-m-t', strtotime($first));
         $label = date('M j', strtotime($start)) . '-' . date('j', strtotime($end)) . ', ' . $y;
-        $db->prepare("INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES (?,?,?,?, 'Open')")
+        $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES (?,?,?,?, 'Open')")
            ->execute([$label, $start, $end, 'Semi-Monthly']);
         $pid = (int)$db->lastInsertId();
-        $db->prepare("INSERT INTO payroll (period_id, emp_id, emp_name, gross_pay, net_pay) VALUES (?,?,?,?,?)")
-           ->execute([$pid, $emp, 'History Person', $net, $net]);
+        $db->prepare("INSERT INTO payroll (period_id, employee_id, gross_pay, net_pay)
+                      VALUES (?, (SELECT id FROM employees WHERE employee_code = ?), ?, ?)")
+           ->execute([$pid, $emp, $net, $net]);
         $ids[] = $pid;
         $i++;
     }
@@ -96,9 +97,11 @@ T::suite('05 · Dashboard forecast & status', function () {
         Fixtures::reset();
         qa_history([10000, 11000]);                                  // Jan 1-15, Jan 16-31 2025
         $db = getDB();
-        $db->prepare("INSERT INTO payroll_periods (period_label, period_start, period_end, period_type, status) VALUES ('Dec 16-31, 2024', '2024-12-16', '2024-12-31', 'Semi-Monthly', 'Open')")->execute();
+        $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Dec 16-31, 2024', '2024-12-16', '2024-12-31', 'Semi-Monthly', 'Open')")->execute();
         $old = (int)$db->lastInsertId();
-        $db->prepare("INSERT INTO payroll (period_id, emp_id, emp_name, gross_pay, net_pay) VALUES (?, 'OLD', 'Old Entry', 1, 1)")->execute([$old]);
+        Fixtures::employee(['emp_id' => 'OLD', 'full_name' => 'Old Entry']);
+        $db->prepare("INSERT INTO payroll (period_id, employee_id, gross_pay, net_pay)
+                      VALUES (?, (SELECT id FROM employees WHERE employee_code = 'OLD'), 1, 1)")->execute([$old]);
         $html = Http::page('dashboard.php')['body'];
         $t->contains('Jan 16-31, 2025', $html);
         $t->ok(!preg_match('/card-sub">\s*Dec 16-31, 2024/', $html), 'the cards are labelled with the December period just because it was entered last');
@@ -110,9 +113,14 @@ T::suite('05 · Dashboard forecast & status', function () {
         $emp2 = Fixtures::employee(['full_name' => 'Totals B']);
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
         $db = getDB();
-        $ins = $db->prepare("INSERT INTO payroll (period_id, emp_id, emp_name, gross_pay, withholding_tax, sss, philhealth, pagibig, bonus, other_deductions, net_pay, overtime_hours, late_hours) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)");
-        $ins->execute([$pid, $emp, 'Totals A', '6270.00', '0', '325.00', '0', '0', '1000.00', '500.50', '6444.50', '2.5', '0.5']);
-        $ins->execute([$pid, $emp2, 'Totals B', '13692.69', '390.10', '675.00', '0', '0', '0', '0', '12627.59', '3', '1']);
+        $ins = $db->prepare("INSERT INTO payroll (period_id, employee_id, gross_pay, withholding_tax, sss_deduction, philhealth_deduction, pagibig_deduction, bonus_pay, other_deductions, net_pay)
+                             VALUES (?,(SELECT id FROM employees WHERE employee_code = ?),?,?,?,?,?,?,?,?)");
+        $hrs = $db->prepare("INSERT INTO attendance_summary (period_id, employee_id, total_overtime_hours, total_late_hours)
+                             VALUES (?,(SELECT id FROM employees WHERE employee_code = ?),?,?)");
+        $ins->execute([$pid, $emp, '6270.00', '0', '325.00', '0', '0', '1000.00', '500.50', '6444.50']);
+        $ins->execute([$pid, $emp2, '13692.69', '390.10', '675.00', '0', '0', '0', '0', '12627.59']);
+        $hrs->execute([$pid, $emp, '2.5', '0.5']);
+        $hrs->execute([$pid, $emp2, '3', '1']);
         $html = Http::page('dashboard.php')['body'];
         // the KPI cards show WHOLE pesos (number_format(x, 0)): 19,962.69 → 19,963 ; 19,072.09 → 19,072 ; 500.50 → 501
         $card = fn(string $label) => preg_match('/' . preg_quote($label, '/') . '<\/div>\s*<div class="card-value">(?:&#8369;)?([^<]+)</', $html, $m) ? trim($m[1]) : '(card not found)';

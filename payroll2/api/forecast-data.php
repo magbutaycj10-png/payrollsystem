@@ -28,24 +28,24 @@ $rows = $db->query("
     SELECT
         pp.id,
         pp.period_label                          AS label,
-        pp.period_start,
+        pp.start_date,
         pp.period_type,
         pp.status,
-        COUNT(DISTINCT p.emp_id)                 AS employee_count,
+        COUNT(DISTINCT p.employee_id)            AS employee_count,
         COALESCE(SUM(p.gross_pay), 0)            AS total_gross,
         COALESCE(SUM(p.net_pay),   0)            AS total_net,
-        COALESCE(SUM(p.bonus),     0)            AS total_bonus,
+        COALESCE(SUM(p.bonus_pay), 0)            AS total_bonus,
         COALESCE(SUM(p.other_deductions), 0)     AS total_deductions,
         COALESCE(SUM(p.withholding_tax),  0)     AS total_tax,
         CASE
-            WHEN COUNT(DISTINCT p.emp_id) > 0
-            THEN COALESCE(SUM(p.gross_pay), 0) / COUNT(DISTINCT p.emp_id)
+            WHEN COUNT(DISTINCT p.employee_id) > 0
+            THEN COALESCE(SUM(p.gross_pay), 0) / COUNT(DISTINCT p.employee_id)
             ELSE 0
         END                                      AS avg_gross
     FROM payroll_periods pp
     LEFT JOIN payroll p ON p.period_id = pp.id
     GROUP BY pp.id
-    ORDER BY pp.period_start ASC, pp.id ASC
+    ORDER BY pp.start_date ASC, pp.id ASC
 ")->fetchAll();
 
 /*
@@ -66,11 +66,11 @@ $periodsPerMonth = match ($periodType) {
 /* What the company adds on top of the pay it hands out (employer SSS, EC, PhilHealth, Pag-IBIG), per period */
 $employer = employerSharesByPeriod($db);
 
-/* Attach a sequential index and extract month/year from period_start */
+/* Attach a sequential index and extract month/year from start_date */
 $result = [];
 foreach ($rows as $i => $r) {
-    /* Fall back to extracting month/year from the label if period_start is null */
-    $ts    = $r['period_start'] ? strtotime($r['period_start']) : null;
+    /* Fall back to extracting month/year from the label if start_date is null */
+    $ts    = $r['start_date'] ? strtotime($r['start_date']) : null;
     $month = $ts ? (int)date('n', $ts) : 0;
     $year  = $ts ? (int)date('Y', $ts) : 0;
 
@@ -88,7 +88,7 @@ foreach ($rows as $i => $r) {
         'month'            => $month,
         'year'             => $year,
         'half'             => $half,
-        'period_start'     => $r['period_start'],
+        'start_date'     => $r['start_date'],
         'label'            => $r['label'],
         'status'           => $r['status'],
         'employee_count'   => (int)$r['employee_count'],

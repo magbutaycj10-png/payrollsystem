@@ -29,9 +29,8 @@ $whereStatus = $filter !== 'All' ? " AND lr.status = ? " : '';
 $params      = $filter !== 'All' ? array_merge($scopeParams, [$filter]) : $scopeParams;
 
 $st = $db->prepare("
-    SELECT lr.*, e.branch, e.position, e.rest_days
-    FROM leave_requests lr
-    JOIN employees e ON e.emp_id = lr.emp_id
+    SELECT " . LEAVE_FULL_COLUMNS . "
+    FROM leave_requests lr " . LEAVE_FULL_JOINS . "
     WHERE 1=1 $scopeWhere $whereStatus
     ORDER BY lr.created_at DESC
 ");

@@ -411,8 +411,8 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
         : '&nbsp;';
 
     $periodRange = '-';
-    if (!empty($r['period_start']) && !empty($r['period_end'])) {
-        $periodRange = date('M j', strtotime($r['period_start'])) . ' &ndash; ' . date('M j, Y', strtotime($r['period_end']));
+    if (!empty($r['start_date']) && !empty($r['end_date'])) {
+        $periodRange = date('M j', strtotime($r['start_date'])) . ' &ndash; ' . date('M j, Y', strtotime($r['end_date']));
     }
 
     /* This employee's pay was changed after the period had been finalized, so

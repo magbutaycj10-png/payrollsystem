@@ -61,7 +61,7 @@ Every punch cell becomes one `attendance_logs` row:
 
 | XLS source | → Column | Notes |
 |---|---|---|
-| `ID:00001` header | `employee_id` | Terminal number, not payroll `emp_id`. Resolved via `biometric_employee_map` at rollup time. |
+| `ID:00001` header | `device_user_id` | Terminal number, not the payroll `employee_code`. Resolved via `biometric_employee_map` at rollup time. (The push API still takes it as `employee_id` in the JSON.) |
 | `MM.DD` cell + year from `Date:26.09.01~...` | `punch_time` | The day cells carry no year - it comes from the period header. Dec→Jan rollover handled. |
 | *which* column the time sat in | `punch_state` | See mapping below |
 | - | `verify_mode` | `0` for file imports; only serial/network carry it |
@@ -113,8 +113,8 @@ are created automatically on the next page load of the deployed app.
 
 | Table | Purpose |
 |---|---|
-| `attendance_logs` | Raw punches. `UNIQUE (employee_id, punch_time)` makes re-syncs free. |
-| `biometric_employee_map` | Terminal number (`00001`) → payroll `emp_id`. |
+| `attendance_logs` | Raw punches. `UNIQUE (device_user_id, punch_time)` makes re-syncs free. |
+| `biometric_employee_map` | Terminal number (`00001`) → the payroll employee (`employee_id` = `employees.id`). |
 | `biometric_agent_state` | Which PC holds the terminal, and when it last reported. |
 | `biometric_api_keys` | One SHA-256-hashed key per client PC. |
 
@@ -127,9 +127,12 @@ leading zeros (`00001` → `1`), which is right often enough to be dangerous.
 Be explicit for anyone it gets wrong:
 
 ```sql
-INSERT INTO biometric_employee_map (device_user_id, emp_id)
-VALUES ('00001', 'EMP-001'), ('00002', 'EMP-002');
+INSERT INTO biometric_employee_map (device_user_id, employee_id)
+SELECT '00001', id FROM employees WHERE employee_code = 'EMP-001' UNION ALL
+SELECT '00002', id FROM employees WHERE employee_code = 'EMP-002';
 ```
+
+(Or pick the employee for each device number on the upload page - it remembers the choice.)
 
 Anything unmapped comes back in the rollup's `unmatched[]` rather than being
 silently dropped.

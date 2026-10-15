@@ -11,7 +11,7 @@ requireManager();
 
 $activePage = 'attendance-upload';
 $db         = getDB();
-$periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' ORDER BY period_start DESC")->fetchAll();
+$periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' ORDER BY start_date DESC")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">

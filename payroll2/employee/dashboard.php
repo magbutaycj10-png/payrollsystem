@@ -15,17 +15,18 @@ $activePage = 'dashboard';
 $db  = getDB();
 $e   = emp();
 
-$empInfo = $db->prepare("SELECT * FROM employees WHERE emp_id=?");
+$empInfo = $db->prepare("SELECT " . EMPLOYEE_COLUMNS . " FROM employees e " . EMPLOYEE_JOINS . " WHERE e.employee_code=?");
 $empInfo->execute([$e['id']]);
 $empInfo = $empInfo->fetch();
+$empPk   = (int)($empInfo['id'] ?? 0);      /* employees.id - what payroll and leave rows point at */
 
 $latestPayroll = $db->prepare("
-    SELECT p.*, pp.period_label FROM payroll p
+    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label FROM payroll p " . PAY_LINE_JOINS . "
     JOIN payroll_periods pp ON pp.id = p.period_id
-    WHERE p.emp_id = ?
-    ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1
+    WHERE p.employee_id = ?
+    ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1
 ");
-$latestPayroll->execute([$e['id']]);
+$latestPayroll->execute([$empPk]);
 $latest = $latestPayroll->fetch();
 
 $hasSigned = false;
@@ -41,14 +42,15 @@ if ($latest) {
  * timeline. Also drives the "vs. last period" comparison.
  */
 $history = $db->prepare("
-    SELECT p.net_pay, p.gross_pay, p.hours_worked, p.overtime_hours, pp.period_label
+    SELECT p.net_pay, p.gross_pay, COALESCE(s.total_hours_worked, 0) AS hours_worked, COALESCE(s.total_overtime_hours, 0) AS overtime_hours, pp.period_label
     FROM payroll p
     JOIN payroll_periods pp ON pp.id = p.period_id
-    WHERE p.emp_id = ?
-    ORDER BY pp.period_start DESC, pp.id DESC
+    LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
+    WHERE p.employee_id = ?
+    ORDER BY pp.start_date DESC, pp.id DESC
     LIMIT 6
 ");
-$history->execute([$e['id']]);
+$history->execute([$empPk]);
 $history = array_reverse($history->fetchAll());
 
 /* Change against the previous period */
@@ -60,20 +62,21 @@ $netPct  = ($prevNet) ? round($netDiff / $prevNet * 100, 1) : null;
 $ytd = $db->prepare("
     SELECT COALESCE(SUM(p.gross_pay),0)         AS gross,
            COALESCE(SUM(p.net_pay),0)           AS net,
-           COALESCE(SUM(p.sss),0)               AS sss,
-           COALESCE(SUM(p.philhealth),0)        AS philhealth,
-           COALESCE(SUM(p.pagibig),0)           AS pagibig,
+           COALESCE(SUM(p.sss_deduction),0)     AS sss,
+           COALESCE(SUM(p.philhealth_deduction),0) AS philhealth,
+           COALESCE(SUM(p.pagibig_deduction),0) AS pagibig,
            COALESCE(SUM(p.withholding_tax),0)   AS tax,
            COALESCE(SUM(p.other_deductions),0)  AS other,
-           COALESCE(SUM(p.bonus),0)             AS bonus,
-           COALESCE(SUM(p.overtime_hours),0)    AS ot,
+           COALESCE(SUM(p.bonus_pay),0)         AS bonus,
+           COALESCE(SUM(s.total_overtime_hours),0) AS ot,
            COALESCE(MAX(p.net_pay),0)           AS best,
            COUNT(*)                             AS periods
     FROM payroll p
     JOIN payroll_periods pp ON pp.id = p.period_id
-    WHERE p.emp_id = ? AND YEAR(pp.period_start) = YEAR(CURDATE())
+    LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
+    WHERE p.employee_id = ? AND YEAR(pp.start_date) = YEAR(CURDATE())
 ");
-$ytd->execute([$e['id']]);
+$ytd->execute([$empPk]);
 $ytd = array_map('floatval', $ytd->fetch(PDO::FETCH_ASSOC) ?: []);
 $ytdDeductions = ($ytd['sss'] ?? 0) + ($ytd['philhealth'] ?? 0) + ($ytd['pagibig'] ?? 0)
                + ($ytd['tax'] ?? 0) + ($ytd['other'] ?? 0);
@@ -87,9 +90,9 @@ $dedRate    = ($ytd['gross'] ?? 0) > 0 ? round($ytdDeductions / $ytd['gross'] * 
 /* Approved leave days taken this year */
 $leaveSt = $db->prepare("
     SELECT date_from, date_to FROM leave_requests
-    WHERE emp_id = ? AND status = 'Approved' AND YEAR(date_from) = YEAR(CURDATE())
+    WHERE employee_id = ? AND status = 'Approved' AND YEAR(date_from) = YEAR(CURDATE())
 ");
-$leaveSt->execute([$e['id']]);
+$leaveSt->execute([$empPk]);
 $leaveDays = 0;   /* duty days: the employee's days off are not leave */
 foreach ($leaveSt->fetchAll() as $l) $leaveDays += leaveDays($l['date_from'], $l['date_to'], $empInfo['rest_days'] ?? null)['duty'];
 

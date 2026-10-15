@@ -7,44 +7,31 @@ $db  = getDB();
 $e   = emp();
 $msg = null;
 
-$empInfo = $db->prepare("SELECT * FROM employees WHERE emp_id=?");
+$empInfo = $db->prepare("SELECT " . EMPLOYEE_COLUMNS . " FROM employees e " . EMPLOYEE_JOINS . " WHERE e.employee_code=?");
 $empInfo->execute([$e['id']]);
 $empInfo = $empInfo->fetch();
+$empPk   = (int)($empInfo['id'] ?? 0);      /* employees.id - what the profile and the login point at */
 
-$profile = $db->prepare("SELECT * FROM employee_profiles WHERE emp_id=?");
-$profile->execute([$e['id']]);
-$profile = $profile->fetch() ?: [];
+/* the contact details and the emergency contact are columns of the employee */
+$profile = $empInfo ?: [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'update_profile') {
+    if ($action === 'update_profile' && $empPk) {
         $address  = trim($_POST['address']           ?? '');
         $phone    = trim($_POST['phone']             ?? '');
         $ec_name  = trim($_POST['emergency_name']    ?? '');
         $ec_phone = trim($_POST['emergency_phone']   ?? '');
         $ec_rel   = trim($_POST['emergency_relation'] ?? '');
 
-        $check = $db->prepare("SELECT id FROM employee_profiles WHERE emp_id=?");
-        $check->execute([$e['id']]);
-
-        if ($check->fetch()) {
-            $db->prepare("
-                UPDATE employee_profiles
-                SET address=?, phone=?, emergency_name=?, emergency_phone=?, emergency_relation=?
-                WHERE emp_id=?
-            ")->execute([$address, $phone, $ec_name, $ec_phone, $ec_rel, $e['id']]);
-        } else {
-            $db->prepare("
-                INSERT INTO employee_profiles (emp_id, address, phone, emergency_name, emergency_phone, emergency_relation)
-                VALUES (?,?,?,?,?,?)
-            ")->execute([$e['id'], $address, $phone, $ec_name, $ec_phone, $ec_rel]);
-        }
+        $db->prepare("UPDATE employees SET address=?, phone=?, emergency_name=?, emergency_phone=?, emergency_relation=? WHERE id=?")
+           ->execute([$address ?: null, $phone ?: null, $ec_name ?: null, $ec_phone ?: null, $ec_rel ?: null, $empPk]);
 
         $msg = ['type' => 'success', 'text' => 'Profile updated successfully.'];
 
-        $profile = $db->prepare("SELECT * FROM employee_profiles WHERE emp_id=?");
-        $profile->execute([$e['id']]);
+        $profile = $db->prepare("SELECT * FROM employees WHERE id=?");
+        $profile->execute([$empPk]);
         $profile = $profile->fetch() ?: [];
     }
 
@@ -53,8 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $newPass     = trim($_POST['new_password']     ?? '');
         $confirmPass = trim($_POST['confirm_password'] ?? '');
 
-        $acct = $db->prepare("SELECT id, password_hash FROM users WHERE emp_id=? AND role='earner'");
-        $acct->execute([$e['id']]);
+        $acct = $db->prepare("SELECT id, password_hash FROM users WHERE employee_id=? AND role='Employee'");
+        $acct->execute([$empPk]);
         $acct = $acct->fetch();
 
         if (!$acct || !password_verify($currentPass, $acct['password_hash'])) {

@@ -19,7 +19,8 @@ $period = $pSt->fetch();
 if (!$period) { jsonResponse(['error' => 'Period not found'], 404); }
 
 /* Fetch every employee payroll row for this period */
-$rSt = $db->prepare("SELECT * FROM payroll WHERE period_id = ? ORDER BY emp_name ASC");
+$rSt = $db->prepare("SELECT " . PAY_LINE_COLUMNS . " FROM payroll p " . PAY_LINE_JOINS . "
+                      WHERE p.period_id = ? ORDER BY e.full_name ASC");
 $rSt->execute([$pid]);
 $rows = $rSt->fetchAll();
 

@@ -5,7 +5,7 @@ requireAuth();
 
 $activePage  = 'attendance-upload';
 $db          = getDB();
-$periods     = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods     = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 /* Default schedule for a new period (Settings); each period then keeps its own */
 $defaultType = periodType(null);
 ?>

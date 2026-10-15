@@ -12,33 +12,34 @@ $activePage = 'home';
 $db = getDB();
 $e  = emp();
 
-$empInfo = $db->prepare("SELECT * FROM employees WHERE emp_id = ?");
+$empInfo = $db->prepare("SELECT " . EMPLOYEE_COLUMNS . " FROM employees e " . EMPLOYEE_JOINS . " WHERE e.employee_code = ?");
 $empInfo->execute([$e['id']]);
 $empInfo = $empInfo->fetch();
+$empPk   = (int)($empInfo['id'] ?? 0);      /* employees.id - what payroll and leave rows point at */
 
 $latestSt = $db->prepare("
-    SELECT p.*, pp.period_label FROM payroll p
+    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label FROM payroll p " . PAY_LINE_JOINS . "
     JOIN payroll_periods pp ON pp.id = p.period_id
-    WHERE p.emp_id = ?
-    ORDER BY pp.period_start DESC, pp.id DESC LIMIT 1
+    WHERE p.employee_id = ?
+    ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1
 ");
-$latestSt->execute([$e['id']]);
+$latestSt->execute([$empPk]);
 $latest = $latestSt->fetch();
 
-$totalPayslips = $db->prepare("SELECT COUNT(*) FROM payroll WHERE emp_id = ?");
-$totalPayslips->execute([$e['id']]);
+$totalPayslips = $db->prepare("SELECT COUNT(*) FROM payroll WHERE employee_id = ?");
+$totalPayslips->execute([$empPk]);
 $totalPayslips = (int)$totalPayslips->fetchColumn();
 
-$pendingLeave = $db->prepare("SELECT COUNT(*) FROM leave_requests WHERE emp_id = ? AND status = 'Pending'");
-$pendingLeave->execute([$e['id']]);
+$pendingLeave = $db->prepare("SELECT COUNT(*) FROM leave_requests WHERE employee_id = ? AND status = 'Pending'");
+$pendingLeave->execute([$empPk]);
 $pendingLeave = (int)$pendingLeave->fetchColumn();
 
 $recentLeave = $db->prepare("
     SELECT leave_type, date_from, date_to, status
-    FROM leave_requests WHERE emp_id = ?
+    FROM leave_requests WHERE employee_id = ?
     ORDER BY created_at DESC LIMIT 3
 ");
-$recentLeave->execute([$e['id']]);
+$recentLeave->execute([$empPk]);
 $recentLeave = $recentLeave->fetchAll();
 
 $hour     = (int)date('G');

@@ -134,7 +134,7 @@ T::suite('03 · Pay engine vs ledger', function () {
     });
 
     T::test('Totals-file path: no day records, late hours ARE charged (₱80/h) and overtime paid - gross = basic + OT − late', function (T $t) {
-        $ctx = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
+        $ctx = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-15', 'period_type' => 'Semi-Monthly']);
         $emp = payEmployee(['emp_id' => 'QA-T', 'salary_type' => 'daily', 'base_salary' => 500]);
         $p = computePayLine($emp, 120.0, 4.0, 2.5, false, $ctx);
         $t->moneyMap(['basic' => '7500.00', 'ot_late_adj' => '-20.00', 'gross' => '7480.00'], $p);   // 7,500 + 180 − 200
@@ -161,7 +161,7 @@ T::suite('03 · Pay engine vs ledger', function () {
         $t->money('0.00', $low['ec'], 'no SSS, no EC');
         // through the engine: the breakdown's company share is the same function on the same deductions
         $emp = payEmployee(['emp_id' => 'QA-ER', 'salary_type' => 'daily', 'base_salary' => 500, 'sss_amount' => 300, 'philhealth_amount' => 250, 'pagibig_amount' => 200]);
-        $mon = buildPayContext(['period_start' => '2026-04-01', 'period_end' => '2026-04-30', 'period_type' => 'Monthly']);
+        $mon = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-30', 'period_type' => 'Monthly']);
         $b = contributionBreakdown($emp, 12000.0, $mon);
         $t->same(['sss' => 300.0, 'philhealth' => 250.0, 'pagibig' => 200.0], $b['ee'], 'a monthly run takes the typed amounts');
         $t->same(employerShare($b['ee'], EARLIER_NONE, 12000.0), $b['er']);
@@ -214,7 +214,7 @@ T::suite('03 · Pay engine vs ledger', function () {
             'days' => Scenario::fullDays('2026-04-01', '2026-04-30'),
             'between' => [0 => function (string $empId, array $periods) {
                 Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $periods[0], 'ignore_drift' => true, 'allow_negative' => true]);
-                getDB()->prepare("UPDATE employees SET sss_amount = 100, philhealth_amount = 400, tax_amount = 200 WHERE emp_id = ?")->execute([$empId]);
+                getDB()->prepare("UPDATE employees SET sss_amount = 100, philhealth_amount = 400, tax_amount = 200 WHERE employee_code = ?")->execute([$empId]);
             }]]);
         [$a, $b] = $r['app'];
         // cut-off 1 (old amounts, ½ each): SSS 250.00, PhilHealth 125.00, tax 300.00 → net 15,000 − 675 = 14,325.00

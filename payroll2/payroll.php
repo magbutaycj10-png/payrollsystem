@@ -4,7 +4,7 @@ requireAuth();
 
 $activePage = 'payroll';
 $db         = getDB();
-$periods    = $db->query("SELECT * FROM payroll_periods ORDER BY period_start DESC")->fetchAll();
+$periods    = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
 $period_id  = (int)($_GET['period'] ?? defaultPeriodId($db, $periods));
 $curPeriod  = null;
 
@@ -14,7 +14,8 @@ foreach ($periods as $p) {
 
 $payrollRows = [];
 if ($period_id) {
-    $st = $db->prepare("SELECT * FROM payroll WHERE period_id=? ORDER BY emp_id ASC");
+    $st = $db->prepare("SELECT " . PAY_LINE_COLUMNS . " FROM payroll p " . PAY_LINE_JOINS . "
+                         WHERE p.period_id=? ORDER BY e.employee_code ASC");
     $st->execute([$period_id]);
     $payrollRows = $st->fetchAll();
 }
@@ -25,8 +26,8 @@ $isOpen = $curPeriod && $curPeriod['status'] === 'Open';
 $adjBonus = $adjDed = 0.0;
 $adjCount = 0;
 if ($period_id) {
-    $st = $db->prepare("SELECT entry_type, COUNT(*) AS c, SUM(amount) AS s
-                          FROM bonus_deduction_history WHERE period_id = ? GROUP BY entry_type");
+    $st = $db->prepare("SELECT type AS entry_type, COUNT(*) AS c, SUM(amount) AS s
+                          FROM bonus_deductions WHERE period_id = ? GROUP BY type");
     $st->execute([$period_id]);
     foreach ($st->fetchAll() as $r) {
         if ($r['entry_type'] === 'Bonus') $adjBonus = (float)$r['s']; else $adjDed = (float)$r['s'];
@@ -71,13 +72,15 @@ if ($curPeriod) {
     $missingEarlier = $ctx['final'] && $ctx['period_type'] !== 'Monthly' && $ctx['earlier_runs'] === 0;
 
     $q = function (string $sql) use ($db, $period_id) { $st = $db->prepare($sql); $st->execute([$period_id]); return $st->fetch(); };
-    $att   = $q("SELECT COUNT(*) n, SUM(manager_approved = 1) ok, SUM(manager_approved = 2) flagged FROM attendance WHERE period_id = ?");
-    $dayRc = $q("SELECT COUNT(*) n, MIN(att_date) a, MAX(att_date) b FROM biometric_daily WHERE period_id = ?");
+    $att   = $q("SELECT COUNT(*) n, COALESCE(SUM(approval_status = 'Approved'), 0) ok, COALESCE(SUM(approval_status = 'Flagged'), 0) flagged FROM attendance_summary WHERE period_id = ?");
+    $dayRc = $q("SELECT COUNT(*) n, MIN(b.att_date) a, MAX(b.att_date) b FROM biometric_daily b JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date WHERE pp.id = ?");
     $hasDays = (int)$dayRc['n'] > 0;
-    $print = $q("SELECT COUNT(*) n FROM print_log WHERE period_id = ?");
-    try { $sig = $q("SELECT COUNT(*) n FROM payslip_signatures WHERE period_id = ?"); } catch (PDOException $e) { $sig = ['n' => 0]; }
+    $print = $q("SELECT COUNT(*) n FROM print_logs WHERE period_id = ?");
+    try { $sig = $q("SELECT COUNT(*) n FROM payslip_signatures ps JOIN payroll p ON p.id = ps.payroll_id WHERE p.period_id = ?"); } catch (PDOException $e) { $sig = ['n' => 0]; }
 
-    $st = $db->prepare("SELECT emp_id, COUNT(DISTINCT att_date) d FROM biometric_daily WHERE period_id = ? AND hours_worked > 0 GROUP BY emp_id");
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, COUNT(DISTINCT b.att_date) d FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
+                         JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date
+                         WHERE pp.id = ? AND b.hours_worked > 0 GROUP BY e.id, e.employee_code");
     $st->execute([$period_id]);
     foreach ($st->fetchAll() as $r) $daysWorked[$r['emp_id']] = (int)$r['d'];
 
@@ -114,10 +117,10 @@ $company = null;
 if ($curPeriod && $payrollRows) {
     $ids = array_column($payrollRows, 'emp_id');
     $in  = implode(',', array_fill(0, count($ids), '?'));
-    $st  = $db->prepare("SELECT * FROM employees WHERE emp_id IN ($in)");
+    $st  = $db->prepare("SELECT * FROM employees WHERE employee_code IN ($in)");
     $st->execute($ids);
     $emps = [];
-    foreach ($st->fetchAll() as $e) $emps[$e['emp_id']] = payEmployee($e);
+    foreach ($st->fetchAll() as $e) $emps[$e['employee_code']] = payEmployee($e);
 
     $company = ['rows' => [], 'stale' => (bool)$stale,
                 'ee' => ['sss' => 0, 'philhealth' => 0, 'pagibig' => 0, 'tax' => 0],
@@ -125,8 +128,8 @@ if ($curPeriod && $payrollRows) {
                 'earnings' => 0];
     foreach ($payrollRows as $r) {
         $e = $emps[$r['emp_id']] ?? payEmployee(['emp_id' => $r['emp_id']]);
-        /* gross_pay is everything earned (overtime included); basic pay is gross less overtime − late */
-        $b  = contributionBreakdown($e, (float)$r['gross_pay'] - (float)$r['ot_late_adj'], $ctx);
+        /* gross_pay is everything earned (overtime included); basic_pay is the basic pay of the run */
+        $b  = contributionBreakdown($e, (float)$r['basic_pay'], $ctx);
         $er = employerShare(['sss' => (float)$r['sss'], 'philhealth' => (float)$r['philhealth'], 'pagibig' => (float)$r['pagibig']],
                             $b['earlier'], $b['basic']);
         $earn = (float)$r['gross_pay'] + (float)$r['bonus'];
@@ -144,8 +147,10 @@ if ($curPeriod && $payrollRows) {
 $audit = [];
 if ($period_id) {
     try {
-        $st = $db->prepare('SELECT * FROM period_audit WHERE period_id = ?
-                             ORDER BY created_at DESC, id DESC LIMIT 30');
+        $st = $db->prepare('SELECT a.*, COALESCE(u.full_name, \'\') AS performed_by FROM period_audit a
+                             LEFT JOIN users u ON u.id = a.performed_by
+                            WHERE a.period_id = ?
+                             ORDER BY a.created_at DESC, a.id DESC LIMIT 30');
         $st->execute([$period_id]);
         $audit = $st->fetchAll();
     } catch (PDOException $e) { $audit = []; }
@@ -253,7 +258,7 @@ if ($period_id) {
             </form>
             <?php if ($curPeriod): ?>
             <div class="pp-meta" style="margin-top:10px;">
-                <strong><?= date('M j, Y', strtotime($curPeriod['period_start'])) ?> – <?= date('M j, Y', strtotime($curPeriod['period_end'])) ?></strong>
+                <strong><?= date('M j, Y', strtotime($curPeriod['start_date'])) ?> – <?= date('M j, Y', strtotime($curPeriod['end_date'])) ?></strong>
                 &nbsp;·&nbsp; <?= htmlspecialchars($schedule) ?>
                 &nbsp;·&nbsp; <?= htmlspecialchars($contribNote) ?>
                 &nbsp;·&nbsp; <a href="settings.php">change in Settings</a>
@@ -498,7 +503,7 @@ if ($period_id) {
 
             <?php if ($missingEarlier): ?>
             <div class="alert alert-info" style="margin-bottom:14px;">
-                <span>The earlier cut-off of <?= date('F Y', strtotime($curPeriod['period_start'])) ?> is not in the system,
+                <span>The earlier cut-off of <?= date('F Y', strtotime($curPeriod['start_date'])) ?> is not in the system,
                 so nothing was taken from it and this cut-off takes each employee's whole monthly SSS, PhilHealth, Pag-IBIG and
                 tax amounts. Upload the 1st half too and these figures are recomputed when you upload this cut-off again.</span>
             </div>

@@ -9,11 +9,11 @@ $e   = emp();
 $companyName = getSetting('company_name', 'My Company');
 
 $rows = $db->prepare("
-    SELECT p.*, pp.period_label, pp.period_start, pp.period_end
-    FROM payroll p
+    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date
+    FROM payroll p " . PAY_LINE_JOINS . "
     JOIN payroll_periods pp ON pp.id = p.period_id
-    WHERE p.emp_id = ?
-    ORDER BY pp.period_start DESC, pp.id DESC
+    WHERE e.employee_code = ?
+    ORDER BY pp.start_date DESC, pp.id DESC
 ");
 $rows->execute([$e['id']]);
 $rows = $rows->fetchAll();
@@ -41,10 +41,10 @@ if ($rows) {
 $adjustments = [];
 if ($rows) {
     $adj = $db->prepare(
-        "SELECT period_id, entry_date, entry_type, amount, reason, finalize_cycle
-           FROM bonus_deduction_history
-          WHERE emp_id = ?
-       ORDER BY entry_date ASC, id ASC"
+        "SELECT h.period_id, h.entry_date, h.type AS entry_type, h.amount, h.reason, h.finalize_cycle
+           FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+          WHERE e.employee_code = ?
+       ORDER BY h.entry_date ASC, h.id ASC"
     );
     $adj->execute([$e['id']]);
     foreach ($adj->fetchAll() as $a) {
@@ -106,7 +106,7 @@ if ($rows) {
                 <div>
                     <strong style="font-size:1.05rem;"><?= htmlspecialchars($r['period_label']) ?></strong>
                     <br><small style="color:#6b7280;">
-                        <?= date('M d', strtotime($r['period_start'])) ?> – <?= date('M d, Y', strtotime($r['period_end'])) ?>
+                        <?= date('M d', strtotime($r['start_date'])) ?> – <?= date('M d, Y', strtotime($r['end_date'])) ?>
                     </small>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
@@ -164,7 +164,7 @@ if ($rows) {
 
             <?php if (!empty($adjustments[$r['period_id']])): ?>
                 <!-- Every bonus and deduction folded into the figures above,
-                     straight from bonus_deduction_history. -->
+                     straight from bonus_deductions. -->
                 <div style="margin-bottom:12px;">
                     <div class="payslip-item-label" style="margin-bottom:6px;">Bonuses &amp; deductions this period</div>
                     <?php foreach ($adjustments[$r['period_id']] as $a): ?>

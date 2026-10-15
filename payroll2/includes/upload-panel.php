@@ -140,8 +140,8 @@ function uploadPanel(array $o): void {
                         <?php foreach ($periods as $p): ?>
                         <option value="<?= (int)$p['id'] ?>"
                                 data-type="<?= periodType($p['period_type'] ?? null) ?>"
-                                data-start="<?= htmlspecialchars($p['period_start']) ?>"
-                                data-end="<?= htmlspecialchars($p['period_end']) ?>"
+                                data-start="<?= htmlspecialchars($p['start_date']) ?>"
+                                data-end="<?= htmlspecialchars($p['end_date']) ?>"
                                 data-status="<?= htmlspecialchars($p['status']) ?>"
                                 data-type-label="<?= htmlspecialchars(periodTypeLabel($p)) ?>">
                             <?= htmlspecialchars($p['period_label']) ?> [<?= htmlspecialchars(periodTypeLabel($p)) ?> · <?= $p['status'] ?>]

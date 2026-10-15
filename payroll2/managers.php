@@ -7,23 +7,33 @@ $db  = getDB();
 $msg = null;
 
 /*
- * Rewrite a manager's explicit employee assignments.
- * Branch-scoped managers keep no rows - their set is resolved from the branch
- * at query time, so employees added to that branch later are covered too.
+ * Rewrite what a manager handles (the rows of user_scopes, one per grant):
+ *   branch      the whole company (no branch picked, one Global row) or one whole branch (one Branch row)
+ *   department  one whole department (one Department row)
+ *   custom      the picked employees (one Employee row each)
+ * Branch and department grants are resolved when a page is opened, so employees added later are covered too.
  */
-function saveManagerScope(PDO $db, int $managerId, string $scope, array $empIds): void {
-    $db->prepare("DELETE FROM manager_employees WHERE manager_id = ?")->execute([$managerId]);
-    if ($scope !== 'custom' || !$empIds) return;
-    $ins = $db->prepare("INSERT IGNORE INTO manager_employees (manager_id, emp_id) VALUES (?, ?)");
-    foreach ($empIds as $eid) $ins->execute([$managerId, $eid]);
+function saveManagerScope(PDO $db, int $managerId, string $scope, ?int $branchId, ?int $departmentId, array $empIds): void {
+    $db->prepare("DELETE FROM user_scopes WHERE user_id = ?")->execute([$managerId]);
+    $ins = $db->prepare("INSERT INTO user_scopes (user_id, scope_type, branch_id, department_id, employee_id) VALUES (?, ?, ?, ?, ?)");
+    if ($scope === 'custom') {
+        foreach (employeePks($db, $empIds) as $pk) $ins->execute([$managerId, 'Employee', null, null, $pk]);
+    } elseif ($scope === 'department' && $departmentId) {
+        $ins->execute([$managerId, 'Department', null, $departmentId, null]);
+    } elseif ($scope === 'branch' && $branchId) {
+        $ins->execute([$managerId, 'Branch', $branchId, null, null]);
+    } else {
+        $ins->execute([$managerId, 'Global', null, null, null]);
+    }
 }
 
 /* Short description of each manager's scope, for the table */
 function scopeSummary(array $mgr, array $assignments): string {
-    if (($mgr['scope_type'] ?? 'branch') === 'custom') {
+    if ($mgr['scope_type'] === 'custom') {
         $n = count($assignments[(int)$mgr['id']] ?? []);
         return $n . ' selected employee' . ($n === 1 ? '' : 's');
     }
+    if ($mgr['scope_type'] === 'department') return $mgr['department'] . ' department';
     return $mgr['branch'] !== '' ? $mgr['branch'] . ' branch' : 'All branches';
 }
 
@@ -34,24 +44,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $password = trim($_POST['password']   ?? '');
         $name     = trim($_POST['full_name']  ?? '');
         $branch   = trim($_POST['branch']     ?? '');
+        $dept     = trim($_POST['department'] ?? '');
         $email    = trim($_POST['email']      ?? '');
-        $scope    = ($_POST['scope_type'] ?? 'branch') === 'custom' ? 'custom' : 'branch';
+        $scope    = in_array($_POST['scope_type'] ?? 'branch', ['branch', 'department', 'custom'], true) ? $_POST['scope_type'] : 'branch';
         $empIds   = array_values(array_filter(array_map('trim', (array)($_POST['emp_ids'] ?? []))));
 
-        /* A branch-scoped manager keeps no explicit list; a custom one keeps no branch */
-        if ($scope === 'custom') { $branch = ''; } else { $empIds = []; }
+        /* each kind of scope keeps only what it needs */
+        if ($scope !== 'custom')     $empIds = [];
+        if ($scope !== 'branch')     $branch = '';
+        if ($scope !== 'department') $dept   = '';
+
+        $branchId = branchId($db, $branch);
+        $deptId   = null;
+        if ($dept !== '') {
+            $dq = $db->prepare("SELECT id FROM departments WHERE name = ?");
+            $dq->execute([$dept]);
+            $deptId = $dq->fetchColumn() ?: null;
+        }
 
         if ($scope === 'custom' && !$empIds) {
             $msg = ['type' => 'error', 'text' => 'Select at least one employee, or switch to whole-branch scope.'];
+        } elseif ($scope === 'branch' && $branch !== '' && !$branchId) {
+            $msg = ['type' => 'error', 'text' => 'That branch is not in the branch list. Add it in Settings first.'];
+        } elseif ($scope === 'department' && !$deptId) {
+            $msg = ['type' => 'error', 'text' => 'Choose a department (add departments in Settings).'];
         } elseif ($action === 'add') {
             if (!$email || !$password || !$name) {
                 $msg = ['type' => 'error', 'text' => 'Name, email, and password are required.'];
             } else {
                 try {
-                    $db->prepare("INSERT INTO users (full_name, email, password_hash, role, branch, scope_type)
-                                  VALUES (?, ?, ?, 'manager', ?, ?)")
-                       ->execute([$name, $email, password_hash($password, PASSWORD_BCRYPT), $branch, $scope]);
-                    saveManagerScope($db, (int)$db->lastInsertId(), $scope, $empIds);
+                    $db->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES (?, ?, ?, 'Manager')")
+                       ->execute([$name, $email, password_hash($password, PASSWORD_BCRYPT)]);
+                    saveManagerScope($db, (int)$db->lastInsertId(), $scope, $branchId, $deptId ? (int)$deptId : null, $empIds);
                     $msg = ['type' => 'success', 'text' => "Manager '$name' added. They can log in at /manager/ using $email."];
                 } catch (PDOException $e) {
                     $msg = ['type' => 'error', 'text' => 'That email is already registered.'];
@@ -59,58 +83,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } else {
             $id = (int)$_POST['id'];
-            if ($password) {
-                $db->prepare("UPDATE users SET full_name=?, email=?, branch=?, scope_type=?, password_hash=?
-                              WHERE id=? AND role='manager'")
-                   ->execute([$name, $email, $branch, $scope, password_hash($password, PASSWORD_BCRYPT), $id]);
-            } else {
-                $db->prepare("UPDATE users SET full_name=?, email=?, branch=?, scope_type=?
-                              WHERE id=? AND role='manager'")
-                   ->execute([$name, $email, $branch, $scope, $id]);
+            try {
+                if ($password) {
+                    $db->prepare("UPDATE users SET full_name=?, email=?, password_hash=? WHERE id=? AND role='Manager'")
+                       ->execute([$name, $email, password_hash($password, PASSWORD_BCRYPT), $id]);
+                } else {
+                    $db->prepare("UPDATE users SET full_name=?, email=? WHERE id=? AND role='Manager'")
+                       ->execute([$name, $email, $id]);
+                }
+                saveManagerScope($db, $id, $scope, $branchId, $deptId ? (int)$deptId : null, $empIds);
+                $msg = ['type' => 'success', 'text' => "Manager '$name' updated."];
+            } catch (PDOException $e) {
+                $msg = ['type' => 'error', 'text' => 'That email is already registered.'];
             }
-            saveManagerScope($db, $id, $scope, $empIds);
-            $msg = ['type' => 'success', 'text' => "Manager '$name' updated."];
         }
     }
 
     if ($action === 'toggle') {
         $id  = (int)$_POST['id'];
-        $cur = $db->prepare("SELECT status FROM users WHERE id=? AND role='manager'");
+        $cur = $db->prepare("SELECT status FROM users WHERE id=? AND role='Manager'");
         $cur->execute([$id]);
         $cur = $cur->fetchColumn();
         $new = $cur === 'Active' ? 'Inactive' : 'Active';
-        $db->prepare("UPDATE users SET status=? WHERE id=? AND role='manager'")->execute([$new, $id]);
+        $db->prepare("UPDATE users SET status=? WHERE id=? AND role='Manager'")->execute([$new, $id]);
         $msg = ['type' => 'success', 'text' => "Manager status changed to $new."];
     }
 }
 
 // Select everything except password_hash - never expose hashes to the browser
-$managers = $db->query("SELECT id, full_name, email, branch, scope_type, status, created_at
-                        FROM users WHERE role='manager' ORDER BY full_name ASC")->fetchAll();
+$managers = $db->query("SELECT id, full_name, email, status, created_at
+                        FROM users WHERE role='Manager' ORDER BY full_name ASC")->fetchAll();
 
-/* The list managed in Settings, plus any branch already in use on an employee
-   or manager row. Reading the table means a branch that has just been created
-   can be assigned straight away, before anyone is in it. */
-$branches = $db->query("
-    SELECT name FROM (
-        SELECT name FROM branches
-        UNION
-        SELECT DISTINCT TRIM(branch) AS name FROM employees
-         WHERE branch IS NOT NULL AND TRIM(branch) <> ''
-        UNION
-        SELECT DISTINCT TRIM(branch) AS name FROM users
-         WHERE role = 'manager' AND branch IS NOT NULL AND TRIM(branch) <> ''
-    ) b ORDER BY name
-")->fetchAll(PDO::FETCH_COLUMN);
-
-$allEmployees = $db->query("SELECT emp_id, full_name, branch FROM employees
-                            WHERE status='Active' ORDER BY branch ASC, full_name ASC")->fetchAll();
-
-/* manager_id => [emp_id, ...] so the edit modal can pre-tick the boxes */
-$assignments = [];
-foreach ($db->query("SELECT manager_id, emp_id FROM manager_employees")->fetchAll() as $row) {
-    $assignments[(int)$row['manager_id']][] = $row['emp_id'];
+/* what each manager handles: the grants, shaped for the table and the edit form */
+$assignments = [];      /* manager_id => [emp_id, ...] for the picked employees */
+$grants      = [];
+foreach ($db->query("SELECT s.user_id, s.scope_type, b.name AS branch, d.name AS department, e.employee_code
+                       FROM user_scopes s
+                  LEFT JOIN branches b    ON b.id = s.branch_id
+                  LEFT JOIN departments d ON d.id = s.department_id
+                  LEFT JOIN employees e   ON e.id = s.employee_id
+                      ORDER BY s.id")->fetchAll() as $g) {
+    $uid = (int)$g['user_id'];
+    $grants[$uid] ??= ['scope_type' => 'branch', 'branch' => '', 'department' => ''];
+    if ($g['scope_type'] === 'Branch')     { $grants[$uid]['branch'] = (string)$g['branch']; }
+    if ($g['scope_type'] === 'Department') { $grants[$uid]['scope_type'] = 'department'; $grants[$uid]['department'] = (string)$g['department']; }
+    if ($g['scope_type'] === 'Employee')   { $grants[$uid]['scope_type'] = 'custom'; $assignments[$uid][] = $g['employee_code']; }
 }
+foreach ($managers as &$m) { $m += $grants[(int)$m['id']] ?? ['scope_type' => 'branch', 'branch' => '', 'department' => '']; }
+unset($m);
+
+/* The branch and department lists managed in Settings */
+$branches    = $db->query("SELECT name FROM branches ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+$departments = $db->query("SELECT name FROM departments ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+
+$allEmployees = $db->query("SELECT e.employee_code AS emp_id, e.full_name, COALESCE(br.name, '') AS branch
+                              FROM employees e LEFT JOIN branches br ON br.id = e.branch_id
+                             WHERE e.status='Active' ORDER BY br.name ASC, e.full_name ASC")->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -213,6 +241,7 @@ foreach ($db->query("SELECT manager_id, emp_id FROM manager_employees")->fetchAl
                     <label>Employees this manager handles</label>
                     <div class="scope-choice">
                         <label><input type="radio" name="scope_type" value="branch" id="sc_branch" checked onchange="updateScopeUI()"> Whole branch</label>
+                        <label><input type="radio" name="scope_type" value="department" id="sc_department" onchange="updateScopeUI()"> Whole department</label>
                         <label><input type="radio" name="scope_type" value="custom" id="sc_custom" onchange="updateScopeUI()"> Selected employees</label>
                     </div>
 
@@ -224,6 +253,17 @@ foreach ($db->query("SELECT manager_id, emp_id FROM manager_employees")->fetchAl
                             <?php endforeach; ?>
                         </select>
                         <p class="scope-hint">Employees added to this branch later are covered automatically.</p>
+                    </div>
+
+                    <div id="departmentScope" style="display:none;">
+                        <select name="department" id="f_department" class="form-control">
+                            <option value="">- choose a department -</option>
+                            <?php foreach ($departments as $d): ?>
+                            <option value="<?= htmlspecialchars($d) ?>"><?= htmlspecialchars($d) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="scope-hint">Everyone whose position belongs to this department, now and later.
+                            <?= $departments ? '' : 'No departments yet - add them in Settings.' ?></p>
                     </div>
 
                     <div id="customScope" style="display:none;">
@@ -291,8 +331,10 @@ function scopeBoxes() {
 }
 function updateScopeUI() {
     const custom = document.getElementById('sc_custom').checked;
-    document.getElementById('customScope').style.display = custom ? 'block' : 'none';
-    document.getElementById('branchScope').style.display = custom ? 'none'  : 'block';
+    const dept   = document.getElementById('sc_department').checked;
+    document.getElementById('customScope').style.display     = custom ? 'block' : 'none';
+    document.getElementById('departmentScope').style.display = dept   ? 'block' : 'none';
+    document.getElementById('branchScope').style.display     = (custom || dept) ? 'none' : 'block';
     updateCount();
 }
 function updateCount() {
@@ -311,6 +353,7 @@ function openModal() {
     document.getElementById('f_email').value          = '';
     document.getElementById('f_password').value       = '';
     document.getElementById('f_branch').value         = '';
+    document.getElementById('f_department').value     = '';
     document.getElementById('sc_branch').checked      = true;
     tickAll(false);
     document.getElementById('passHint').textContent   = '* required';
@@ -329,9 +372,11 @@ function editMgr(m) {
     document.getElementById('passHint').textContent   = '(leave blank to keep current)';
     document.getElementById('f_password').required    = false;
 
-    const custom = (m.scope_type === 'custom');
-    document.getElementById('sc_custom').checked = custom;
-    document.getElementById('sc_branch').checked = !custom;
+    document.getElementById('f_department').value = m.department || '';
+    const custom = (m.scope_type === 'custom'), dept = (m.scope_type === 'department');
+    document.getElementById('sc_custom').checked     = custom;
+    document.getElementById('sc_department').checked = dept;
+    document.getElementById('sc_branch').checked     = !custom && !dept;
 
     const mine = ASSIGNMENTS[m.id] || [];
     scopeBoxes().forEach(c => { c.checked = mine.indexOf(c.value) !== -1; });

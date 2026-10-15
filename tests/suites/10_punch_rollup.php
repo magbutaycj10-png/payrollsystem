@@ -14,7 +14,7 @@ T::suite('10 · Punch roll-up (api/rollup-punches.php)', function () {
         Fixtures::reset();
         $id = Fixtures::employee($emp + ['emp_id' => 'QA-ROLL', 'full_name' => 'Roll Up', 'base_salary' => '500.00']);
         $pid = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        $ins = getDB()->prepare('INSERT INTO attendance_logs (employee_id, punch_time, punch_state, device_id, source) VALUES (?,?,0,?,?)');
+        $ins = getDB()->prepare('INSERT INTO attendance_logs (device_user_id, punch_time, punch_state, device_id, source) VALUES (?,?,0,?,?)');
         foreach ($punches as $when) $ins->execute([$id, $when, 'QA', 'test']);
         $r = Http::call('api/rollup-punches.php', ['method' => 'GET', 'query' => ['period_id' => $pid], 'session' => Http::admin()]);
         $rows = [];
