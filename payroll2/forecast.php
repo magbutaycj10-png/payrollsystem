@@ -230,7 +230,7 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>const FC_NOUN = <?= json_encode($fcPeriodNoun) ?>;</script>
-<script src="assets/js/forecast.js"></script>
+<script src="assets/js/forecast.js?v=<?= filemtime(__DIR__ . '/assets/js/forecast.js') ?>"></script>
 <script>
 /* ── Shared state ── */
 let _exportHistory = null;

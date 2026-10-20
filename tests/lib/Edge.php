@@ -70,7 +70,7 @@ final class Edge
     {
         foreach ($inline as $src => $code) {
             $js = str_replace('</script', '<\/script', (string)$code);
-            $html = preg_replace_callback('#<script\b[^>]*\bsrc=["\']' . preg_quote($src, '#') . '["\'][^>]*>\s*</script>#i', fn() => "<script>\n$js\n</script>", $html, 1);
+            $html = preg_replace_callback('#<script\b[^>]*\bsrc=["\']' . preg_quote($src, '#') . '(?:\?[^"\']*)?["\'][^>]*>\s*</script>#i', fn() => "<script>\n$js\n</script>", $html, 1);
         }
         $head = "<script>window.QA = " . self::json($input) . ";</script>\n<script>\n" . self::STUB_BASE . "\n</script>\n";
         $html = preg_replace_callback('#<head\b[^>]*>#i', fn($m) => $m[0] . "\n" . $head, $html, 1);
