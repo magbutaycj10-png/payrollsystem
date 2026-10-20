@@ -5,13 +5,21 @@ requireAuth();
 $activePage = 'dashboard';
 $db         = getDB();
 
-/* Most recent payroll period BY DATE that has payroll - a period entered later for an older month is not "latest" */
-$latestPeriodRow   = $db->query("SELECT pp.id, pp.period_label, pp.status, pp.period_type FROM payroll_periods pp
-                                  WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
-                                  ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1")->fetch()
-                  ?: $db->query("SELECT id, period_label, status, period_type FROM payroll_periods ORDER BY start_date DESC, id DESC LIMIT 1")->fetch();
+/* The period "now" is about: the one holding today's date, else the newest that has started - by date, never by id, and
+   never one entered in advance for a later month (see reportingPeriod()). Signing in lands here, so it opens on today. */
+$latestPeriodRow   = reportingPeriod($db);
 $latestPeriod      = $latestPeriodRow['id']           ?? null;
 $latestPeriodLabel = $latestPeriodRow['period_label'] ?? null;
+
+/* "As of" line under the heading: the period's dates, how far its attendance files reach, and whether today is inside it */
+$today        = date('Y-m-d');
+$holdsToday   = $latestPeriodRow && $latestPeriodRow['start_date'] <= $today && $latestPeriodRow['end_date'] >= $today;
+$dataThrough  = null;
+if ($latestPeriodRow) {
+    $dq = $db->prepare("SELECT MAX(att_date) FROM biometric_daily WHERE att_date BETWEEN ? AND ?");
+    $dq->execute([$latestPeriodRow['start_date'], $latestPeriodRow['end_date']]);
+    $dataThrough = $dq->fetchColumn() ?: null;
+}
 /* What one point of the trend below is: a month, a cut-off or a week - the card must say what it predicts */
 $nextWord = match (periodType($latestPeriodRow['period_type'] ?? null)) { 'Semi-Monthly' => 'Cut-off', 'Weekly' => 'Week', default => 'Month' };
 
@@ -42,21 +50,24 @@ if ($latestPeriod) {
  * Uses ALL periods (Open + Locked) - no longer requires Finalized status -
  * so the prediction works as soon as attendance is uploaded.
  */
-/* The SIX MOST RECENT periods (newest first inside, oldest first outside) - the trend is about now, not about the first six ever */
-$monthly = $db->query("
+/* The SIX MOST RECENT periods up to the one shown (newest first inside, oldest first outside) - the trend is about now, not about the first six ever */
+$tq = $db->prepare("
     SELECT * FROM (
         SELECT pp.id, pp.period_label, pp.start_date,
                COALESCE(SUM(p.net_pay),0)   AS total_net,
                COALESCE(SUM(p.gross_pay),0) AS total_gross
         FROM payroll_periods pp
         LEFT JOIN payroll p ON p.period_id = pp.id
+        WHERE pp.start_date <= ?
         GROUP BY pp.id
         HAVING total_net > 0
         ORDER BY pp.start_date DESC, pp.id DESC
         LIMIT 6
     ) latest
     ORDER BY start_date ASC, id ASC
-")->fetchAll();
+");
+$tq->execute([$latestPeriodRow['end_date'] ?? '9999-12-31']);
+$monthly = $tq->fetchAll();
 
 /* Linear regression on the net pay series to forecast the next point (next month / cut-off / week, see $nextWord) */
 $nets      = array_map('floatval', array_column($monthly, 'total_net'));
@@ -354,6 +365,15 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
         <div>
             <h1>Dashboard</h1>
             <p>Welcome back, <?= htmlspecialchars($_SESSION['admin']) ?> &nbsp;&nbsp; <?= date('F j, Y') ?></p>
+            <?php if ($latestPeriodRow): ?>
+            <p>
+                Showing <strong><?= htmlspecialchars($latestPeriodLabel) ?></strong>
+                (<?= date('M j', strtotime($latestPeriodRow['start_date'])) ?> to <?= date('M j, Y', strtotime($latestPeriodRow['end_date'])) ?>)
+                &nbsp;&middot;&nbsp;
+                <?= $dataThrough ? 'attendance up to ' . date('M j, Y', strtotime($dataThrough)) : 'no attendance uploaded yet' ?>
+                <?= $holdsToday ? '' : '&nbsp;&middot;&nbsp; no period covers today yet, this is the latest one' ?>
+            </p>
+            <?php endif; ?>
         </div>
         <a href="attendance-upload.php" class="btn btn-primary">Upload Attendance</a>
     </div>

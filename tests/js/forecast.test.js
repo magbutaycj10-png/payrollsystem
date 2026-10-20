@@ -5,7 +5,7 @@
 
 /* ------------------------------------------------------------------ the scripts under test are really there */
 t('the application\'s functions are loaded (forecast.js)', () => {
-  ['difference', 'undifference', 'yuleWalker', 'arimaForecast', 'detectTurningPoints', 'classifyNextPeriod', 'nextPeriodOf',
+  ['difference', 'undifference', 'yuleWalker', 'arimaForecast', 'nextPeriodOf',
    'buildFeatures', 'buildNextFeatures', 'RandomForestRegressor', 'periodName']
     .forEach(n => truthy(typeof globalThis[n] === 'function' || (function () { try { return typeof eval(n) === 'function'; } catch (e) { return false; } })(), n + ' is missing'));
 });
@@ -54,20 +54,7 @@ t('ARIMA one-step forecast equals the textbook AR(2) formula on a realistic payr
   near(arimaForecast(s, 1, 2, 1)[0], textbookArima(s), 0.01, 'app ' + arimaForecast(s, 1, 2, 1)[0].toFixed(2) + ' vs textbook ' + textbookArima(s).toFixed(2));
 }, 'D-05');
 
-/* ------------------------------------------------------------------ turning points, calendar, formatting */
-t('turning points: peaks and troughs are found where the series changes direction', () => {
-  same(detectTurningPoints([3, 5, 4, 6, 2]).map(p => [p.index, p.type]), [[1, 'Peak'], [2, 'Trough'], [3, 'Peak']]);
-  same(detectTurningPoints([1, 2, 3, 4]), []);
-});
-
-t('classifyNextPeriod: rising then falling = Peak; falling then rising = Trough; a continued trend = nothing', () => {
-  PERIODS_PER_MONTH = 1;
-  truthy(classifyNextPeriod([10, 12], 11).startsWith('Peak'));
-  truthy(classifyNextPeriod([12, 10], 11).startsWith('Trough'));
-  same(classifyNextPeriod([10, 12], 13), null);
-  same(classifyNextPeriod([10], 13), null);
-});
-
+/* ------------------------------------------------------------------ calendar, formatting */
 t('kinsenas calendar: 1st half → 2nd half of the same month; 2nd half → next month; December rolls the year; names say which half', () => {
   PERIODS_PER_MONTH = 2;
   same(nextPeriodOf({ month: 4, year: 2026, half: 1 }), { month: 4, year: 2026, half: 2 });

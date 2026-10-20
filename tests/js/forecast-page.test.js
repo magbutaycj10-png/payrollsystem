@@ -17,7 +17,7 @@ ta('the page forecasts total labor cost by default: two-decimal amounts, labelle
   truthy(PESO.test($('cardRF').textContent) && PESO.test($('cardARIMA').textContent), 'model cards: ' + $('cardRF').textContent + ' / ' + $('cardARIMA').textContent);
   truthy(/labor cost/i.test($('cardConsensusLabel').textContent), 'card heading: ' + $('cardConsensusLabel').textContent);
   truthy(/labor cost/i.test($('chartTitle').textContent), 'chart heading: ' + $('chartTitle').textContent);
-  truthy(/labor cost/i.test($('thTpValue').textContent), 'turning-point column: ' + $('thTpValue').textContent);
+  truthy(!$('tpBody') && !$('cardTP') && !$('guideBody'), 'the turning-point card/table and the Orange3 guide are no longer on the page');
   same($('histBody').children.length, HIST.length, 'one row per payroll period');
   truthy(HIST.every(r => r.total_labor_cost > r.total_net), 'labor cost is more than take-home in every period of the data');
 

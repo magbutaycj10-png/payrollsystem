@@ -2010,6 +2010,21 @@ function currentPeriod(PDO $db, bool $openOnly = false): ?array {
 }
 
 /*
+ * The pay period the admin dashboard reports on after sign-in: the one whose
+ * dates hold today, else the newest one that has already started. A period
+ * entered in advance for a later month is never "latest" - only when every
+ * period still lies in the future is the soonest of them shown.
+ */
+function reportingPeriod(PDO $db): ?array {
+    $today = date('Y-m-d');
+    $st = $db->prepare("SELECT * FROM payroll_periods WHERE start_date <= ?
+                         ORDER BY (end_date >= ?) DESC, start_date DESC, id DESC LIMIT 1");
+    $st->execute([$today, $today]);
+    if ($p = $st->fetch()) return $p;
+    return $db->query("SELECT * FROM payroll_periods ORDER BY start_date ASC, id ASC LIMIT 1")->fetch() ?: null;
+}
+
+/*
  * Another period whose dates overlap start..end, or null. Two periods
  * covering the same days would pay those days twice.
  */

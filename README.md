@@ -16,7 +16,7 @@ A payroll system for a Philippine small business - built for **L&N Pharmacy** - 
 | **Bonus & deductions** | Per employee or in bulk, with a history and an audit trail; a deduction can't push net pay below zero; bonuses are watched against the ₱90,000 tax-exempt ceiling. |
 | **13th month pay** | Works out *basic pay earned in the year ÷ 12* for everyone, shows every month so it can be checked, accepts mid-year advances, and records the payment on payslips. [How it works](#13th-month-pay) |
 | **Payslips & records** | Printable payslips and register, e-signatures, finalize / unlock with a revision trail, print log. |
-| **Forecast** | Random Forest + ARIMA forecast of the next period's **labor cost** (pay + bonus + the employer's SSS, EC, PhilHealth, Pag-IBIG) or take-home pay, with turning points and a CSV for Orange3. |
+| **Forecast** | Random Forest + ARIMA forecast of the next period's **labor cost** (pay + bonus + the employer's SSS, EC, PhilHealth, Pag-IBIG) or take-home pay, and a CSV for Orange3. |
 
 ## 13th month pay
 

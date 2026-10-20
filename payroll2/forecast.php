@@ -5,7 +5,6 @@
  * Uses two independent models running in the browser (no Python required):
  *   - Random Forest Regression
  *   - ARIMA(2,1,0)
- * Also includes a step-by-step guide for training/validating in Orange3.
  */
 
 require 'includes/helpers.php';
@@ -52,60 +51,6 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
 
         /* Chart area */
         .chart-area { height: 320px; position: relative; }
-
-        /* Orange3 guide - collapsible section */
-        .guide-section { margin-top: 28px; }
-
-        .guide-toggle {
-            width: 100%; text-align: left; background: none; border: none;
-            padding: 16px 20px; font-size: 1rem; font-weight: 600;
-            cursor: pointer; display: flex; justify-content: space-between;
-            align-items: center; color: var(--text);
-        }
-
-        .guide-toggle:hover { background: #f9fafb; }
-
-        .guide-body { padding: 0 20px 20px; display: none; }
-        .guide-body.open { display: block; }
-
-        /* Numbered step cards inside the guide */
-        .step-list { counter-reset: step; }
-
-        .step-item {
-            display: flex; gap: 14px; margin-bottom: 18px;
-            padding: 16px; border: 1px solid var(--border);
-            border-radius: 8px; background: #fafafa;
-        }
-
-        .step-num {
-            counter-increment: step;
-            width: 32px; height: 32px; border-radius: 50%;
-            background: #1e293b; color: #fff;
-            display: flex; align-items: center; justify-content: center;
-            font-weight: 700; font-size: .85rem; flex-shrink: 0;
-        }
-
-        .step-num::before { content: counter(step); }
-
-        .step-content h4 { font-size: .9rem; font-weight: 700; margin-bottom: 4px; }
-        .step-content p  { font-size: .85rem; color: var(--text-muted); margin: 0; line-height: 1.6; }
-        .step-content code {
-            background: #f1f5f9; padding: 2px 6px;
-            border-radius: 4px; font-family: monospace; font-size: .82rem;
-        }
-
-        /* Workflow diagram for Orange3 */
-        .workflow {
-            display: flex; align-items: center; flex-wrap: wrap;
-            gap: 6px; margin: 10px 0;
-        }
-
-        .wf-node {
-            background: #1e293b; color: #fff;
-            padding: 5px 12px; border-radius: 6px; font-size: .78rem; font-weight: 600;
-        }
-
-        .wf-arrow { color: #6b7280; font-size: 1rem; }
 
         /* Data quality warning banner */
         #dataWarning {
@@ -189,14 +134,6 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 <div class="card-sub"   id="cardARIMADiff" style="color:var(--text-muted);">change vs last</div>
             </div>
 
-            <div class="card card-purple fc-card">
-                <div class="card-label"><?= $fcPeriodNoun ?> Signal</div>
-                <div class="card-value" style="font-size:1rem;margin-top:8px;">
-                    <span id="cardTP">-</span>
-                </div>
-                <div class="card-sub" style="margin-top:6px;">Turning point detection</div>
-            </div>
-
         </div>
 
         <!-- ── Forecast chart ── -->
@@ -213,27 +150,6 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 <div class="chart-area">
                     <canvas id="forecastChart"></canvas>
                 </div>
-            </div>
-        </div>
-
-        <!-- ── Turning points table ── -->
-        <div class="box" style="margin-bottom:24px;">
-            <div class="box-header">
-                <h2>Turning Points</h2>
-                <span id="tpCount" style="font-size:.85rem;color:#6b7280;"></span>
-            </div>
-            <div class="table-wrap">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Period</th>
-                            <th>Type</th>
-                            <th id="thTpValue">Amount</th>
-                            <th>Source</th>
-                        </tr>
-                    </thead>
-                    <tbody id="tpBody"></tbody>
-                </table>
             </div>
         </div>
 
@@ -262,247 +178,6 @@ $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next 
                 </table>
             </div>
         </div>
-
-        <!-- ── Orange3 Guide ── -->
-        <div class="box guide-section">
-            <button class="guide-toggle" onclick="toggleGuide(this)">
-                <span>How to Train and Validate in Orange3 (Step-by-Step Guide)</span>
-                <span id="guideArrow">&#9660;</span>
-            </button>
-            <div class="guide-body" id="guideBody">
-
-                <div class="alert alert-info" style="margin-bottom:20px;">
-                    Orange3 is a free visual data mining tool.
-                    The models in this page run automatically in your browser, but Orange3
-                    lets you visually explore, retrain, and validate them with no code.
-                    Download it free at <strong>orangedatamining.com</strong>
-                </div>
-
-                <!-- Part A: Setup -->
-                <h3 style="font-size:.95rem;font-weight:700;margin-bottom:14px;color:#1e293b;">
-                    Part A - Install Orange3
-                </h3>
-                <div class="step-list">
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Download &amp; Install Orange3</h4>
-                            <p>Go to <strong>orangedatamining.com</strong>, click Download,
-                               run the installer, and follow the defaults.
-                               Orange3 is free and runs on Windows, Mac, and Linux.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Install the Time Series Add-on (for ARIMA)</h4>
-                            <p>Open Orange3 &rarr; click <code>Options</code> &rarr; <code>Add-ons</code>
-                               &rarr; search for <code>Time Series</code> &rarr; click Install &rarr; restart Orange3.
-                               This adds the ARIMA widget needed for time-series forecasting.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Export your payroll data as CSV</h4>
-                            <p>Click the <strong>"Export CSV for Orange3"</strong> button at the top of
-                               this page. Save the file as <code>payroll_forecast_data.csv</code>.
-                               This file contains all the period totals the models need.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Part B: Random Forest in Orange -->
-                <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part B - Random Forest in Orange3
-                </h3>
-                <p style="font-size:.85rem;color:#6b7280;margin-bottom:14px;">
-                    Random Forest treats forecasting as a regression problem.
-                    Each payroll period is one row; the model learns how period index,
-                    month, employee count, and average gross pay together determine total net pay.
-                </p>
-
-                <!-- Workflow diagram -->
-                <div class="workflow" style="margin-bottom:16px;">
-                    <span class="wf-node">File</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">Select Columns</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">Random Forest</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">Test &amp; Score</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">Predictions</span>
-                </div>
-
-                <div class="step-list">
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Load the CSV</h4>
-                            <p>Drag a <strong>File</strong> widget onto the canvas &rarr;
-                               double-click it &rarr; browse to <code>payroll_forecast_data.csv</code>.
-                               Orange will auto-detect the columns.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Set the target variable</h4>
-                            <p>Add a <strong>Select Columns</strong> widget and connect it to File.
-                               Drag <code>total_net</code> into the <em>Target Variable</em> slot.
-                               Move <code>label</code>, <code>status</code> into <em>Ignored</em>.
-                               Leave <code>period_index</code>, <code>month</code>, <code>year</code>,
-                               <code>employee_count</code>, <code>avg_gross</code> as Features.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Add the Random Forest widget</h4>
-                            <p>Search for <strong>Random Forest</strong> in the widget panel
-                               and connect it after Select Columns.
-                               Set: <code>Number of trees = 100</code>, <code>Max depth = 4</code>.
-                               These match the settings used in this app's built-in model.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Evaluate with Test &amp; Score</h4>
-                            <p>Add a <strong>Test &amp; Score</strong> widget.
-                               Connect <em>Select Columns &rarr; Test &amp; Score (Data input)</em>
-                               and <em>Random Forest &rarr; Test &amp; Score (Learner input)</em>.
-                               Use <strong>Cross-validation (k=3)</strong> since datasets are small.
-                               Check the <strong>RMSE</strong> and <strong>R²</strong> values -
-                               higher R² (closer to 1) means a better fit.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>View predictions</h4>
-                            <p>Add a <strong>Predictions</strong> widget connected to both
-                               <em>Test &amp; Score</em> and <em>Select Columns</em>.
-                               You can see what the model predicted for each historical period
-                               and how close it was to the actual value.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Part C: ARIMA in Orange -->
-                <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part C - ARIMA in Orange3 (Time Series Add-on)
-                </h3>
-                <p style="font-size:.85rem;color:#6b7280;margin-bottom:14px;">
-                    ARIMA models the payroll as a sequence in time.
-                    It captures autocorrelation - the idea that the next <?= $fcPeriodWord ?>&rsquo;s salary
-                    is partly predictable from the past few months' salaries.
-                    ARIMA(2,1,0) means: use 2 past values after first-order differencing.
-                </p>
-
-                <div class="workflow" style="margin-bottom:16px;">
-                    <span class="wf-node">File</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">As Time Series</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">ARIMA</span>
-                    <span class="wf-arrow">&#8594;</span>
-                    <span class="wf-node">Line Chart</span>
-                </div>
-
-                <div class="step-list">
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Load the same CSV with File widget</h4>
-                            <p>Use the same <strong>File</strong> widget from Part B, or add a new one.
-                               Make sure the <code>period_index</code> column is present
-                               - it will be used as the time axis.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Convert to Time Series</h4>
-                            <p>Add the <strong>As Time Series</strong> widget (from the Time Series add-on).
-                               Connect File &rarr; As Time Series.
-                               Set <em>Time variable</em> to <code>period_index</code>
-                               and <em>Series</em> to <code>total_net</code>.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Configure the ARIMA widget</h4>
-                            <p>Add the <strong>ARIMA</strong> widget and connect As Time Series &rarr; ARIMA.
-                               Set the order to <code>p=2, d=1, q=0</code> to match the model
-                               running in this app. Tick <strong>Auto-fit</strong> if you want
-                               Orange to find the best p/d/q values automatically (recommended
-                               once you have 12+ periods of data).</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Set forecast horizon</h4>
-                            <p>In the ARIMA widget, set <strong>Forecast steps = 3</strong>
-                               to predict the next 3 months. The widget shows the
-                               forecast with a confidence interval band (95% by default).</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Visualise with Line Chart</h4>
-                            <p>Add a <strong>Line Chart</strong> widget and connect ARIMA &rarr; Line Chart.
-                               Select <code>total_net</code> as the series.
-                               The chart shows actual historical values in blue
-                               and ARIMA forecast values in a different colour with shaded confidence bands.</p>
-                        </div>
-                    </div>
-                    <div class="step-item">
-                        <div class="step-num"></div>
-                        <div class="step-content">
-                            <h4>Read the forecast table</h4>
-                            <p>Add a <strong>Data Table</strong> widget connected to the ARIMA output.
-                               This shows the numeric forecast values per period -
-                               compare these to what this page predicts to cross-validate.</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Part D: Interpreting results -->
-                <h3 style="font-size:.95rem;font-weight:700;margin:20px 0 14px;color:#1e293b;">
-                    Part D - Interpreting Results &amp; Turning Points
-                </h3>
-                <div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:16px;font-size:.85rem;line-height:1.8;">
-                    <p><strong>Which model to trust?</strong><br>
-                    Use <strong>Random Forest</strong> when you have more than 8 periods and
-                    multiple features that affect salary (bonuses, headcount changes, seasonal pay).
-                    Use <strong>ARIMA</strong> when the payroll series has a clear trend or seasonal
-                    pattern over time. The <em>Consensus</em> card above averages both.</p>
-
-                    <p style="margin-top:12px;"><strong>What is a Turning Point?</strong><br>
-                    A <strong>Peak</strong> means salary cost hit a local high and is predicted to fall.
-                    A <strong>Trough</strong> means it hit a local low and is predicted to rise.
-                    Use these to plan cash flow - if a peak is predicted, you may need
-                    extra budget this <?= $fcPeriodWord ?> before it drops next <?= $fcPeriodWord ?>.</p>
-
-                    <p style="margin-top:12px;"><strong>When predictions improve:</strong><br>
-                    Both models become meaningfully more accurate with more data.
-                    A rough guide: 3-5 periods = directional only, 6-11 periods = useful estimates,
-                    12+ periods = reliable forecasts with seasonal detection.</p>
-
-                    <p style="margin-top:12px;"><strong>In Orange, find turning points by:</strong><br>
-                    Adding a <strong>Line Chart</strong> to the historical data -
-                    local peaks and troughs are visually obvious.
-                    The Time Series add-on also has a <strong>Moving Transform</strong>
-                    widget that can smooth the series to make turning points clearer.</p>
-                </div>
-
-            </div><!-- /guide-body -->
-        </div><!-- /box -->
 
     </div><!-- /fcContent -->
 </div><!-- /main-content -->
@@ -570,13 +245,6 @@ window.renderTable = function(history) {
 };
 
 function exportCSVBtn() { exportCSV(_exportHistory); }
-
-function toggleGuide(btn) {
-    const body  = document.getElementById('guideBody');
-    const arrow = document.getElementById('guideArrow');
-    const open  = body.classList.toggle('open');
-    arrow.innerHTML = open ? '&#9650;' : '&#9660;';
-}
 
 /* ── Period detail modal ── */
 

@@ -107,6 +107,48 @@ T::suite('05 · Dashboard forecast & status', function () {
         $t->ok(!preg_match('/card-sub">\s*Dec 16-31, 2024/', $html), 'the cards are labelled with the December period just because it was entered last');
     }, ['defect' => 'D-13']);
 
+    T::test('after sign-in the dashboard opens on the period that holds TODAY, even before any payroll is computed in it', function (T $t) {
+        Fixtures::reset();
+        qa_history([10000, 11000]);                                  // Jan 1-15, Jan 16-31 2025 - both have payroll
+        Fixtures::period('This month', date('Y-m-01'), date('Y-m-t'), 'Monthly');   // opened just now, nothing uploaded into it
+        $html = Http::page('dashboard.php')['body'];
+        $t->contains('Showing <strong>This month</strong>', $html, 'the heading names the period holding today');
+        $t->ok(preg_match('/card-sub">\s*This month/', $html) === 1, 'the cards are labelled with it, not with the older period that has data');
+        $t->contains('no attendance uploaded yet', $html);
+        $t->notContains('no period covers today yet', $html, 'today is inside this period');
+        $d = qa_dashboard_data($html);
+        $t->same([10000.0, 11000.0], array_map('floatval', $d['net']), 'the trend still shows the earlier periods that have payroll');
+    });
+
+    T::test('the dashboard says how far the attendance files reach into the period it shows', function (T $t) {
+        Fixtures::reset();
+        Fixtures::employee(['full_name' => 'Daily Person', 'base_salary' => '500.00']);
+        $pid = Fixtures::period('This month', date('Y-m-01'), date('Y-m-t'), 'Monthly');
+        $first = date('Y-m-01');
+        $r = Fixtures::days($pid, [Fixtures::day('Daily Person', $first, 8)]);
+        $t->same(200, $r['status'], 'the day was saved: ' . json_encode($r));
+        $html = Http::page('dashboard.php')['body'];
+        $t->contains('attendance up to ' . date('M j, Y', strtotime($first)), $html);
+    });
+
+    T::test('a period entered in advance for a later month is not "latest": the dashboard stays on the newest one that has started', function (T $t) {
+        Fixtures::reset();
+        qa_history([10000, 11000]);                                  // Jan 1-15, Jan 16-31 2025
+        $db = getDB();
+        $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Next year', ?, ?, 'Semi-Monthly', 'Open')")
+           ->execute([date('Y-m-d', strtotime('+1 year')), date('Y-m-d', strtotime('+1 year +14 days'))]);
+        $future = (int)$db->lastInsertId();
+        $emp = Fixtures::employee(['full_name' => 'Future Person']);
+        $db->prepare("INSERT INTO payroll (period_id, employee_id, gross_pay, net_pay)
+                      VALUES (?, (SELECT id FROM employees WHERE employee_code = ?), 99999, 99999)")->execute([$future, $emp]);
+        $html = Http::page('dashboard.php')['body'];
+        $t->contains('Showing <strong>Jan 16-31, 2025</strong>', $html);
+        $t->ok(preg_match('/card-sub">\s*Next year/', $html) !== 1, 'the cards are labelled with a period that has not started');
+        $t->contains('no period covers today yet', $html, 'the page says today is outside the period it shows');
+        $d = qa_dashboard_data($html);
+        $t->same([10000.0, 11000.0], array_map('floatval', $d['net']), 'the trend and the prediction ignore the period that has not started');
+    });
+
     T::test('dashboard totals: gross, net, tax, bonus, deductions of the latest period equal the sums of its payroll rows', function (T $t) {
         Fixtures::reset();
         $emp = Fixtures::employee(['full_name' => 'Totals A']);

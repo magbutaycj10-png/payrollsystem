@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-20 - new sign-in screen, a leaner forecast page, a dashboard that opens on today
+
+* **Sign-in page** redrawn: large "Payroll System" heading with the gold "Predictive Forecasting" accent, a rounded white card, a show/hide eye in the password box, and the store-front photo (`assets/images/login-bg.jpg`) faded into the navy background. Same form, same fields, same sign-in rules.
+* **Salary Forecast**: the "Turning Points" table, the "next period signal" card and the "How to Train and Validate in Orange3 (Step-by-Step Guide)" section are gone (page, `forecast.js` and their tests). The models, the cards, the chart, the history table and the CSV export are unchanged.
+* **Dashboard** (the page after an admin signs in) reports on **today's** pay period - the one whose dates hold today, else the newest one that has already started (`reportingPeriod()` in `includes/helpers.php`). Before, it showed the newest period by date that had payroll, so a period dated in advance could take over and a period just opened stayed hidden behind an older one. A line under the heading names the period, its dates and how far the attendance files reach; the trend chart and the prediction stop at the period shown. Three new tests in suite 05.
+
 ## 2026-10-15 - the standard database layout (14 tables, every record has its own `id`, links are `<thing>_id`)
 
 The database is now laid out the way a textbook ERD would draw it, from the sample the school schema was modelled on. Nothing looks different on any screen, payslip or file - the employee number is still `EMP-004` everywhere - but underneath:

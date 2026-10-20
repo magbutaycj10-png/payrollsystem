@@ -13,9 +13,6 @@ function escHtml(v) {
  *      between period index, month, employee count, etc. and net pay.
  *   2. ARIMA(2,1,0)              - classic time-series model that learns
  *      from the autocorrelation structure of the payroll series.
- *
- * Also provides turning-point detection on the historical series and
- * flags whether the next predicted value is itself a turning point.
  */
 
 'use strict';
@@ -326,50 +323,7 @@ function arimaForecast(series, steps = 1, p = 2, d = 1) {
 }
 
 /* ============================================================
-   SECTION 3 - Turning Point Detection
-   ============================================================
-   A turning point is a local maximum (peak) or minimum (trough)
-   in the time series.  They indicate months where salary cost
-   reversed direction - useful for budget planning.
-*/
-
-/*
- * detectTurningPoints()
- * Scans the historical series for peaks and troughs.
- * A point i is a peak   if values[i] > values[i-1] AND values[i] > values[i+1]
- * A point i is a trough if values[i] < values[i-1] AND values[i] < values[i+1]
- */
-function detectTurningPoints(values) {
-    const points = [];
-    for (let i = 1; i < values.length - 1; i++) {
-        if (values[i] > values[i - 1] && values[i] > values[i + 1]) {
-            points.push({ index: i, type: 'Peak',   value: values[i] });
-        } else if (values[i] < values[i - 1] && values[i] < values[i + 1]) {
-            points.push({ index: i, type: 'Trough', value: values[i] });
-        }
-    }
-    return points;
-}
-
-/*
- * classifyNextPeriod()
- * Determines whether the forecast value for next month constitutes a turning point
- * relative to the last two historical values.
- * Returns a descriptive string, or null if no turning point is detected.
- */
-function classifyNextPeriod(series, nextVal) {
-    if (series.length < 2) return null;
-    const prev  = series[series.length - 1];
-    const prev2 = series[series.length - 2];
-    const risingBefore = prev  > prev2;
-    const risingAfter  = nextVal > prev;
-    if ( risingBefore && !risingAfter) return 'Peak - salary expected to decrease next ' + periodWord();
-    if (!risingBefore &&  risingAfter) return 'Trough - salary expected to increase next ' + periodWord();
-    return null; /* continuation of existing trend */
-}
-
-/* ============================================================
-   SECTION 4 - Pay-period calendar
+   SECTION 3 - Pay-period calendar
    ============================================================
    The payroll calendar is whatever Settings says: one run a month,
    two (kinsenas), or four. Everything below forecasts the next
@@ -410,13 +364,8 @@ function periodName(p) {
     return base + ' (' + (p.half === 1 ? '1st half' : '2nd half') + ')';
 }
 
-/* The word this page uses for one payroll run. */
-function periodWord() {
-    return PERIODS_PER_MONTH >= 2 ? 'period' : 'month';
-}
-
 /* ============================================================
-   SECTION 4b - Feature Engineering for Random Forest
+   SECTION 3b - Feature Engineering for Random Forest
    ============================================================ */
 
 /*
@@ -484,7 +433,7 @@ function randomForestForecast(history, field = 'total_net') {
 }
 
 /* ============================================================
-   SECTION 5 - Main Orchestration
+   SECTION 4 - Main Orchestration
    ============================================================ */
 
 /*
@@ -493,8 +442,7 @@ function randomForestForecast(history, field = 'total_net') {
  * 1. Fetches historical payroll data from the API
  * 2. Trains both models
  * 3. Predicts next month's total net pay
- * 4. Detects turning points in the historical series
- * 5. Renders the results into the page
+ * 4. Renders the results into the page
  */
 async function runForecast() {
     showStatus('loading');
@@ -538,16 +486,11 @@ async function runForecast() {
     /* ── Random Forest: seeded (same data, same answer) and trained on period-to-period change ── */
     const rfPred = randomForestForecast(history, field);
 
-    /* ── Turning points ── */
-    const turningPoints = detectTurningPoints(series);
-    const nextLabel     = classifyNextPeriod(series, (rfPred + (arimaPred || rfPred)) / 2);
-
     /* ── Render everything ── */
     showStatus('done');
     renderTargetLabels(field);
-    renderCards(rfPred, arimaPred, history, nextLabel, field);
+    renderCards(rfPred, arimaPred, history, field);
     renderChart(history, rfPred, arimaPred, field);
-    renderTurningPoints(turningPoints, history, nextLabel, rfPred, arimaPred, field);
     renderTable(history);
 }
 
@@ -565,7 +508,7 @@ function pickTarget(history) {
 }
 
 /* ============================================================
-   SECTION 6 - Rendering helpers
+   SECTION 5 - Rendering helpers
    ============================================================ */
 
 /* Money is always shown to the centavo (two decimals) - a forecast is a float with many - and a negative amount keeps its sign in front */
@@ -582,7 +525,6 @@ function renderTargetLabels(field) {
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     set('cardConsensusLabel', 'Consensus Forecast - ' + (typeof FC_NOUN !== 'undefined' ? FC_NOUN : 'Next Period') + ' ' + t.name);
     set('chartTitle', 'Historical ' + t.name + ' + Forecast');
-    set('thTpValue', t.name);
     set('fcTargetNote', t.name + ': ' + t.note);
 }
 
@@ -593,7 +535,7 @@ function showStatus(state, msg = '') {
     if (state === 'error') document.getElementById('fcError').textContent = msg;
 }
 
-function renderCards(rfPred, arimaPred, history, nextLabel, field = 'total_net') {
+function renderCards(rfPred, arimaPred, history, field = 'total_net') {
     const last      = history[history.length - 1][field];
     const consensus = arimaPred ? (rfPred + arimaPred) / 2 : rfPred;
 
@@ -617,24 +559,13 @@ function renderCards(rfPred, arimaPred, history, nextLabel, field = 'total_net')
         document.getElementById('cardARIMADiff').textContent = '(min 5 periods required)';
     }
 
-    /* Turning point badge */
-    const tpEl = document.getElementById('cardTP');
-    if (nextLabel) {
-        tpEl.textContent  = nextLabel;
-        tpEl.className    = 'badge ' + (nextLabel.startsWith('Peak') ? 'badge-red' : 'badge-blue');
-    } else {
-        tpEl.textContent  = 'Trend continues';
-        tpEl.className    = 'badge badge-green';
-    }
-
     /* Data quality warning */
     const warnEl = document.getElementById('dataWarning');
     if (history.length < 6) {
         warnEl.style.display = 'block';
         warnEl.textContent   =
             `Note: Only ${history.length} period(s) of data available. ` +
-            `Predictions improve significantly with 6+ periods. ` +
-            `Use the Orange3 guide below for additional validation.`;
+            `Predictions improve significantly with 6+ periods.`;
     }
 }
 
@@ -736,46 +667,6 @@ function renderChart(history, rfPred, arimaPred, field = 'total_net') {
             }
         }
     });
-}
-
-function renderTurningPoints(points, history, nextLabel, rfPred, arimaPred, field = 'total_net') {
-    const tbody = document.getElementById('tpBody');
-    tbody.innerHTML = '';
-
-    /* Historical turning points */
-    points.forEach(p => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-            <td>${escHtml(history[p.index].label)}</td>
-            <td><span class="badge badge-${p.type === 'Peak' ? 'red' : 'blue'}">${p.type}</span></td>
-            <td>${fmt(p.value)}</td>
-            <td>Historical</td>`;
-        tbody.appendChild(tr);
-    });
-
-    /* Predicted turning point for the next payroll run */
-    if (nextLabel) {
-        const consensus = arimaPred ? (rfPred + (arimaPred || rfPred)) / 2 : rfPred;
-        const type      = nextLabel.startsWith('Peak') ? 'Peak' : 'Trough';
-        const last      = history[history.length - 1];
-        const nextName  = periodName(nextPeriodOf(last));
-        const tr        = document.createElement('tr');
-        tr.style.background = '#fffbeb';
-        tr.innerHTML = `
-            <td>${nextName} <span class="badge badge-yellow">Forecast</span></td>
-            <td><span class="badge badge-${type === 'Peak' ? 'red' : 'blue'}">${type}</span></td>
-            <td>${fmt(consensus)}</td>
-            <td>Predicted</td>`;
-        tbody.appendChild(tr);
-    }
-
-    if (!points.length && !nextLabel) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="4" style="text-align:center;color:#9ca3af;padding:20px;">No turning points detected in current data.</td>';
-        tbody.appendChild(tr);
-    }
-
-    document.getElementById('tpCount').textContent = points.length + ' found';
 }
 
 function renderTable(history) {
