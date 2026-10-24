@@ -17,7 +17,7 @@ $msg = null;
 
 [$scopeWhere, $scopeParams] = mgrScopeWhere();
 
-$employees = $db->prepare("SELECT e.id, e.employee_code AS emp_id, e.full_name, COALESCE(br.name, '') AS branch FROM employees e LEFT JOIN branches br ON br.id = e.branch_id WHERE e.status='Active' $scopeWhere ORDER BY e.full_name");
+$employees = $db->prepare("SELECT e.id, e.employee_code AS emp_id, e.full_name, e.pay_schedule, COALESCE(br.name, '') AS branch FROM employees e LEFT JOIN branches br ON br.id = e.branch_id WHERE e.status='Active' $scopeWhere ORDER BY e.full_name");
 $employees->execute($scopeParams);
 $employees = $employees->fetchAll();
 
@@ -39,10 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emp = null;
     foreach ($employees as $e) { if ($e['emp_id'] === $emp_id) $emp = $e; }
 
-    /* The Open period that holds this day */
+    /* The Open period that holds this day - of the schedule the employee is paid on (a Monthly run and the kinsenas cut-offs can hold the same date) */
     $period = null;
     foreach ($openPeriods as $p) {
-        if ($date >= $p['start_date'] && $date <= $p['end_date']) { $period = $p; break; }
+        if ($date >= $p['start_date'] && $date <= $p['end_date'] && (!$emp || employeeInPeriod($emp, periodType($p['period_type'] ?? null)))) { $period = $p; break; }
     }
 
     if (!$emp) {
@@ -52,8 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($hoursProblem !== null) {
         $msg = ['type' => 'error', 'text' => "Not saved - {$hoursProblem}. Check the hours and try again."];
     } elseif (!$period) {
-        $msg = ['type' => 'error', 'text' => 'No open pay period covers ' . date('M d, Y', strtotime($date))
-                                           . '. Ask the admin to create or unlock it.'];
+        $msg = ['type' => 'error', 'text' => 'No open ' . $emp['pay_schedule'] . ' pay period covers ' . date('M d, Y', strtotime($date))
+                                           . ' (' . $emp['full_name'] . ' is paid ' . strtolower($emp['pay_schedule']) . '). Ask the admin to create or unlock it.'];
     } else {
         try {
             $db->prepare("
@@ -83,7 +83,7 @@ $recentManual = $db->prepare("
     SELECT b.id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours, b.is_day_off AS day_off, b.uploaded_at, ub.full_name AS entered_by,
            e.employee_code AS emp_id, e.full_name AS emp_name,
            (SELECT pp.period_label FROM payroll_periods pp WHERE b.att_date BETWEEN pp.start_date AND pp.end_date
-             ORDER BY pp.start_date, pp.id LIMIT 1) AS period_label
+             ORDER BY (pp.period_type = e.pay_schedule) DESC, pp.start_date, pp.id LIMIT 1) AS period_label
     FROM biometric_daily b
     JOIN employees e ON e.id = b.employee_id
     LEFT JOIN users ub ON ub.id = b.entered_by

@@ -5,12 +5,10 @@
  */
 final class Fixtures
 {
-    /** the pharmacy's settings (₱45 overtime hour, kinsenas calendar, contribution schedule as in Settings) */
+    /** the pharmacy's settings (₱45 overtime hour). The pay schedule and the contribution schedule are not settings any more: they are columns of the employee. */
     public const DEFAULT_SETTINGS = [
         'overtime_rate' => '45', 'overtime_method' => 'flat', 'overtime_multiplier' => '1.25',
-        'late_rate' => '80', 'standard_hours' => '8', 'payroll_period' => 'Semi-Monthly',
-        'contribution_timing_sss' => 'first', 'contribution_timing_philhealth' => 'second', 'contribution_timing_pagibig' => 'second',
-        'contribution_timing_tax' => 'split',
+        'late_rate' => '80', 'standard_hours' => '8',
         'bir_registered_name' => 'QA TEST PHARMACY', 'bir_signatory_name' => 'QA Signatory',
     ];
 
@@ -29,7 +27,9 @@ final class Fixtures
 
     /**
      * insert an employee; returns the emp_id. sss_amount / philhealth_amount / pagibig_amount / tax_amount are the
-     * employee's MONTHLY amounts as the admin types them on Employees (default 0.00 = none).
+     * employee's MONTHLY amounts as the admin types them on Employees (default 0.00 = none). pay_schedule (Semi-Monthly | Monthly) is
+     * how often they are paid - a pay period only takes the employees on its schedule; sss_timing / philhealth_timing / pagibig_timing /
+     * tax_timing (first | split | second) say which cut-off of the month takes each amount (default: the usual schedule, Ledger::TIMING).
      */
     public static function employee(array $e): string
     {
@@ -37,13 +37,18 @@ final class Fixtures
         $e += ['emp_id' => 'EMP-' . str_pad((string)(++$n), 3, '0', STR_PAD_LEFT), 'full_name' => 'Test Employee ' . $n, 'position' => 'Staff',
                'branch' => 'MAIN', 'base_salary' => '480.00', 'salary_type' => 'daily', 'date_hired' => null, 'rest_days' => '7',
                'hours_per_day' => null, 'sss_amount' => '0.00', 'philhealth_amount' => '0.00', 'pagibig_amount' => '0.00', 'tax_amount' => '0.00',
+               'pay_schedule' => 'Semi-Monthly',
+               'sss_timing' => Ledger::TIMING['sss'], 'philhealth_timing' => Ledger::TIMING['philhealth'],
+               'pagibig_timing' => Ledger::TIMING['pagibig'], 'tax_timing' => Ledger::TIMING['tax'],
                'status' => 'Active'];
         [$first, $last] = self::splitName($e['full_name']);
-        self::db()->prepare("INSERT INTO employees (employee_code, first_name, last_name, position_id, branch_id, base_salary, salary_type, date_hired, rest_days,
-                             hours_per_day, sss_amount, philhealth_amount, pagibig_amount, tax_amount, status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        self::db()->prepare("INSERT INTO employees (employee_code, first_name, last_name, position_id, branch_id, base_salary, salary_type, pay_schedule, date_hired, rest_days,
+                             hours_per_day, sss_amount, philhealth_amount, pagibig_amount, tax_amount, sss_timing, philhealth_timing, pagibig_timing, tax_timing, status)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
             ->execute([$e['emp_id'], $first, $last, self::lookup('positions', 'title', $e['position']), self::lookup('branches', 'name', $e['branch']),
-                       $e['base_salary'], $e['salary_type'], $e['date_hired'],
-                       $e['rest_days'], $e['hours_per_day'], $e['sss_amount'], $e['philhealth_amount'], $e['pagibig_amount'], $e['tax_amount'], $e['status']]);
+                       $e['base_salary'], $e['salary_type'], $e['pay_schedule'], $e['date_hired'],
+                       $e['rest_days'], $e['hours_per_day'], $e['sss_amount'], $e['philhealth_amount'], $e['pagibig_amount'], $e['tax_amount'],
+                       $e['sss_timing'], $e['philhealth_timing'], $e['pagibig_timing'], $e['tax_timing'], $e['status']]);
         return $e['emp_id'];
     }
 

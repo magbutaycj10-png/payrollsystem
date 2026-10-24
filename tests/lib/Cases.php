@@ -105,16 +105,18 @@ function qa_worker(string $name, string $from, string $to, string $rate = '500.0
 /**
  * What the admin does on Employees → Edit: one employee through the real page, every field posted again as the form does,
  * with $change on top (e.g. ['tax_amount' => '0']). Returns the page's response.
+ * $omit names fields the browser does not send - e.g. the four contribution schedules of a Monthly employee, which the form greys out.
  */
-function qa_edit_employee(string $empId, array $change): array
+function qa_edit_employee(string $empId, array $change, array $omit = []): array
 {
     $e = Fixtures::empRow($empId);
     $post = ['action' => 'edit', 'id' => $e['id'], 'emp_id' => $e['emp_id'], 'first_name' => $e['first_name'], 'last_name' => (string)$e['last_name'], 'position' => (string)$e['position'],
-             'branch' => (string)$e['branch'], 'email' => (string)$e['email'], 'salary_type' => $e['salary_type'], 'base_salary' => $e['base_salary'],
+             'branch' => (string)$e['branch'], 'email' => (string)$e['email'], 'salary_type' => $e['salary_type'], 'pay_schedule' => $e['pay_schedule'], 'base_salary' => $e['base_salary'],
              'date_hired' => (string)$e['date_hired'], 'hours_per_day' => (string)$e['hours_per_day'],
              'rest_days' => $e['rest_days'] === '' ? [] : explode(',', $e['rest_days']),
-             'sss_amount' => $e['sss_amount'], 'philhealth_amount' => $e['philhealth_amount'], 'pagibig_amount' => $e['pagibig_amount'], 'tax_amount' => $e['tax_amount']];
-    return Http::page('employee.php', $change + $post);
+             'sss_amount' => $e['sss_amount'], 'philhealth_amount' => $e['philhealth_amount'], 'pagibig_amount' => $e['pagibig_amount'], 'tax_amount' => $e['tax_amount'],
+             'sss_timing' => $e['sss_timing'], 'philhealth_timing' => $e['philhealth_timing'], 'pagibig_timing' => $e['pagibig_timing'], 'tax_timing' => $e['tax_timing']];
+    return Http::page('employee.php', array_diff_key($change + $post, array_flip($omit)));
 }
 
 /* ---- the DBeaver queries (tests/dbeaver_checks.sql), parsed and run ---- */

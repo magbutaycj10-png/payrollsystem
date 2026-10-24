@@ -413,39 +413,56 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money(Ledger::c($after['gross_pay']) - 95000, $after['net_pay'], 'net pay is gross less 400 + 250 + 300');
     });
 
-    T::test('Settings: overtime multiplier 1–3, method flat|labor_code, schedule, timing, duty day 1–24 - junk is refused, valid values saved, the rest still saved', function (T $t) {
+    T::test('Settings: overtime multiplier 1–3, method flat|labor_code, duty day 1–24 - junk is refused, valid values saved, the rest still saved', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
         Fixtures::setting('overtime_multiplier', '1.25');
         Fixtures::setting('overtime_method', 'flat');
         $get = fn(string $k) => (string)getDB()->query("SELECT setting_value FROM settings WHERE setting_key = '$k'")->fetchColumn();
-        $r = Http::page('settings.php', ['overtime_multiplier' => '0.5', 'overtime_method' => 'maybe', 'payroll_period' => 'Fortnightly', 'standard_hours' => '30',
-                                         'contribution_timing_sss' => 'never', 'contribution_timing_tax' => 'weekly', 'overtime_rate' => '-45', 'late_rate' => 'abc']);
+        $r = Http::page('settings.php', ['overtime_multiplier' => '0.5', 'overtime_method' => 'maybe', 'standard_hours' => '30', 'overtime_rate' => '-45', 'late_rate' => 'abc']);
         $t->contains('Not saved', $r['body']);
         $t->same('1.25', $get('overtime_multiplier'), 'multiplier 0.5 is below the legal minimum of 1');
         $t->same('flat', $get('overtime_method'), 'unknown method');
-        $t->same('Semi-Monthly', $get('payroll_period'), 'unknown schedule keeps the old one');
         $t->same('8', $get('standard_hours'), '30-hour duty day');
-        $t->same('first', $get('contribution_timing_sss'), 'unknown timing keeps the old one');
-        $t->same('split', $get('contribution_timing_tax'), 'unknown tax timing keeps the old one');
         $t->same('45', $get('overtime_rate'), 'negative overtime rate');
         $t->same('80', $get('late_rate'), 'non-numeric late rate');
-        Http::page('settings.php', ['overtime_multiplier' => '1.30', 'overtime_method' => 'labor_code', 'overtime_rate' => '60.50', 'standard_hours' => '10',
-                                    'contribution_timing_pagibig' => 'split', 'contribution_timing_sss' => 'second', 'contribution_timing_tax' => 'first']);
+        Http::page('settings.php', ['overtime_multiplier' => '1.30', 'overtime_method' => 'labor_code', 'overtime_rate' => '60.50', 'standard_hours' => '10']);
         $t->same('1.30', $get('overtime_multiplier'));
         $t->same('labor_code', $get('overtime_method'));
         $t->same('60.50', $get('overtime_rate'));
         $t->same('10', $get('standard_hours'));
-        $t->same('split', $get('contribution_timing_pagibig'), 'split is a valid timing');
-        $t->same('second', $get('contribution_timing_sss'), 'second is a valid timing');
-        $t->same('first', $get('contribution_timing_tax'), 'first is a valid timing, for tax too');
         $page = Http::page('settings.php')['body'];
-        $t->contains('1st cut-off of the month, in full', $page, 'the schedule offers the 1st cut-off');
-        $t->contains('Every cut-off, in equal shares', $page, 'equal shares');
-        $t->contains('Last cut-off of the month, in full', $page, 'and the last cut-off');
-        $t->contains('name="contribution_timing_tax"', $page, 'withholding tax has its own schedule line');
         $t->contains('Contribution tables - for reference', $page, 'the statutory tables are labelled as reference only');
         $t->notContains('applied automatically', $page, 'and no longer claimed to be applied automatically');
+    });
+
+    T::test('Settings no longer holds the pay schedule or the contribution schedule (they are set per employee): the form has no such boxes, a post of them saves nothing, and the reference tables close the page', function (T $t) {
+        qa_need_fixes();
+        Fixtures::reset();
+        $get = fn(string $k) => getDB()->query("SELECT setting_value FROM settings WHERE setting_key = '$k'")->fetchColumn();
+        $page = Http::page('settings.php')['body'];
+        foreach (['Default Pay Schedule', 'name="payroll_period"', 'name="contribution_timing_sss"', 'name="contribution_timing_tax"', 'id="contribSchedule"', 'Weekly'] as $gone) {
+            $t->notContains($gone, $page, "Settings does not offer: $gone");
+        }
+        $t->contains('Employees &rsaquo; Add / Edit', $page, 'it says where they went');
+        // an older database still holds the old rows; whatever is posted for them now changes nothing
+        Fixtures::setting('payroll_period', 'Semi-Monthly');
+        Fixtures::setting('contribution_timing_sss', 'first');
+        Http::page('settings.php', ['payroll_period' => 'Monthly', 'contribution_timing_sss' => 'second', 'contribution_timing_tax' => 'first', 'overtime_rate' => '45']);
+        $t->same('Semi-Monthly', $get('payroll_period'), 'a posted pay schedule is not stored');
+        $t->same('first', $get('contribution_timing_sss'), 'nor a posted contribution schedule');
+        $t->same(false, $get('contribution_timing_tax'), 'nor one that was never there');
+        getDB()->exec("DELETE FROM settings WHERE setting_key IN ('payroll_period', 'contribution_timing_sss')");
+        // "Contribution tables - for reference" is the last thing on the page: after the lists, Account Storage and the Database Summary
+        $ref = strpos($page, 'Contribution tables - for reference');
+        $t->ok($ref !== false, 'the reference tables are on the page');
+        foreach (['Company Information', 'Payroll Computation Rates', 'Admin Account', 'Branches', 'Positions', 'Account Storage', 'Database Summary'] as $before) {
+            $t->ok(strpos($page, $before) !== false && strpos($page, $before) < $ref, "$before comes before the reference tables");
+        }
+        $t->contains('chosen for that employee under', $page, 'the closing note no longer points at a Contribution Schedule "above"');
+        $t->notContains('Contribution Schedule</em> above', $page);
+        $t->contains('Employee share 5% of the Monthly Salary Credit (employer 10%, total 15%)', $page, 'the SSS line is as it was');
+        $t->contains('TRAIN graduated tables on taxable pay', $page, 'and so is the tax line');
     });
 
     /* ================================================================== D · Labor Code overtime */
@@ -455,11 +472,12 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::reset();
         Fixtures::setting('overtime_method', 'labor_code');
         Fixtures::setting('overtime_multiplier', '1.25');
-        $d = Fixtures::employee(['full_name' => 'OT Daily 480', 'base_salary' => '480.00']);
-        $b = Fixtures::employee(['full_name' => 'OT Daily 620', 'base_salary' => '620.00']);
-        $k = Fixtures::employee(['full_name' => 'OT Kinsenas', 'base_salary' => '15000.00', 'salary_type' => 'kinsenas']);
-        $m = Fixtures::employee(['full_name' => 'OT Monthly', 'base_salary' => '26000.00', 'salary_type' => 'monthly']);
-        $h = Fixtures::employee(['full_name' => 'OT Ten Hour', 'base_salary' => '600.00', 'hours_per_day' => '10.00']);
+        $pay = ['pay_schedule' => 'Monthly'];                         // one Monthly pay period for all five: a pay period takes the employees paid on its schedule
+        $d = Fixtures::employee($pay + ['full_name' => 'OT Daily 480', 'base_salary' => '480.00']);
+        $b = Fixtures::employee($pay + ['full_name' => 'OT Daily 620', 'base_salary' => '620.00']);
+        $k = Fixtures::employee($pay + ['full_name' => 'OT Kinsenas', 'base_salary' => '15000.00', 'salary_type' => 'kinsenas']);
+        $m = Fixtures::employee($pay + ['full_name' => 'OT Monthly', 'base_salary' => '26000.00', 'salary_type' => 'monthly']);
+        $h = Fixtures::employee($pay + ['full_name' => 'OT Ten Hour', 'base_salary' => '600.00', 'hours_per_day' => '10.00']);
         $pid = Fixtures::period('Apr 1-30, 2026', '2026-04-01', '2026-04-30', 'Monthly');
         $rows = [];
         foreach (['OT Daily 480', 'OT Daily 620', 'OT Kinsenas', 'OT Monthly'] as $n) $rows = array_merge($rows, Fixtures::fullDays($n, '2026-04-01', '2026-04-30'));
@@ -600,9 +618,10 @@ T::suite('11 · More numbers & the audit fixes', function () {
             $t->contains('Company Cost &amp; Remittances', $p['body']);
             $t->notContains('Pay this month so far', $p['body'], 'the old "pay so far" column is gone');
         }
-        // cut-off 1: SSS in full, half the tax, PhilHealth waits
-        $t->contains('SSS taken in full; withholding tax taken in equal shares', $p1['body'], 'the schedule line says what this run takes');
-        $t->contains('PhilHealth and Pag-IBIG wait for the last cut-off', $p1['body']);
+        // cut-off 1: SSS in full, half the tax, PhilHealth waits - each employee's own contribution schedule decides (set on the employee, not in Settings)
+        $t->contains('follow each employee&#039;s own contribution schedule', $p1['body'], 'the schedule line says whose schedule decides what this run takes');
+        $t->contains('set on each employee', $p1['body'], 'and where it is set');
+        $t->notContains('change in Settings', $p1['body'], 'no longer a Settings link');
         $t->contains('&#8369;675.00 / &#8369;1,350.00 + &#8369;10.00', $p1['body'], 'SSS: employee / company + EC');
         $t->contains('monthly &#8369;750.00 · waits for the last cut-off', $p1['body'], 'PhilHealth is not taken yet');
         $t->contains('monthly &#8369;600.00', $p1['body'], 'the typed tax');
@@ -736,7 +755,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('approved leave is a paid day even in a month whose file starts late: September\'s file begins on the 21st, the 8th-9th are approved leave', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $e   = Fixtures::employee(['full_name' => 'Leave Case', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-10-10']);
+        $e   = Fixtures::employee(['full_name' => 'Leave Case', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'date_hired' => '2026-10-10', 'pay_schedule' => 'Monthly']);
         $sep = Fixtures::period('Sep 1-30, 2026', '2026-09-01', '2026-09-30', 'Monthly');
         Fixtures::leave($e, '2026-09-08', '2026-09-09', 'Approved');
         Fixtures::days($sep, Fixtures::fullDays('Leave Case', '2026-09-20', '2026-09-30'));            // the 20th and 27th are Sundays: 9 days from the 21st
@@ -752,8 +771,9 @@ T::suite('11 · More numbers & the audit fixes', function () {
         Fixtures::reset();
         $db = getDB();
         $name = 'Added Today Case';
+        // paid Monthly at first (September has one Monthly pay period), then kinsenas from October - a change the admin makes on the Employees page
         $r = Http::page('employee.php', ['action' => 'add', 'first_name' => $name, 'branch' => 'MAIN', 'salary_type' => 'monthly', 'base_salary' => '26000',
-                                         'date_hired' => '2026-10-10', 'rest_days' => ['7'], 'sss_amount' => '900']);
+                                         'pay_schedule' => 'Monthly', 'date_hired' => '2026-10-10', 'rest_days' => ['7'], 'sss_amount' => '900']);
         $t->contains('added', $r['body'], 'the employee is added');
         $e = (string)$db->query('SELECT employee_code FROM employees WHERE full_name = ' . $db->quote($name))->fetchColumn();
         $t->ok($e !== '', 'the employee exists');
@@ -772,6 +792,13 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money('900.00', $s['sss'], 'September: the typed SSS');
         $t->money('25100.00', $s['net_pay'], 'September: net pay');
 
+        // September is done and finalized; from October the employee is paid kinsenas, so the admin changes the Pay Schedule on the Employees page
+        $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $sep]);
+        $t->same(true, $f['json']['success'] ?? null, "finalize September: " . $f['body']);
+        $history = Fixtures::payroll($sep)[$e];
+        $t->contains('Pay schedule is now Semi-Monthly', qa_edit_employee($e, ['pay_schedule' => 'Semi-Monthly'])['body'], 'the page says what changed');
+        $t->same($history, Fixtures::payroll($sep)[$e], 'the finalized September line is exactly as it was');
+
         // this month so far: the 1st-15th cut-off through today (the 10th), the 7th OFF, the 6th approved leave - the 12th-15th are not in the file yet
         $oct  = Fixtures::period('Oct 1-15, 2026', '2026-10-01', '2026-10-15');
         $rows = Fixtures::fullDays($name, '2026-10-01', '2026-10-10');
@@ -785,10 +812,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->money('9148.15', $o['gross_pay'], 'October 1-15 so far: ₱13,000 for the cut-off − 4 × 26,000 ÷ 27');
         $t->money('900.00', $o['sss'], 'October: SSS in full on the 1st cut-off');
 
-        foreach ([$sep, $oct] as $pid) {
-            $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $pid]);
-            $t->same(true, $f['json']['success'] ?? null, "finalize $pid: " . $f['body']);
-        }
+        $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $oct]);
+        $t->same(true, $f['json']['success'] ?? null, "finalize $oct: " . $f['body']);
     });
 
     T::test('a daily-rate employee added today is paid exactly the hours the file shows, for a past month too (the Date Hired never matters to a daily rate)', function (T $t) {
@@ -848,7 +873,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
 
         // negative net
         Fixtures::reset();
-        $n = Fixtures::employee(['full_name' => 'Negative Case', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00']);
+        $n = Fixtures::employee(['full_name' => 'Negative Case', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00', 'pay_schedule' => 'Monthly']);
         $p2 = Fixtures::period('Apr 1-30, 2026', '2026-04-01', '2026-04-30', 'Monthly');
         Fixtures::days($p2, [Fixtures::day('Negative Case', '2026-04-01', 8, 0, 0, 0)]);
         $t->ok((float)Fixtures::payroll($p2)[$n]['net_pay'] < 0, 'the case is a negative payslip');
@@ -863,7 +888,7 @@ T::suite('11 · More numbers & the audit fixes', function () {
     T::test('the payroll page warns about stale lines and negative net pay before anyone finalizes', function (T $t) {
         qa_need_fixes();
         Fixtures::reset();
-        $n = Fixtures::employee(['full_name' => 'Banner Negative', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00']);
+        $n = Fixtures::employee(['full_name' => 'Banner Negative', 'base_salary' => '480.00', 'sss_amount' => '250.00', 'philhealth_amount' => '250.00', 'pay_schedule' => 'Monthly']);
         $p = Fixtures::period('Apr 1-30, 2026', '2026-04-01', '2026-04-30', 'Monthly');
         Fixtures::days($p, [Fixtures::day('Banner Negative', '2026-04-01', 8, 0, 0, 0)]);
         $page = Http::page('payroll.php', [], ['period' => $p])['body'];

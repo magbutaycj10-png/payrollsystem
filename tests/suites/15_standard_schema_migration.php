@@ -20,12 +20,15 @@
  *   F  when a check fails the old tables are NOT deleted, and a half-converted database is not touched again
  *   G  Part E (the backup copies of the earlier update) only runs once its dashes are removed
  *   H  the application reads the converted data: register, payslip, employees, every manager's scope, the employee portal - and
- *      adds nothing to the layout
+ *      adds to the layout only the five employee columns of the pay schedule and the contribution schedule (a patch of 2026-10-24),
+ *      giving every employee what the old Settings said
  */
 
 const QA15_DB   = 'qa_std';
 const QA15_FAIL = 'qa_std_fail';
 const QA15_LEFTOVERS = ['bak_emp_employees', 'users_unmatched'];
+/** the columns of employees that the application's own patch list adds after the migration (the migration itself does not know them) */
+const QA15_PATCH_COLUMNS = ['pay_schedule', 'sss_timing', 'philhealth_timing', 'pagibig_timing', 'tax_timing'];
 const QA15_STANDARD_TABLES = ['settings', 'branches', 'departments', 'positions', 'employees', 'users', 'user_scopes', 'payroll_periods', 'biometric_daily',
                               'attendance_summary', 'leave_requests', 'bonus_deductions', 'payroll', 'payslip_signatures', 'print_logs', 'period_audit',
                               'login_attempts', 'document_series', 'document_serials', 'attendance_logs', 'biometric_employee_map', 'biometric_agent_state',
@@ -54,7 +57,9 @@ function qa15_database(string $name): PDO
  */
 function qa15_seed(PDO $db): array
 {
-    $db->exec("INSERT INTO settings (setting_key, setting_value) VALUES ('payroll_period', 'Semi-Monthly'), ('company_name', 'QA Pharmacy')");
+    // (the two contribution timings are Settings of the layout the live database had; the application gives them to every employee on its first page)
+    $db->exec("INSERT INTO settings (setting_key, setting_value) VALUES ('payroll_period', 'Semi-Monthly'), ('company_name', 'QA Pharmacy'),
+               ('contribution_timing_sss', 'split'), ('contribution_timing_tax', 'first')");
     $db->exec("INSERT INTO branches (id, name) VALUES (1, 'MAIN'), (2, 'NORTH'), (3, 'SOUTH')");
 
     $emp = $db->prepare("INSERT INTO employees (id, emp_id, full_name, `position`, branch, email, base_salary, salary_type, date_hired, status, rest_days, hours_per_day,
@@ -224,7 +229,10 @@ function qa15_signature(PDO $root, string $schema): array
                   WHERE k.TABLE_SCHEMA = ? AND k.REFERENCED_TABLE_NAME IS NOT NULL
                   GROUP BY k.TABLE_NAME, k.CONSTRAINT_NAME, k.REFERENCED_TABLE_NAME, r.UPDATE_RULE, r.DELETE_RULE ORDER BY k.TABLE_NAME, k.CONSTRAINT_NAME") as $r) $out[] = 'foreign key ' . implode(' | ', $r);
     foreach ($q("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME") as $r) $out[] = 'table ' . $r[0];
-    return array_values(array_filter($out, fn($l) => !preg_match('/^(column|index|foreign key|table) (' . implode('|', QA15_LEFTOVERS) . ')\b/', $l)));
+    /* the leftover tables of the earlier update are left out - and so are the five employee columns the application adds itself on its first page
+       (the pay schedule and the contribution schedule, a patch of 2026-10-24): the migration does not create them, test H shows them arriving */
+    $patched = '/^column employees \| (' . implode('|', QA15_PATCH_COLUMNS) . ') \|/';
+    return array_values(array_filter($out, fn($l) => !preg_match('/^(column|index|foreign key|table) (' . implode('|', QA15_LEFTOVERS) . ')\b/', $l) && !preg_match($patched, $l)));
 }
 
 /** the migration file, whole */
@@ -608,8 +616,22 @@ T::suite('15 · The standard-layout migration (sql/migrate-standard-schema.sql)'
         $t->same(2, (int)$db->query("SELECT entered_by FROM biometric_daily WHERE employee_id = 11 AND att_date = '2026-04-08'")->fetchColumn(), 'it is filed under ANA and remembers the account that typed it');
         $t->same([], $r['warnings'] ?? [], 'no PHP warnings');
 
-        // the first page the application served did not change the layout (it only writes the setting that remembers it)
-        $t->same($S->signature, qa15_signature(TestDb::root(), QA15_DB), 'the application added nothing to the layout');
+        // the first page the application served did not change the layout (it only writes the setting that remembers it) - except for the five
+        // columns its own patch list adds: the pay schedule and the contribution schedule, which the old Settings held for everybody
+        $t->same($S->signature, qa15_signature(TestDb::root(), QA15_DB), 'the application added nothing to the layout (beyond the schedule columns)');
+        $cols = $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '" . QA15_DB . "' AND TABLE_NAME = 'employees'
+                             AND COLUMN_NAME IN ('" . implode("','", QA15_PATCH_COLUMNS) . "') ORDER BY COLUMN_NAME")->fetchAll(PDO::FETCH_COLUMN);
+        $want = QA15_PATCH_COLUMNS;
+        sort($want);
+        $t->same($want, $cols, 'the application added the pay schedule and the four contribution schedules to employees');
+        // every employee starts where the old Settings had them: SSS in two shares and tax on the 1st cut-off (the two Settings the seed changed), the usual for the rest;
+        // paid Semi-Monthly - the schedule of the pay periods they were paid in (and of the old default for the four who have no pay yet)
+        $rows = $db->query("SELECT employee_code, pay_schedule, sss_timing, philhealth_timing, pagibig_timing, tax_timing FROM employees ORDER BY id")->fetchAll(PDO::FETCH_NUM);
+        $t->same(9, count($rows), 'all nine employees');
+        foreach ($rows as [$code, $pay, $sss, $ph, $pi, $tax]) {
+            $t->same(['Semi-Monthly', 'split', 'second', 'second', 'first'], [$pay, $sss, $ph, $pi, $tax], "$code carries the old Settings");
+        }
+        $t->same('Semi-Monthly', (string)$db->query("SELECT setting_value FROM settings WHERE setting_key = 'payroll_period'")->fetchColumn(), 'the old Settings rows are left alone');
         $t->ok((string)$db->query("SELECT setting_value FROM settings WHERE setting_key = 'schema_version'")->fetchColumn() !== '', 'it remembers that the layout is in place, so the next page costs one query');
         TestDb::root()->exec('DROP DATABASE ' . QA15_DB);
     });

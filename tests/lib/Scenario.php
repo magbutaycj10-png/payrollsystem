@@ -15,7 +15,8 @@ final class Scenario
     /**
      * $spec: emp[] (employees columns - sss_amount, philhealth_amount, pagibig_amount, tax_amount are the monthly amounts typed
      *        on Employees), runs[] (start, end, type), days (date => [h, ot, late, under, off]),
-     *        leave[] approved dates, pending[] / rejected[] dates, cfg (ot_rate, timing…), setup (callable)
+     *        leave[] approved dates, pending[] / rejected[] dates, cfg (ot_rate, timing… - timing is saved on the employee: sss_timing…),
+     *        setup (callable). The employee is paid Monthly when every run is a Monthly one, else Semi-Monthly (emp['pay_schedule'] overrides).
      *        between: [run index => callable ($empId, $periodIds)] - runs after that run is computed and before the next one (an admin
      *        finalizing a cut-off, then editing the employee mid-month). The ledger cannot follow an edit, so 'exp' is only meaningful without it.
      * @return array{emp:string, periods:int[], app:array, exp:array}
@@ -40,9 +41,14 @@ final class Scenario
         Fixtures::setting('overtime_multiplier', $cfg['ot_mult'] ?? '1.25');
         Fixtures::setting('late_rate', $cfg['late_rate'] ?? '80');
         Fixtures::setting('standard_hours', (string)($cfg['std'] ?? 8));
-        foreach ($cfg['timing'] as $k => $when) Fixtures::setting("contribution_timing_$k", $when);
 
-        $empId = Fixtures::employee(($spec['emp'] ?? []) + ['emp_id' => sprintf('QA-%05d', $n), 'full_name' => "QA Employee $n", 'branch' => "B$n"]);
+        // the employee's own schedules: the cut-off that takes each monthly amount (cfg timing), and how often they are paid - Monthly when every
+        // run of the scenario is a Monthly one (a pay period only takes the employees on its schedule), else Semi-Monthly (a Weekly run takes everybody)
+        $allMonthly = $spec['runs'] && !array_filter($spec['runs'], fn($r) => $r['type'] !== 'Monthly');
+        $own = ['pay_schedule' => $allMonthly ? 'Monthly' : 'Semi-Monthly',
+                'sss_timing' => $cfg['timing']['sss'], 'philhealth_timing' => $cfg['timing']['philhealth'],
+                'pagibig_timing' => $cfg['timing']['pagibig'], 'tax_timing' => $cfg['timing']['tax']];
+        $empId = Fixtures::employee(($spec['emp'] ?? []) + $own + ['emp_id' => sprintf('QA-%05d', $n), 'full_name' => "QA Employee $n", 'branch' => "B$n"]);
         $emp = Fixtures::empRow($empId);
 
         $periods = [];

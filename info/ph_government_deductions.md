@@ -61,6 +61,13 @@ and onwards** (TRAIN Law, RA 10963):
 
 ## How the system computes one pay run
 
+**Who is in a pay run.** Each employee has a **Pay Schedule** (*Employees → Add / Edit*): **Semi-Monthly**
+(kinsenas - the 1st-15th and 16th-end cut-offs) or **Monthly** (one run for the whole month). A pay period has
+a schedule too and takes only the employees on it, so a Monthly pay period can run beside the two cut-offs of
+the same month without anybody being paid twice. Everyone's days are saved by date whichever period the file
+was uploaded into, and count in the pay period of their own schedule. There is no weekly payroll (an older
+database may still hold a Weekly period; it takes everybody, as it always did).
+
 1. **Basic pay**
    - *Daily-rate*: daily rate × days paid. Each duty day is one full day of the employee's
      **duty hours** (Settings standard, 8, or the employee's own, e.g. 10) minus its undertime,
@@ -82,13 +89,17 @@ and onwards** (TRAIN Law, RA 10963):
    the multiplier (1.25 on an ordinary day, Art. 87; the hourly rate is a day's pay ÷ duty hours).
 3. **SSS, PhilHealth, Pag-IBIG and withholding tax are the employee's own monthly amounts**, typed
    by the admin in *Employees → Add / Edit* (all optional; blank or 0 = the employee has none).
-   Nothing is worked out from the pay - a month's pay does not change them. A monthly payroll
-   takes them in full. With several cut-offs a month, *Settings → Contribution Schedule* picks,
-   for each of the four, which cut-off takes it:
+   Nothing is worked out from the pay - a month's pay does not change them. An employee paid
+   Monthly has them taken in full on the one run. For an employee paid Semi-Monthly, the employee's own
+   *Contribution Schedule* (the same form, under the amounts) picks, for each of the four, which cut-off
+   takes it:
    - **1st cut-off, in full** (**first**) - the month's first run;
    - **every cut-off, in equal shares** (**split**) - each run takes its share of the month (half on a
-     semi-monthly payroll, 12/52 on a weekly one), the last run takes what is left;
+     semi-monthly payroll), the last run takes what is left;
    - **last cut-off, in full** (**second**).
+
+   The *See brackets* button on that form shows the brackets of each contribution and of the withholding tax
+   (the tables above) and marks the ones that fit the employee's pay, as a guide to what to type.
 
    Whatever is picked, the month's **last run settles whatever is still owed**, so a month always comes to
    exactly the amount typed, to the centavo (a half centavo of a share rounds up). If an amount is edited

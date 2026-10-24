@@ -13,7 +13,7 @@ const SCHEMA_LAYOUT = 'standard-2026-10-15';
  * Gets the database ready for this version of the app and seeds the admin account on the first-ever run:
  *   1. a database with no payroll tables yet is built from sql/database.sql - a fresh install needs nothing else
  *   2. a database still in an older layout stops the app, with what to do about it (schemaLayoutProblem)
- *   3. $patches: changes made to the standard layout after it was introduced, oldest first (none so far)
+ *   3. $patches: changes made to the standard layout after it was introduced, oldest first
  * Safe to call on every request: a static guard runs it once per PHP process, and a fingerprint kept in settings means a
  * normal page load costs one query.
  */
@@ -25,7 +25,15 @@ function applySchemaPatches(): void {
     $db = getDB();
 
     /* Each statement must be safe on a database that already has it - a failure is ignored */
-    $patches = [];
+    $patches = [
+        /* 2026-10-24: the pay schedule and the contribution schedule belong to each employee (they used to be two Settings, the same
+           for everybody). seedEmployeeSchedules() fills them in the first time they exist. */
+        "ALTER TABLE employees ADD COLUMN pay_schedule ENUM('Semi-Monthly','Monthly') NOT NULL DEFAULT 'Semi-Monthly' AFTER salary_type",
+        "ALTER TABLE employees ADD COLUMN sss_timing ENUM('first','split','second') NOT NULL DEFAULT 'first' AFTER tax_amount",
+        "ALTER TABLE employees ADD COLUMN philhealth_timing ENUM('first','split','second') NOT NULL DEFAULT 'second' AFTER sss_timing",
+        "ALTER TABLE employees ADD COLUMN pagibig_timing ENUM('first','split','second') NOT NULL DEFAULT 'second' AFTER philhealth_timing",
+        "ALTER TABLE employees ADD COLUMN tax_timing ENUM('first','split','second') NOT NULL DEFAULT 'split' AFTER pagibig_timing",
+    ];
 
     /*
      * Run only when something has changed since the last run. The database is in the cloud (~350 ms a round trip), so
@@ -46,9 +54,17 @@ function applySchemaPatches(): void {
         showAppError($problem, '', 503);
     }
 
+    /* Do the employees have their own pay schedule yet? (a fresh install builds the table with it; an existing database gets it below) */
+    $hadSchedule = true;
+    try {
+        $hadSchedule = (int)$db->query("SELECT COUNT(*) FROM information_schema.COLUMNS
+                                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees' AND COLUMN_NAME = 'pay_schedule'")->fetchColumn() > 0;
+    } catch (PDOException $e) {}
+
     foreach ($patches as $sql) {
         try { $db->exec($sql); } catch (PDOException $e) {}
     }
+    if (!$hadSchedule) seedEmployeeSchedules($db);
 
     // Seed the admin user on first-ever run. The first password comes from
     // the ADMIN_INITIAL_PASSWORD environment variable. Without it, a local
@@ -86,6 +102,44 @@ function installSchemaIfEmpty(PDO $db): void {
     foreach (splitSqlStatements((string)file_get_contents($file)) as $stmt) {
         $db->exec($stmt);
     }
+}
+
+/*
+ * The first time the employees table has its own pay schedule and contribution schedule (2026-10-24), everybody starts exactly
+ * where the company-wide Settings had them, so no payroll changes by itself:
+ *   contribution schedule   Settings' contribution_timing_sss / _philhealth / _pagibig / _tax (the defaults where Settings never said)
+ *   pay schedule            the schedule of the pay period the employee was last paid in; an employee with no pay yet takes Settings'
+ *                           payroll_period. Weekly (no longer offered) and anything unknown become Semi-Monthly.
+ * Nothing is deleted: the old Settings rows stay in the settings table, unused. updated_at is left as it was.
+ */
+function seedEmployeeSchedules(PDO $db): void {
+    try {
+        $s = $db->query("SELECT setting_key, setting_value FROM settings
+                          WHERE setting_key IN ('payroll_period', 'contribution_timing_sss', 'contribution_timing_philhealth',
+                                                'contribution_timing_pagibig', 'contribution_timing_tax')")->fetchAll(PDO::FETCH_KEY_PAIR);
+        $default = in_array($s['payroll_period'] ?? '', PAY_SCHEDULES, true) ? $s['payroll_period'] : 'Semi-Monthly';
+        $sets    = ['pay_schedule = ?', 'updated_at = updated_at'];
+        $args    = [$default];
+        foreach (CONTRIBUTION_TIMING_DEFAULT as $k => $def) {
+            $v      = $s["contribution_timing_$k"] ?? '';
+            $sets[] = "{$k}_timing = ?";
+            $args[] = in_array($v, CONTRIBUTION_TIMING_CHOICES, true) ? $v : $def;
+        }
+        $db->prepare('UPDATE employees SET ' . implode(', ', $sets))->execute($args);
+
+        /* how each employee has actually been paid: the latest pay period they have a line in decides */
+        $last = [];
+        foreach ($db->query("SELECT p.employee_id, pp.period_type FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id
+                              ORDER BY pp.start_date, pp.id")->fetchAll() as $r) {
+            $last[(int)$r['employee_id']] = $r['period_type'];
+        }
+        foreach (PAY_SCHEDULES as $type) {
+            $ids = array_keys(array_filter($last, fn($t) => $t === $type));
+            if (!$ids) continue;
+            $db->prepare('UPDATE employees SET pay_schedule = ?, updated_at = updated_at WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')')
+               ->execute(array_merge([$type], $ids));
+        }
+    } catch (PDOException $e) { /* the columns keep their defaults; the admin can set each employee on Employees */ }
 }
 
 /* The statements of a .sql file, in order, without comments: split on ";" outside quotes and comments */
@@ -542,13 +596,108 @@ function birTax(float $taxable, string $table = 'monthly'): float {
 }
 
 /*
- * SSS, PhilHealth, Pag-IBIG and withholding tax are each a MONTHLY amount typed on the employee. When the month has more
- * than one pay run, Settings → Contribution Schedule says which run takes it:
+ * The law's brackets laid out as tables - what Employees > Add / Edit shows under "See brackets". Reference only, built from
+ * PH_RULES (the same figures as Settings' "Contribution tables"); payroll does not apply them, it deducts what is typed.
+ *
+ * Returns a list of tables, each
+ *   key, title, note   what it is, and one line on how it works
+ *   basis              which figure picks the row: 'pay' (monthly pay), 'taxable_month' (monthly pay less the SSS, PhilHealth and
+ *                      Pag-IBIG typed on the employee) or 'taxable_cutoff' (half of that: one semi-monthly cut-off)
+ *   head               the column titles
+ *   rows               each ['cells' => the text shown, 'lo' => float, 'hi' => ?float]: the row covers lo <= figure < hi (hi null =
+ *                      no upper limit); the window uses these to mark the row an employee's pay falls in
+ */
+function contributionBrackets(): array {
+    $R   = PH_RULES;
+    $php = fn(float $x, int $d = 2): string => '₱' . number_format($x, $d);
+    $pct = fn(float $x): string => rtrim(rtrim(number_format($x * 100, 2, '.', ''), '0'), '.') . '%';      /* 0.05 -> "5%", 0.025 -> "2.5%" */
+    $out = [];
+
+    /* SSS: the Monthly Salary Credit is the pay to the nearest ₱500 (₱5,000 - ₱35,000); pay from credit - 250 up to credit + 249.99 */
+    $s    = $R['sss'];
+    $half = $s['msc_step'] / 2;
+    $rows = [];
+    for ($msc = $s['msc_min']; $msc <= $s['msc_max']; $msc += $s['msc_step']) {
+        $first = $msc === $s['msc_min'];
+        $last  = $msc === $s['msc_max'];
+        $ee    = round($msc * $s['ee_rate'], 2);
+        $er    = round($msc * $s['er_rate'], 2);
+        $ec    = $msc >= $s['ec_from'] ? $s['ec_high'] : $s['ec_low'];
+        $range = $first ? 'Below ' . $php($msc + $half)
+               : ($last ? $php($msc - $half) . ' and above' : $php($msc - $half) . ' - ' . $php($msc + $half - 0.01));
+        $rows[] = ['cells' => [$range, $php($msc), $php($ee), $php($er), $php($ec), $php($ee + $er + $ec)],
+                   'lo' => $first ? 0.0 : $msc - $half, 'hi' => $last ? null : $msc + $half];
+    }
+    $out[] = ['key' => 'sss', 'title' => 'SSS', 'basis' => 'pay',
+              'note' => 'The employee pays ' . $pct($s['ee_rate']) . ' of the Monthly Salary Credit and the employer ' . $pct($s['er_rate']) . ' (together '
+                      . $pct($s['ee_rate'] + $s['er_rate']) . '); the Employees\' Compensation (EC) is paid by the employer only. The credit is the monthly pay to the nearest '
+                      . $php($s['msc_step'], 0) . ', from ' . $php($s['msc_min'], 0) . ' to ' . $php($s['msc_max'], 0) . '. In effect since ' . $s['since'] . ' (' . $s['source'] . ').',
+              'head' => ['Monthly pay', 'Monthly Salary Credit', 'Employee ' . $pct($s['ee_rate']), 'Employer ' . $pct($s['er_rate']), 'EC (employer)', 'Total'],
+              'rows' => $rows];
+
+    /* PhilHealth: 5% of the monthly basic salary, split equally; the salary counted runs from the floor to the ceiling */
+    $p    = $R['philhealth'];
+    $prem = fn(float $base): float => $base * $p['rate'];
+    $half2 = fn(float $base): float => $base * $p['rate'] * $p['ee_share'];
+    $out[] = ['key' => 'philhealth', 'title' => 'PhilHealth', 'basis' => 'pay',
+              'note' => 'The premium is ' . $pct($p['rate']) . ' of the monthly basic salary, split equally between employee and employer (' . $pct($p['rate'] * $p['ee_share'])
+                      . ' each). The salary counted is at least ' . $php($p['floor'], 0) . ' and at most ' . $php($p['ceiling'], 0) . '. In effect since ' . $p['since'] . ' (' . $p['source'] . ').',
+              'head' => ['Monthly basic salary', 'Premium (' . $pct($p['rate']) . ')', 'Employee share', 'Employer share'],
+              'rows' => [
+                  ['cells' => [$php($p['floor'], 0) . ' and below', $php($prem($p['floor'])) . ' (fixed)', $php($half2($p['floor'])), $php($half2($p['floor']))],
+                   'lo' => 0.0, 'hi' => $p['floor'] + 0.005],
+                  ['cells' => ['Over ' . $php($p['floor'], 0) . ' up to ' . $php($p['ceiling'], 0), $pct($p['rate']) . ' of the salary', $pct($p['rate'] * $p['ee_share']) . ' of the salary', $pct($p['rate'] * (1 - $p['ee_share'])) . ' of the salary'],
+                   'lo' => $p['floor'] + 0.005, 'hi' => $p['ceiling']],
+                  ['cells' => [$php($p['ceiling'], 0) . ' and above', $php($prem($p['ceiling'])) . ' (fixed)', $php($half2($p['ceiling'])), $php($half2($p['ceiling']))],
+                   'lo' => $p['ceiling'], 'hi' => null],
+              ]];
+
+    /* Pag-IBIG: 2% each on a monthly pay of up to ₱10,000 (the employee 1% when the pay is ₱1,500 or less) */
+    $g    = $R['pagibig'];
+    $top  = $g['max_comp'] * $g['rate'];
+    $out[] = ['key' => 'pagibig', 'title' => 'Pag-IBIG', 'basis' => 'pay',
+              'note' => 'Computed on the monthly pay up to ' . $php($g['max_comp'], 0) . ' (the maximum fund salary), so each side pays at most ' . $php($top)
+                      . ' a month. The employer always pays ' . $pct($g['er_rate']) . '. In effect since ' . $g['since'] . ' (' . $g['source'] . ').',
+              'head' => ['Monthly pay', 'Employee', 'Employer'],
+              'rows' => [
+                  ['cells' => [$php($g['low_limit'], 0) . ' and below', $pct($g['rate_low']), $pct($g['er_rate'])],
+                   'lo' => 0.0, 'hi' => $g['low_limit'] + 0.005],
+                  ['cells' => ['Over ' . $php($g['low_limit'], 0) . ' up to ' . $php($g['max_comp'], 0), $pct($g['rate']), $pct($g['er_rate'])],
+                   'lo' => $g['low_limit'] + 0.005, 'hi' => $g['max_comp'] + 0.005],
+                  ['cells' => ['Over ' . $php($g['max_comp'], 0), $php($top) . ' (the most)', $php($g['max_comp'] * $g['er_rate']) . ' (the most)'],
+                   'lo' => $g['max_comp'] + 0.005, 'hi' => null],
+              ]];
+
+    /* Withholding tax: the TRAIN tables (BIR Annex E) for the two pay schedules - the tax on a bracket's lower amount, plus a rate on the excess */
+    $b = $R['bir'];
+    foreach (['semi' => ['tax_semi', 'taxable_cutoff', 'Withholding tax - Semi-Monthly (each cut-off)'],
+              'monthly' => ['tax_month', 'taxable_month', 'Withholding tax - Monthly']] as $table => [$key, $basis, $title]) {
+        $br   = array_reverse($b['tables'][$table]);              /* lowest bracket first: [over, tax on that amount, rate] */
+        $rows = [['cells' => ['-', $php($br[0][0], 0), 'No tax', '-'], 'lo' => 0.0, 'hi' => $br[0][0] + 0.005]];
+        foreach ($br as $i => [$over, $base, $rate]) {
+            $next = $br[$i + 1][0] ?? null;
+            $rows[] = ['cells' => [$php($over, 0), $next === null ? 'no limit' : $php($next, 0), $php($base), $pct($rate) . ' of the excess over ' . $php($over, 0)],
+                       'lo' => $over + 0.005, 'hi' => $next === null ? null : $next + 0.005];
+        }
+        $out[] = ['key' => $key, 'title' => $title, 'basis' => $basis,
+                  'note' => 'The TRAIN graduated table on the taxable pay of ' . ($table === 'semi' ? 'one semi-monthly cut-off' : 'a month')
+                          . ' (gross pay minus the employee\'s SSS, PhilHealth and Pag-IBIG). In effect since ' . $b['since'] . ' (' . $b['source'] . ').',
+                  'head' => ['Taxable pay over', 'But not over', 'Tax on the "over" amount', 'Plus'],
+                  'rows' => $rows];
+    }
+    return $out;
+}
+
+/*
+ * SSS, PhilHealth, Pag-IBIG and withholding tax are each a MONTHLY amount typed on the employee. When the employee's month has more
+ * than one pay run (a Semi-Monthly pay schedule), the employee's own contribution schedule (Employees > Add / Edit) says which run
+ * takes each amount:
  *   first   the month's first run, in full
  *   split   every run takes its share of the month (half on a semi-monthly payroll), the last run takes the rest
  *   second  nothing until the month's last run, which takes it in full
  * Whatever the schedule, the month's last run settles anything still owed, so the month always ends at exactly the
- * amount typed. The defaults follow L&N Pharmacy's own timesheets - SSS in full on the 1st cut-off, PhilHealth in full on the 2nd.
+ * amount typed. An employee on a Monthly pay schedule has one run a month, which takes everything. The defaults follow
+ * L&N Pharmacy's own timesheets - SSS in full on the 1st cut-off, PhilHealth and Pag-IBIG in full on the 2nd, tax in shares.
  */
 const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'];
 const CONTRIBUTION_TIMING_CHOICES = ['first', 'split', 'second'];
@@ -557,13 +706,41 @@ const CONTRIBUTION_TIMING_LABELS  = ['first'  => '1st cut-off of the month, in f
                                      'split'  => 'every cut-off, in equal shares',
                                      'second' => 'last cut-off of the month, in full'];
 
-function contributionTiming(): array {
+/*
+ * How often an employee is paid - and so which pay periods they are in: a pay period takes the employees on its own schedule.
+ * Semi-Monthly is the kinsenas (1-15 and 16-end), Monthly one run for the whole month. (A Weekly period is no longer offered; one
+ * that an older database still holds keeps working and takes every employee, as it always did.)
+ */
+const PAY_SCHEDULES       = ['Semi-Monthly', 'Monthly'];
+const PAY_SCHEDULE_LABELS = ['Semi-Monthly' => 'Semi-Monthly (kinsenas)',
+                             'Monthly'      => 'Monthly (once a month)'];
+
+/* When each of an employee's monthly amounts comes out: their own choice per amount, the default where it is blank or unknown */
+function employeeTiming(array $emp): array {
     $out = [];
     foreach (CONTRIBUTION_TIMING_DEFAULT as $k => $def) {
-        $v = getSetting("contribution_timing_$k", '');
+        $v = $emp["{$k}_timing"] ?? '';
         $out[$k] = in_array($v, CONTRIBUTION_TIMING_CHOICES, true) ? $v : $def;
     }
     return $out;
+}
+
+/* Is this employee paid on this pay period's schedule? (payEmployee() row; a Weekly period takes everybody) */
+function employeeInPeriod(array $emp, string $periodType): bool {
+    return $periodType === 'Weekly' || ($emp['pay_schedule'] ?? 'Semi-Monthly') === $periodType;
+}
+
+/*
+ * The schedule most active employees are paid on - what a new pay period starts with. Semi-Monthly when it is a tie, and when
+ * nobody is on the payroll yet.
+ */
+function defaultPaySchedule(?PDO $db = null): string {
+    try {
+        $n = ($db ?? getDB())->query("SELECT pay_schedule, COUNT(*) FROM employees WHERE status = 'Active' GROUP BY pay_schedule")->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (PDOException $e) {
+        return 'Semi-Monthly';
+    }
+    return (int)($n['Monthly'] ?? 0) > (int)($n['Semi-Monthly'] ?? 0) ? 'Monthly' : 'Semi-Monthly';
 }
 
 /*
@@ -578,28 +755,13 @@ function contributionTake(string $timing, array $ctx): string {
     return $timing === 'split' ? 'share' : 'none';
 }
 
-/* One line on the screen: how this pay run takes the employees' monthly amounts */
+/* One line on the screen: how this pay run takes the employees' monthly amounts (each employee's own contribution schedule decides, except on the month's last run) */
 function contributionPlanText(array $ctx): string {
     if ($ctx['period_type'] === 'Monthly') return "the month's contributions and tax are taken in full";
-    $names = ['sss' => 'SSS', 'philhealth' => 'PhilHealth', 'pagibig' => 'Pag-IBIG', 'tax' => 'withholding tax'];
-    $join  = fn($a) => count($a) > 1 ? implode(', ', array_slice($a, 0, -1)) . ' and ' . end($a) : implode('', $a);
     if ($ctx['final']) {
-        return "last cut-off of the month: " . $join(array_values($names)) . " are settled in full, minus what earlier cut-offs took";
+        return "last cut-off of the month: SSS, PhilHealth, Pag-IBIG and withholding tax are settled in full, minus what earlier cut-offs took";
     }
-    $full = $share = $later = $earlier = [];
-    foreach ($ctx['timing'] as $k => $t) {
-        $take = contributionTake($t, $ctx);
-        if     ($take === 'rest')  $full[]    = $names[$k];
-        elseif ($take === 'share') $share[]   = $names[$k];
-        elseif ($t === 'first')    $earlier[] = $names[$k];
-        else                       $later[]   = $names[$k];
-    }
-    return implode('; ', array_filter([
-        $full    ? $join($full) . ' taken in full' : '',
-        $share   ? $join($share) . ' taken in equal shares across the cut-offs' : '',
-        $earlier ? $join($earlier) . ' already taken on the 1st cut-off' : '',
-        $later   ? $join($later) . ' wait for the last cut-off' : '',
-    ]));
+    return "SSS, PhilHealth, Pag-IBIG and withholding tax follow each employee's own contribution schedule";
 }
 
 /*
@@ -607,8 +769,8 @@ function contributionPlanText(array $ctx): string {
  * company's share paid on top.
  *
  * The amounts are the employee's own, typed by the admin (sss_amount, philhealth_amount, pagibig_amount, tax_amount): each
- * is a monthly amount, 0 meaning none. Nothing is worked out from pay. Which run takes it is the amount's schedule
- * (contributionTiming / contributionTake); a run takes what the month still owes, so the month adds up to exactly the
+ * is a monthly amount, 0 meaning none. Nothing is worked out from pay. Which run takes it is the amount's schedule on the employee
+ * (employeeTiming / contributionTake); a run takes what the month still owes, so the month adds up to exactly the
  * amount typed. If the amount is changed mid-month the last run settles the difference: a contribution never goes below
  * zero, tax is refunded when the month owes less than was withheld.
  *
@@ -617,6 +779,7 @@ function contributionPlanText(array $ctx): string {
  * Returns
  *   earlier    what earlier runs of the month already deducted (EARLIER_NONE shape)
  *   month      the employee's monthly amounts: sss, philhealth, pagibig, tax
+ *   timing     the employee's schedule per amount: 'first' | 'split' | 'second'
  *   on         per amount: the employee has one (> 0)
  *   take       per amount: 'rest' | 'share' | 'none' on this run (contributionTake)
  *   due        per amount: this run takes something (take is not 'none')
@@ -635,9 +798,10 @@ function contributionBreakdown(array $emp, float $basic, array $ctx): array {
               'pagibig'    => max(0.0, (float)($emp['pagibig_amount']    ?? 0)),
               'tax'        => max(0.0, (float)($emp['tax_amount']        ?? 0))];
 
+    $timing = employeeTiming($emp);
     $take = $due = $on = $now = [];
     foreach ($month as $k => $amount) {
-        $take[$k] = contributionTake($ctx['timing'][$k] ?? CONTRIBUTION_TIMING_DEFAULT[$k], $ctx);
+        $take[$k] = contributionTake($timing[$k], $ctx);
         $due[$k]  = $take[$k] !== 'none';
         $on[$k]   = $amount > 0;
         $owed     = $cents($amount) - $cents($prev[$k]);
@@ -661,6 +825,7 @@ function contributionBreakdown(array $emp, float $basic, array $ctx): array {
         'basic'     => $basicM,       // basic pay so far this month (the Pag-IBIG company rate reads this)
         'earlier'   => $prev,         // what earlier cut-offs this month paid / deducted
         'month'     => $month,
+        'timing'    => $timing,
         'on'        => $on,
         'take'      => $take,
         'due'       => $due,
@@ -712,17 +877,25 @@ function employeeDayHours(array $emp, array $ctx): float {
  * emp_id in this app's own arrays (EMPLOYEE_COLUMNS adds the alias); either is accepted.
  */
 function payEmployee(array $e): array {
+    $timing = employeeTiming($e);
     return [
         'id'                => (int)($e['id'] ?? 0),        /* employees.id - what payroll rows store as employee_id */
         'emp_id'            => (string)($e['emp_id'] ?? $e['employee_code'] ?? ''),
         'full_name'         => (string)($e['full_name'] ?? ''),
         'base_salary'       => (float)($e['base_salary'] ?? 0),
         'salary_type'       => $e['salary_type'] ?? 'monthly',
+        /* how often they are paid - which pay periods they are in */
+        'pay_schedule'      => in_array($e['pay_schedule'] ?? '', PAY_SCHEDULES, true) ? $e['pay_schedule'] : 'Semi-Monthly',
         /* the monthly amounts the admin typed on the employee; 0 = none */
         'sss_amount'        => (float)($e['sss_amount']        ?? 0),
         'philhealth_amount' => (float)($e['philhealth_amount'] ?? 0),
         'pagibig_amount'    => (float)($e['pagibig_amount']    ?? 0),
         'tax_amount'        => (float)($e['tax_amount']        ?? 0),
+        /* and which cut-off of the month takes each one (first | split | second) */
+        'sss_timing'        => $timing['sss'],
+        'philhealth_timing' => $timing['philhealth'],
+        'pagibig_timing'    => $timing['pagibig'],
+        'tax_timing'        => $timing['tax'],
         'hours_per_day'     => isset($e['hours_per_day']) && $e['hours_per_day'] !== null ? (float)$e['hours_per_day'] : null,
         'rest_days'         => $e['rest_days'] ?? '7',
     ];
@@ -788,8 +961,8 @@ function dayUndertime(array $d, float $dayHours): float {
  * Gross pay is everything earned: basic + overtime − late - what the
  * pharmacy's timesheet calls GROSS PAY. Then the employee's own monthly
  * SSS, PhilHealth, Pag-IBIG and withholding-tax amounts, as typed on the
- * employee, are deducted on the run(s) the Contribution Schedule names (see
- * contributionBreakdown) - they do not depend on what was earned. Net pay is
+ * employee, are deducted on the run(s) the employee's own contribution schedule
+ * names (see contributionBreakdown) - they do not depend on what was earned. Net pay is
  * gross less those four.
  *
  * Returns gross, basic, overtime_pay, late_deduction, ot_late_adj (overtime pay - late deduction), sss, philhealth,
@@ -961,10 +1134,10 @@ function defaultPeriodId(PDO $db, array $periods): int {
     return ($last && in_array($last, $ids, true)) ? $last : ($ids[0] ?? 0);
 }
 
-/* A period's pay schedule: its own, or the Settings default for older periods */
+/* A period's pay schedule: its own - or, for one that has none, the schedule most employees are on (defaultPaySchedule). 'Weekly' is
+   only read: it is no longer offered, but a period an older database holds keeps working. */
 function periodType(?string $stored): string {
-    $t = $stored ?: getSetting('payroll_period', 'Monthly');
-    return in_array($t, ['Monthly', 'Semi-Monthly', 'Weekly'], true) ? $t : 'Monthly';
+    return in_array($stored, ['Monthly', 'Semi-Monthly', 'Weekly'], true) ? $stored : defaultPaySchedule();
 }
 
 /* "Semi-Monthly · 1st half" etc., for period pickers and headings */
@@ -1009,8 +1182,9 @@ function payContext(PDO $db, int $periodId): array {
             $earlier[$r['emp_id']] = ['g' => (float)$r['g'], 'basic' => (float)$r['basic'], 'sss' => (float)$r['s'],
                                       'philhealth' => (float)$r['ph'], 'pagibig' => (float)$r['pg'], 'tax' => (float)$r['tax']];
         }
-        $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND start_date >= ? AND end_date < ?");
-        $st->execute([$periodId, $monthStart, $start]);
+        /* the earlier runs of THIS schedule: a Monthly run is not an earlier cut-off for the kinsenas employees, and the other way round */
+        $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND start_date >= ? AND end_date < ? AND period_type = ?");
+        $st->execute([$periodId, $monthStart, $start, (string)($row['period_type'] ?? '')]);
         $earlierRuns = (int)$st->fetchColumn();
     } catch (PDOException $e) { /* older database: no history, each run stands alone */ }
 
@@ -1042,7 +1216,6 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
         'fraction'         => periodFraction($type),
         'semi'             => $type === 'Semi-Monthly',
         'half'             => (int)date('j', strtotime($start)) <= 15 ? 1 : 2,
-        'timing'           => contributionTiming(),
         'final'            => $final,        /* last pay run of the month */
         'earlier'          => $earlier,      /* emp_id => already earned / deducted / withheld this month */
         'earlier_runs'     => $earlierRuns,  /* earlier pay periods this month in the system */
@@ -1056,8 +1229,8 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
  *
  *  An employee's rate is quoted per month, per kinsena or per day,
  *  and an employee's SSS, PhilHealth, Pag-IBIG and tax amounts are
- *  MONTHLY. A payroll run, though, covers whatever the payroll_period
- *  setting says - a whole month, a kinsena (half a month), or a week.
+ *  MONTHLY. A payroll run, though, covers what its pay period says - a whole
+ *  month or a kinsena (half a month); an older database may hold a week.
  *
  *  So the computation works in two steps:
  *    1. monthlyEquivalent() - what this employee earns in a month,
@@ -1072,8 +1245,7 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
  * Semi-Monthly is the kinsenas schedule: two runs per month.
  */
 function periodFraction(?string $periodType = null): float {
-    $periodType = $periodType ?? getSetting('payroll_period', 'Monthly');
-    return match ($periodType) {
+    return match (periodType($periodType)) {
         'Semi-Monthly' => 0.5,
         'Weekly'       => 12.0 / 52.0,
         default        => 1.0,      /* Monthly */
@@ -1336,6 +1508,9 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     $emps = [];
     foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['employee_code']] = payEmployee($er);
     $inScope = fn($id) => $who['scope'] === null || in_array((string)$id, array_map('strval', $who['scope']), true);
+    /* A pay period takes the employees paid on its schedule: a Monthly employee is not in a Semi-Monthly cut-off and the other way
+       round. Their days are saved all the same and count in the pay period of their own schedule. */
+    $onSchedule = fn($id) => isset($emps[$id]) && employeeInPeriod($emps[$id], $ctx['period_type']);
 
     /* Every day saved inside the period's dates (a day belongs to the period that holds its date) */
     $st = $db->prepare("SELECT e.employee_code AS emp_id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours, b.undertime_hours, b.is_day_off, b.entered_by
@@ -1358,7 +1533,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     /* One line per employee: someone whose only records are days off gets no payroll line. */
     $lines = [];
     foreach ($byEmp as $id => $days) {
-        if (isset($emps[$id]) && $inScope($id) && (isset($worked[$id]) || count($days) > count($offDay[$id] ?? []))) {
+        if ($onSchedule($id) && $inScope($id) && (isset($worked[$id]) || count($days) > count($offDay[$id] ?? []))) {
             $lines[$id] = true;
         }
     }
@@ -1383,7 +1558,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
                          WHERE lr.status = 'Approved' AND lr.date_from <= ? AND lr.date_to >= ?");
     $st->execute([$per['end_date'], $per['start_date']]);
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
-        if (isset($emps[$id]) && $inScope($id)) $lines[$id] = true;
+        if ($onSchedule($id) && $inScope($id)) $lines[$id] = true;
     }
 
     $cal = attendanceCalendar($db, array_merge(array_keys($lines), array_keys($covered)),
@@ -1511,15 +1686,16 @@ function recomputeEmployeeOpenPeriods(PDO $db, string $empId, string $from, stri
  * period changes they have to be recomputed as well.
  */
 function laterPeriodsInMonth(PDO $db, int $periodId): array {
-    $st = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
+    $st = $db->prepare("SELECT start_date, end_date, period_type FROM payroll_periods WHERE id = ?");
     $st->execute([$periodId]);
     $p = $st->fetch();
     if (!$p) return [];
+    /* only the cut-offs of the same schedule: they hold the same employees, so they are the ones that settle against this one */
     $st = $db->prepare("SELECT l.id FROM payroll_periods l
-                         WHERE l.status = 'Open' AND l.id <> ? AND l.start_date > ? AND l.start_date <= ?
+                         WHERE l.status = 'Open' AND l.id <> ? AND l.start_date > ? AND l.start_date <= ? AND l.period_type = ?
                            AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.att_date BETWEEN l.start_date AND l.end_date)
                          ORDER BY l.start_date");
-    $st->execute([$periodId, $p['end_date'], date('Y-m-t', strtotime($p['start_date']))]);
+    $st->execute([$periodId, $p['end_date'], date('Y-m-t', strtotime($p['start_date'])), $p['period_type']]);
     return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
 }
 
@@ -1531,6 +1707,26 @@ function recomputeMonthFrom(PDO $db, int $periodId, array $who): int {
     $n = recomputePeriodFromDaily($db, $periodId, $who);
     foreach (laterPeriodsInMonth($db, $periodId) as $later) recomputePeriodFromDaily($db, $later, $who);
     return $n;
+}
+
+/*
+ * Days were saved or changed in this period's dates: besides the period itself (recomputeMonthFrom), every OTHER open pay period
+ * that holds some of those dates is brought up to date too. Employees paid on different schedules are in different pay periods
+ * over the same dates (a Monthly run and the two kinsenas cut-offs), and a saved day counts in the period of its employee's schedule.
+ * Returns the labels of the other periods recomputed.
+ */
+function recomputeParallelPeriods(PDO $db, int $periodId, array $who): array {
+    $st = $db->prepare("SELECT o.id, o.period_label FROM payroll_periods o JOIN payroll_periods p ON p.id = ?
+                         WHERE o.id <> p.id AND o.status = 'Open' AND o.start_date <= p.end_date AND o.end_date >= p.start_date
+                           AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.att_date BETWEEN o.start_date AND o.end_date)
+                         ORDER BY o.start_date, o.id");
+    $st->execute([$periodId]);
+    $done = [];
+    foreach ($st->fetchAll() as $o) {
+        recomputeMonthFrom($db, (int)$o['id'], $who);
+        $done[] = $o['period_label'];
+    }
+    return $done;
 }
 
 /*
@@ -1871,7 +2067,7 @@ function monthAttendance(PDO $db, string $ym, ?array $scope, bool $withPay = tru
           JOIN employees e ON e.id = b.employee_id
           JOIN payroll_periods p ON p.id = (SELECT p2.id FROM payroll_periods p2
                                              WHERE b.att_date BETWEEN p2.start_date AND p2.end_date
-                                             ORDER BY p2.start_date, p2.id LIMIT 1)
+                                             ORDER BY (p2.period_type = e.pay_schedule) DESC, p2.start_date, p2.id LIMIT 1)
           LEFT JOIN users ub ON ub.id = b.entered_by
          WHERE b.att_date BETWEEN ? AND ? $dayScope
          ORDER BY b.att_date");
@@ -2025,14 +2221,17 @@ function reportingPeriod(PDO $db): ?array {
 }
 
 /*
- * Another period whose dates overlap start..end, or null. Two periods
- * covering the same days would pay those days twice.
+ * Another period whose dates overlap start..end, or null. Two periods of the SAME schedule covering the same days would pay those
+ * days twice. Periods of different schedules do not clash - a Monthly run and the two kinsenas cut-offs of the same month hold
+ * different employees - except a Weekly one (no longer offered, but an older database may hold one), which takes everybody.
+ *   $type   the schedule of the period to be (Semi-Monthly | Monthly); null = a clash with a period of any schedule
  */
-function overlappingPeriod(PDO $db, string $start, string $end, int $exceptId = 0): ?array {
+function overlappingPeriod(PDO $db, string $start, string $end, int $exceptId = 0, ?string $type = null): ?array {
     $st = $db->prepare("SELECT id, period_label, start_date, end_date, period_type FROM payroll_periods
                          WHERE start_date <= ? AND end_date >= ? AND id <> ?
+                           AND (? IS NULL OR period_type = ? OR period_type = 'Weekly' OR ? = 'Weekly')
                          ORDER BY start_date LIMIT 1");
-    $st->execute([$end, $start, $exceptId]);
+    $st->execute([$end, $start, $exceptId, $type, $type, $type]);
     return $st->fetch() ?: null;
 }
 

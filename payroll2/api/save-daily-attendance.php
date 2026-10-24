@@ -40,11 +40,11 @@ if (!$period_id || empty($rows)) {
 uploadPeriodGuard($db, $period_id, $who);
 saveBioLinks($db, $body['bio_links'] ?? [], $who);   /* device report -> employee choices */
 
-/* Registered employees: emp_id => employees.id, full name and duty-day hours */
+/* Registered employees: emp_id => employees.id, full name, duty-day hours and the schedule they are paid on */
 $standard = max(1.0, (float)getSetting('standard_hours', '8'));
 $empData  = [];
-foreach ($db->query("SELECT id, employee_code AS emp_id, full_name, hours_per_day FROM employees")->fetchAll() as $er) {
-    $empData[$er['emp_id']] = ['pk' => (int)$er['id'], 'full_name' => $er['full_name'],
+foreach ($db->query("SELECT id, employee_code AS emp_id, full_name, hours_per_day, pay_schedule FROM employees")->fetchAll() as $er) {
+    $empData[$er['emp_id']] = ['pk' => (int)$er['id'], 'full_name' => $er['full_name'], 'pay_schedule' => $er['pay_schedule'],
                                'day_hours' => (float)$er['hours_per_day'] > 0 ? (float)$er['hours_per_day'] : $standard];
 }
 $autoOt = !empty($body['auto_ot']);
@@ -64,10 +64,12 @@ try {
 
     /* Only days inside the pay period count: a whole-month file uploaded into
        the 16–31 cut-off must not put the 1st–15th into it */
-    $pr = $db->prepare("SELECT start_date, end_date, period_label FROM payroll_periods WHERE id = ?");
+    $pr = $db->prepare("SELECT start_date, end_date, period_label, period_type FROM payroll_periods WHERE id = ?");
     $pr->execute([$period_id]);
     $per = $pr->fetch();
+    $payType = periodType($per['period_type'] ?? null);   /* the pay schedule this period is for */
     $outsidePeriod = 0;
+    $otherSchedule = [];   /* emp_id => name and schedule: saved, but paid in the pay period of their own schedule (not this one) */
 
     foreach ($rows as $r) {
         $emp_name = trim((string)($r['emp_name'] ?? ''));
@@ -122,6 +124,9 @@ try {
            paid twice. */
         $daily["$emp_id|$att_date"] = [$empData[$emp_id]['pk'], $att_date,
                                        round($hours, 2), round($ot, 2), round($late, 2), $under, $off ? 1 : 0];
+        if (!employeeInPeriod($empData[$emp_id], $payType)) {
+            $otherSchedule[$emp_id] = ['name' => $empData[$emp_id]['full_name'], 'schedule' => $empData[$emp_id]['pay_schedule']];
+        }
     }
 
     $inserted = count($daily);
@@ -162,8 +167,16 @@ try {
     /* ── Step 2: Rebuild the period's payroll from ALL its saved days ──
        Days from earlier uploads stay and count; see recomputePeriodFromDaily() */
     $count = recomputeMonthFrom($db, $period_id, $who);   /* + later cut-offs of the month */
+    /* The days of employees paid on another schedule count in the open pay periods of THEIR schedule over these dates: bring those
+       up to date - for those employees only, so a file of this schedule's own employees touches nothing else */
+    $alsoRecomputed = $otherSchedule ? recomputeParallelPeriods($db, $period_id, ['role' => $who['role'], 'scope' => array_map('strval', array_keys($otherSchedule))]) : [];
 
     $message = "$inserted daily record(s) saved. Payroll recomputed for $count employee(s).";
+    if ($otherSchedule) {
+        $message .= ' ' . count($otherSchedule) . " employee(s) in the file are paid on another schedule, so they are not in this $payType pay period"
+                  . ' - their days were saved and count in the pay period of their own schedule'
+                  . ($alsoRecomputed ? ' (' . implode(', ', $alsoRecomputed) . ' brought up to date).' : '.');
+    }
     if ($unmatched) {
         $message .= ' ' . count($unmatched) . ' name(s) in the file match no employee - those rows were not saved.';
     }
@@ -186,6 +199,7 @@ try {
         'message'      => $message,
         'outside_period' => $outsidePeriod,
         'days_off'       => $daysOff,
+        'other_schedule' => array_slice(array_values($otherSchedule), 0, 50),   /* [{name, schedule}] paid on another schedule than this pay period's */
     ]);
 
 } catch (PDOException $e) {

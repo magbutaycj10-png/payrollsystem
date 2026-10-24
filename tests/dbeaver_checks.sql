@@ -160,18 +160,19 @@ SELECT a.id AS attendance_summary_id, pp.period_label, e.employee_code, e.full_n
     OR a.total_hours_worked < 0 OR a.total_overtime_hours < 0 OR a.total_late_hours < 0
  ORDER BY pp.start_date, e.full_name;
 
--- @check C22 | A saved day that falls inside two pay periods (the periods overlap, so that day is counted in both) | expect: none
+-- @check C22 | A saved day that falls inside two pay periods that both take the employee (the periods overlap on the employee's own pay schedule, so that day is counted in both) | expect: none
 SELECT e.employee_code, e.full_name, b.att_date, COUNT(*) AS in_periods_count, GROUP_CONCAT(pp.period_label ORDER BY pp.start_date SEPARATOR ' | ') AS in_periods
   FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
-  JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date
+  JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date AND (pp.period_type = e.pay_schedule OR pp.period_type = 'Weekly')
  GROUP BY b.id, e.employee_code, e.full_name, b.att_date
 HAVING COUNT(*) > 1
  ORDER BY b.att_date, e.full_name;
 
--- @check C23 | Pay periods that overlap in dates (days can be counted in both) | expect: review
+-- @check C23 | Pay periods of the same schedule that overlap in dates (days can be counted in both). A Monthly run beside the kinsenas cut-offs of the same month is normal and is not listed | expect: review
 SELECT a.id AS period_a, a.period_label AS label_a, a.start_date AS start_a, a.end_date AS end_a,
        b.id AS period_b, b.period_label AS label_b, b.start_date AS start_b, b.end_date AS end_b
   FROM payroll_periods a JOIN payroll_periods b ON a.id < b.id AND a.start_date <= b.end_date AND b.start_date <= a.end_date
+   AND (a.period_type = b.period_type OR a.period_type = 'Weekly' OR b.period_type = 'Weekly')
  ORDER BY a.start_date;
 
 -- @check C30 | Employee set-up that cannot be right: negative or absurd pay, a negative or absurd monthly SSS / PhilHealth / Pag-IBIG / tax amount, or a duty day outside 1-24 hours | expect: none
@@ -184,7 +185,7 @@ SELECT e.employee_code, e.full_name, e.salary_type, e.base_salary, e.hours_per_d
     OR e.pagibig_amount < 0 OR e.pagibig_amount > 100000 OR e.tax_amount < 0 OR e.tax_amount > 10000000
  ORDER BY e.employee_code;
 
--- @check C31 | Settings that are not usable values (rates, duty day, schedule, contribution timing, overtime method / multiplier) | expect: none
+-- @check C31 | Settings that are not usable values (rates, duty day, overtime method / multiplier) | expect: none
 SELECT setting_key, setting_value, 'must be a number from 0 to 100000' AS problem FROM settings
  WHERE setting_key IN ('overtime_rate', 'late_rate')
    AND (setting_value NOT REGEXP '^[0-9]+([.][0-9]+)?$' OR CAST(setting_value AS DECIMAL(14,2)) > 100000)
@@ -193,18 +194,18 @@ SELECT setting_key, setting_value, 'must be a number from 1 to 24' FROM settings
  WHERE setting_key = 'standard_hours'
    AND (setting_value NOT REGEXP '^[0-9]+([.][0-9]+)?$' OR CAST(setting_value AS DECIMAL(14,2)) NOT BETWEEN 1 AND 24)
 UNION ALL
-SELECT setting_key, setting_value, 'must be Monthly, Semi-Monthly or Weekly' FROM settings
- WHERE setting_key = 'payroll_period' AND setting_value NOT IN ('Monthly', 'Semi-Monthly', 'Weekly')
-UNION ALL
-SELECT setting_key, setting_value, 'must be first, split or second' FROM settings
- WHERE setting_key LIKE 'contribution_timing_%' AND setting_value NOT IN ('first', 'split', 'second')
-UNION ALL
 SELECT setting_key, setting_value, 'must be flat or labor_code' FROM settings
  WHERE setting_key = 'overtime_method' AND setting_value NOT IN ('flat', 'labor_code')
 UNION ALL
 SELECT setting_key, setting_value, 'must be a number from 1 to 3' FROM settings
  WHERE setting_key = 'overtime_multiplier'
    AND (setting_value NOT REGEXP '^[0-9]+([.][0-9]+)?$' OR CAST(setting_value AS DECIMAL(14,2)) NOT BETWEEN 1 AND 3);
+
+-- @check C32 | Pay lines in a pay period of another schedule than the one the employee is paid on now (their Pay Schedule was changed after that pay run, or the line is older than the schedules) | expect: review
+SELECT pp.period_label, pp.period_type AS period_schedule, e.employee_code, e.full_name, e.pay_schedule AS employee_schedule, p.net_pay, pp.status
+  FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.id = p.employee_id
+ WHERE pp.period_type <> 'Weekly' AND pp.period_type <> e.pay_schedule
+ ORDER BY pp.start_date, e.full_name;
 
 -- =====================================================================================================================
 --  4. BONUSES AND DEDUCTIONS

@@ -16,11 +16,10 @@
  * different cases must not share a calendar month for long.
  */
 
-/** the Settings a generated case was played under (they are global, and every case uses different ones) */
+/** the Settings a generated case was played under (they are global, and every case uses different ones). The contribution schedule is not one of them any more: it is on the employee. */
 function qa_apply_cfg(array $spec): void
 {
     Fixtures::setting('overtime_rate', $spec['cfg']['ot_rate']);
-    foreach ($spec['cfg']['timing'] as $k => $when) Fixtures::setting("contribution_timing_$k", $when);
 }
 
 T::suite('06 · Accounting tie-outs', function () {

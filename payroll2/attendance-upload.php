@@ -6,8 +6,8 @@ requireAuth();
 $activePage  = 'attendance-upload';
 $db          = getDB();
 $periods     = $db->query("SELECT * FROM payroll_periods ORDER BY start_date DESC")->fetchAll();
-/* Default schedule for a new period (Settings); each period then keeps its own */
-$defaultType = periodType(null);
+/* Schedule a new period starts with: the one most employees are paid on (set on each employee); each period then keeps its own */
+$defaultType = defaultPaySchedule($db);
 ?>
 <!DOCTYPE html>
 <html lang="en">

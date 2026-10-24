@@ -32,6 +32,28 @@
 
 .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 20px; color: #111827; }
 
+/* ── See brackets (the law's tables, opened from the employee form) ───────── */
+.brk-overlay { z-index: 1100; }                        /* above the employee form it was opened from */
+.modal-box.brk-box { max-width: 920px; }
+.brk-intro { font-size: .82rem; color: #6b7280; margin: -8px 0 10px; line-height: 1.5; }
+.brk-now { font-size: .8rem; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; }
+.brk-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: 1px solid #e5e7eb; }
+.brk-tab { background: none; border: none; border-bottom: 3px solid transparent; padding: 8px 14px; font-size: .86rem; font-weight: 600; color: #6b7280; cursor: pointer; }
+.brk-tab:hover { color: #111827; }
+.brk-tab.on { color: #111827; border-bottom-color: #111827; }
+.brk-panel[hidden] { display: none; }
+.brk-title { font-size: .92rem; font-weight: 700; color: #111827; margin: 14px 0 4px; }
+.brk-panel .brk-title:first-child { margin-top: 0; }
+.brk-note { font-size: .78rem; color: #6b7280; margin: 0 0 8px; line-height: 1.5; }
+.brk-scroll { max-height: 46vh; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; position: relative; }
+.brk-table { width: 100%; border-collapse: collapse; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.brk-table th { position: sticky; top: 0; background: #f8fafc; color: #374151; text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+                padding: 8px 12px; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+.brk-table td { padding: 7px 12px; border-bottom: 1px solid #f1f5f9; white-space: nowrap; }
+.brk-table tbody tr:last-child td { border-bottom: none; }
+.brk-table tr.brk-hit td { background: #fef3c7; font-weight: 700; color: #78350f; }
+.brk-table tr.brk-hit td:first-child { box-shadow: inset 4px 0 0 #f59e0b; }
+
 /* ── Responsive modals ───────────────────────────────────── */
 @media (max-width: 600px) {
     .modal-overlay {

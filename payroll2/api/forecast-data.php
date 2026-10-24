@@ -53,7 +53,7 @@ $rows = $db->query("
  * two periods a month, so "the next period" is not "the next month", and the
  * seasonal signal is (month, half) rather than month on its own.
  */
-/* …read from the most recent period itself (each period carries its own schedule); Settings only when it has none */
+/* …read from the most recent period itself (each period carries its own schedule); the schedule most employees are on when there is none */
 $lastType        = null;
 foreach ($rows as $r0) { if ((float)$r0['total_net'] > 0) $lastType = $r0['period_type'] ?? null; }
 $periodType      = periodType($lastType);

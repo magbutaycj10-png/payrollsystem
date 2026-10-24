@@ -14,7 +14,7 @@ $activePage = 'forecast';
 
 /* The payroll calendar drives the wording: a kinsenas shop forecasts the
    next PERIOD (the other half of the month), not the next month. */
-/* …read from the most recent period that has payroll (each period carries its own schedule); Settings only when it has none */
+/* …read from the most recent period that has payroll (each period carries its own schedule); the schedule most employees are on when there is none */
 $fcLast        = getDB()->query("SELECT pp.period_type FROM payroll_periods pp
                                   WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
                                   ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1")->fetchColumn();

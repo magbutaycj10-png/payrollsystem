@@ -28,10 +28,11 @@ function qa_expected(array $emp, array $payloadByRun, array $runs, array $upto):
         $leave->execute([$id]);
         $dates = [];
         foreach ($leave->fetchAll() as $l) $dates = array_merge($dates, Ledger::dates($l['date_from'], $l['date_to']));
+        $row = Fixtures::empRow($id);       // the cut-off that takes each amount is the employee's own
         $cfg = ['ot_rate' => getSetting('overtime_rate', '45'), 'refund' => AppCopy::hasFixes(),
-                'timing' => ['sss' => getSetting('contribution_timing_sss', 'first'), 'philhealth' => getSetting('contribution_timing_philhealth', 'second'),
-                             'pagibig' => getSetting('contribution_timing_pagibig', 'second'), 'tax' => getSetting('contribution_timing_tax', 'split')]];
-        $out[$name] = Ledger::month(Fixtures::ledgerEmp(Fixtures::empRow($id)), $runs, $days, $dates, $cfg, $upto);
+                'timing' => ['sss' => $row['sss_timing'], 'philhealth' => $row['philhealth_timing'],
+                             'pagibig' => $row['pagibig_timing'], 'tax' => $row['tax_timing']]];
+        $out[$name] = Ledger::month(Fixtures::ledgerEmp($row), $runs, $days, $dates, $cfg, $upto);
     }
     return $out;
 }

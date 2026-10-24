@@ -155,9 +155,41 @@ T::suite('02 · Hours & calendar primitives', function () {
         $t->eq(12 / 52, $w['fraction'], 'a week is 12/52 of a month');
         $m = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-30', 'period_type' => 'Monthly']);
         $t->eq(1.0, $m['fraction']);
-        // a period with no stored type falls back to the Settings default (Semi-Monthly here)
+        // a period with no stored type falls back to the schedule most employees are on (Semi-Monthly when nobody is)
+        Fixtures::reset();
         $d = buildPayContext(['start_date' => '2026-04-01', 'end_date' => '2026-04-15', 'period_type' => null]);
         $t->same('Semi-Monthly', $d['period_type']);
+    });
+
+    T::test('the schedule a new pay period starts with is the one most active employees are paid on - Semi-Monthly when it is a tie or nobody is on the payroll', function (T $t) {
+        Fixtures::reset();
+        $t->same('Semi-Monthly', defaultPaySchedule(), 'no employees');
+        Fixtures::employee(['full_name' => 'Pay A', 'pay_schedule' => 'Monthly']);
+        $t->same('Monthly', defaultPaySchedule(), 'one Monthly employee against none');
+        Fixtures::employee(['full_name' => 'Pay B', 'pay_schedule' => 'Semi-Monthly']);
+        $t->same('Semi-Monthly', defaultPaySchedule(), 'a tie');
+        Fixtures::employee(['full_name' => 'Pay C', 'pay_schedule' => 'Monthly']);
+        $t->same('Monthly', defaultPaySchedule(), 'two Monthly against one Semi-Monthly');
+        Fixtures::employee(['full_name' => 'Pay D', 'pay_schedule' => 'Semi-Monthly', 'status' => 'Inactive']);
+        Fixtures::employee(['full_name' => 'Pay E', 'pay_schedule' => 'Semi-Monthly', 'status' => 'Inactive']);
+        $t->same('Monthly', defaultPaySchedule(), 'employees who left do not vote');
+        $t->same('Monthly', periodType(null), 'a period with no type takes it');
+        $t->same('Monthly', periodType('Fortnightly'), 'and so does a type nobody knows');
+        $t->same('Weekly', periodType('Weekly'), 'a Weekly period an older database holds is still read as Weekly');
+        $t->eq(0.5, periodFraction('Semi-Monthly'));
+        $t->eq(1.0, periodFraction(null), 'no type: the default (Monthly here) - the whole month');
+        Fixtures::reset();
+    });
+
+    T::test('employeeInPeriod: a pay period takes the employees on its schedule; a Weekly one (older databases) takes everybody', function (T $t) {
+        $semi = payEmployee(['emp_id' => 'S', 'pay_schedule' => 'Semi-Monthly']);
+        $mon  = payEmployee(['emp_id' => 'M', 'pay_schedule' => 'Monthly']);
+        $none = payEmployee(['emp_id' => 'N']);
+        $t->same([true, false], [employeeInPeriod($semi, 'Semi-Monthly'), employeeInPeriod($semi, 'Monthly')], 'a Semi-Monthly employee');
+        $t->same([false, true], [employeeInPeriod($mon, 'Semi-Monthly'), employeeInPeriod($mon, 'Monthly')], 'a Monthly employee');
+        $t->same('Semi-Monthly', $none['pay_schedule'], 'no pay schedule on the row is Semi-Monthly');
+        $t->same('Semi-Monthly', payEmployee(['emp_id' => 'W', 'pay_schedule' => 'Weekly'])['pay_schedule'], 'Weekly is not a schedule an employee can be on');
+        $t->same([true, true], [employeeInPeriod($semi, 'Weekly'), employeeInPeriod($mon, 'Weekly')], 'a Weekly period takes both');
     });
 
     T::test('monthlyEquivalent: monthly as is, kinsenas × 2, daily × working days', function (T $t) {
@@ -167,16 +199,15 @@ T::suite('02 · Hours & calendar primitives', function () {
         $t->eq(30000.0, monthlyEquivalent('rubbish', 30000.0, 26), 'unknown type is treated as monthly');
     });
 
-    T::test('contribution timing falls back to the defaults for blank or unknown settings; first, split and second are all accepted', function (T $t) {
-        Fixtures::setting('contribution_timing_sss', 'bogus');
-        Fixtures::setting('contribution_timing_philhealth', '');
-        Fixtures::setting('contribution_timing_pagibig', 'split');
-        Fixtures::setting('contribution_timing_tax', 'first');
-        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'split', 'tax' => 'first'], contributionTiming());
-        foreach (['sss', 'philhealth', 'pagibig', 'tax'] as $k) Fixtures::setting("contribution_timing_$k", '');
-        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'], contributionTiming(),
+    T::test('an employee\'s contribution schedule falls back to the defaults for a blank or unknown choice; first, split and second are all accepted', function (T $t) {
+        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'split', 'tax' => 'first'],
+                 employeeTiming(['sss_timing' => 'bogus', 'philhealth_timing' => '', 'pagibig_timing' => 'split', 'tax_timing' => 'first']));
+        $t->same(['sss' => 'first', 'philhealth' => 'second', 'pagibig' => 'second', 'tax' => 'split'], employeeTiming([]),
                  'the defaults follow the pharmacy\'s sheets: SSS 1st cut-off, PhilHealth and Pag-IBIG the 2nd, tax in shares');
-        Fixtures::reset();
+        $e = payEmployee(['emp_id' => 'X', 'sss_timing' => 'second', 'tax_timing' => 'first', 'pagibig_timing' => 'weekly']);
+        $t->same(['second', 'second', 'second', 'first'], [$e['sss_timing'], $e['philhealth_timing'], $e['pagibig_timing'], $e['tax_timing']],
+                 'the pay computation reads each employee\'s own choice - and the default where it is unknown');
+        $t->same(CONTRIBUTION_TIMING_DEFAULT, Ledger::TIMING, 'the ledger starts from the same defaults');
     });
 
     T::test('which pay run takes what: the month\'s last run always settles; "first" waits for no one; "split" takes a share; "second" waits', function (T $t) {

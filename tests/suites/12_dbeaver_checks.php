@@ -74,10 +74,10 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
             'C20' => ["UPDATE biometric_daily SET hours_worked = 30 WHERE employee_id = {$pk($feb)} LIMIT 1"],
             'C21' => ["UPDATE attendance_summary a JOIN payroll p ON p.period_id = a.period_id AND p.employee_id = a.employee_id SET a.total_hours_worked = 9999 WHERE p.id = {$line($mar)}"],
             'C22' => ["INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Dup', '2026-02-01', '2026-02-14', 'Semi-Monthly', 'Open')"],
-            'C23' => ["INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Overlap', '2026-03-10', '2026-03-20', 'Semi-Monthly', 'Open')"],
+            'C23' => ["INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Overlap', '2026-02-10', '2026-02-20', 'Semi-Monthly', 'Open')"],
             'C30' => ["UPDATE employees SET base_salary = -500 WHERE employee_code = '$feb'"],
             'C31' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('overtime_rate', '-45') ON DUPLICATE KEY UPDATE setting_value = '-45'"],
-            'C31 timing' => ["INSERT INTO settings (setting_key, setting_value) VALUES ('contribution_timing_tax', 'weekly') ON DUPLICATE KEY UPDATE setting_value = 'weekly'"],
+            'C32' => ["UPDATE employees SET pay_schedule = 'Monthly' WHERE employee_code = '$feb'"],           // Feb's kinsenas pay lines are now on the wrong schedule
             'C30 amount' => ["UPDATE employees SET sss_amount = 999999 WHERE employee_code = '$mar'"],
             'C30 negative' => ["UPDATE employees SET tax_amount = -5 WHERE employee_code = '$mar'"],
             'C40' => ["UPDATE payroll SET bonus_pay = bonus_pay + 5 WHERE id = {$line($mar)}"],
@@ -102,6 +102,17 @@ T::suite('12 · DBeaver audit queries (tests/dbeaver_checks.sql)', function () {
             }
             $t->ok(count($after) > $before, "$id did not notice the damage (rows before $before, after " . count($after) . ')');
             $t->same($before, count(qa_sql_run($byId[$cid])), "$id: the injected damage was rolled back");
+        }
+        // a Monthly run beside the kinsenas cut-offs of the same month is normal: neither C22 nor C23 calls it a clash
+        $db->beginTransaction();
+        try {
+            $db->exec("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Monthly beside', '2026-02-01', '2026-02-28', 'Monthly', 'Open')");
+            $t->checks += 2;
+            $t->same([], qa_sql_run($byId['C23']), 'C23 does not list a Monthly period beside the two Semi-Monthly cut-offs of February');
+            $t->same([], qa_sql_run($byId['C22']), 'C22 does not count February\'s days twice: the Monthly run does not take the kinsenas employee');
+            $t->same(0, count(qa_sql_run($byId['C32'])), 'C32 finds nothing wrong on the dataset');
+        } finally {
+            $db->rollBack();
         }
         // a Labor Code overtime method silences the compliance query
         $db->beginTransaction();

@@ -8,7 +8,8 @@ if (get_included_files()[0] === __FILE__) { http_response_code(404); exit; }
  * Driven by assets/js/attendance-formats.js + attendance-upload.js.
  *
  * The two ideas a new user needs, said on screen:
- *   - A pay period (cut-off) is WHAT you pay for: Semi-Monthly, Monthly, Weekly.
+ *   - A pay period (cut-off) is WHAT you pay for: Semi-Monthly or Monthly. It takes the employees paid on that schedule
+ *     (Employees > Add / Edit > Pay Schedule); the other employees' days are saved and count in their own pay period.
  *   - A file is HOW attendance arrives: day-by-day rows add up inside the period,
  *     a totals file (one line per employee) replaces the period's attendance.
  */
@@ -131,7 +132,8 @@ function uploadPanel(array $o): void {
                     </div>
                     <p class="up-hint" style="margin:8px 0 0;">
                         <b>Semi-Monthly</b> (kinsenas) pays twice a month: 1–15 and 16–end.
-                        <b>Monthly</b> pays once for the whole month.
+                        <b>Monthly</b> pays once for the whole month. A pay period takes the employees on its schedule
+                        (set on each employee).
                     </p>
                 </div>
                 <div class="up-field">
@@ -162,7 +164,6 @@ function uploadPanel(array $o): void {
                             <option value="Semi-Monthly|1" <?= $o['defaultType'] === 'Semi-Monthly' ? 'selected' : '' ?>>Semi-Monthly - 1st half (1–15)</option>
                             <option value="Semi-Monthly|2">Semi-Monthly - 2nd half (16–end)</option>
                             <option value="Monthly|0" <?= $o['defaultType'] === 'Monthly' ? 'selected' : '' ?>>Monthly (whole month)</option>
-                            <option value="Weekly|0" <?= $o['defaultType'] === 'Weekly' ? 'selected' : '' ?>>Weekly (set the dates)</option>
                         </select>
                     </div>
                     <div class="up-field">

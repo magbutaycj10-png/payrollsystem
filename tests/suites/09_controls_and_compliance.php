@@ -59,12 +59,17 @@ T::suite('09 · Controls & compliance', function () {
         $t->ok($net >= 0, "net pay is ₱$net after the deduction");
     }, ['defect' => 'D-10']);
 
-    T::test('Settings\' payroll period and contribution timing fall back safely on junk values', function (T $t) {
+    T::test('the old Settings rows for the pay schedule and the contribution timing (an older database still holds them) are ignored: only the employee\'s own schedules count', function (T $t) {
         Fixtures::reset();
-        Fixtures::setting('payroll_period', 'Fortnightly');
-        $t->same('Monthly', periodType(null), 'an unknown schedule means Monthly');
-        $t->eq(1.0, periodFraction(null));
-        Fixtures::setting('payroll_period', 'Semi-Monthly');
+        Fixtures::setting('payroll_period', 'Monthly');
+        foreach (['sss', 'philhealth', 'pagibig', 'tax'] as $k) Fixtures::setting("contribution_timing_$k", 'second');
+        $id = Fixtures::employee(['full_name' => 'Old Settings', 'pay_schedule' => 'Semi-Monthly']);
+        $t->same('Semi-Monthly', defaultPaySchedule(), 'the schedule a new period starts with comes from the employees, not from Settings');
+        $t->same('Semi-Monthly', periodType(null));
+        $t->eq(0.5, periodFraction(null));
+        $t->same(CONTRIBUTION_TIMING_DEFAULT, employeeTiming(payEmployee(Fixtures::empRow($id))), 'the cut-off that takes each amount is the one on the employee');
+        getDB()->exec("DELETE FROM settings WHERE setting_key IN ('payroll_period', 'contribution_timing_sss', 'contribution_timing_philhealth', 'contribution_timing_pagibig', 'contribution_timing_tax')");
+        Fixtures::reset();
     });
 
     /* ================================================================== compliance */

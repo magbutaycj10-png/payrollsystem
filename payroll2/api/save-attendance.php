@@ -35,9 +35,10 @@ uploadPeriodGuard($db, $period_id, $who);
  * away days recorded earlier - so the uploader is asked first, and only on
  * a confirmed replace are those days cleared along with the old totals.
  */
-$pp = $db->prepare("SELECT start_date, end_date FROM payroll_periods WHERE id = ?");
+$pp = $db->prepare("SELECT start_date, end_date, period_type FROM payroll_periods WHERE id = ?");
 $pp->execute([$period_id]);
 $perRow  = $pp->fetch();
+$payType = periodType($perRow['period_type'] ?? null);   /* the pay schedule this period is for */
 $dayScope = '';
 $dayArgs  = [$perRow['start_date'], $perRow['end_date']];   /* a day belongs to the period that holds its date */
 if ($who['scope'] !== null) {
@@ -45,6 +46,12 @@ if ($who['scope'] !== null) {
         ? ' AND employee_id IN (SELECT id FROM employees WHERE employee_code IN (' . implode(',', array_fill(0, count($who['scope']), '?')) . '))'
         : ' AND 1 = 0';
     $dayArgs  = array_merge($dayArgs, array_values($who['scope']));
+}
+/* Only the days of the employees this period takes (those paid on its schedule): the others' days belong to their own pay period,
+   which a totals file here neither counts nor replaces */
+if ($payType !== 'Weekly') {
+    $dayScope .= ' AND employee_id IN (SELECT id FROM employees WHERE pay_schedule = ?)';
+    $dayArgs[] = $payType;
 }
 $dc = $db->prepare("SELECT COUNT(*) FROM biometric_daily WHERE att_date BETWEEN ? AND ?$dayScope");
 $dc->execute($dayArgs);
@@ -55,12 +62,16 @@ if ($savedDays && empty($body['replace_days'])) {
 
 saveBioLinks($db, $body['bio_links'] ?? [], $who);   /* device report -> employee choices */
 
-/* Registered employees this uploader may write for: emp_id => full name */
+/* Registered employees this uploader may write for: emp_id => full name (and the schedule each is paid on) */
 $names = [];
-foreach ($db->query("SELECT employee_code AS emp_id, full_name FROM employees")->fetchAll() as $e) {
-    $names[(string)$e['emp_id']] = $e['full_name'];
+$paidOn = [];
+foreach ($db->query("SELECT employee_code AS emp_id, full_name, pay_schedule FROM employees")->fetchAll() as $e) {
+    $names[(string)$e['emp_id']]  = $e['full_name'];
+    $paidOn[(string)$e['emp_id']] = $e['pay_schedule'];
 }
 $scope = $who['scope'] === null ? $names : array_intersect_key($names, array_flip($who['scope']));
+/* An employee paid on another schedule is not in this pay period (a Weekly one takes everybody) */
+$otherSchedule = fn(string $id): bool => $payType !== 'Weekly' && ($paidOn[$id] ?? 'Semi-Monthly') !== $payType;
 
 /*
  * Match each row to an employee by name and give it that employee's system
@@ -88,6 +99,11 @@ foreach ($rows as $r) {
     if (!isset($scope[$sysId])) {
         $mismatches[] = ['emp_id' => $sysId, 'name' => $name, 'type' => 'out_of_scope',
                          'issue' => 'Not one of your assigned employees'];
+        continue;
+    }
+    if ($otherSchedule($sysId)) {
+        $mismatches[] = ['emp_id' => $sysId, 'name' => $names[$sysId], 'type' => 'other_schedule', 'schedule' => $paidOn[$sysId],
+                         'issue' => "Paid {$paidOn[$sysId]} - not part of a $payType pay period"];
         continue;
     }
     $r['emp_id']   = $sysId;
@@ -127,10 +143,10 @@ if (!$rows && $invalid) {
         'invalid' => array_slice($invalid, 0, 50)], 400);
 }
 
-/* Employees (within scope) that the file left out - they get no payroll line */
+/* Employees (within scope) that the file left out - they get no payroll line (those paid on another schedule are not expected here) */
 $inFile = array_flip(array_column($rows, 'emp_id'));
 foreach ($scope as $id => $fullName) {
-    if (!isset($inFile[$id])) {
+    if (!isset($inFile[$id]) && !$otherSchedule((string)$id)) {
         $mismatches[] = ['emp_id' => $id, 'name' => $fullName, 'type' => 'emp_only',
                          'issue' => 'Registered employee not found in uploaded file'];
     }

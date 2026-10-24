@@ -3,8 +3,9 @@
  * Mutations - a self-check of the test suite itself: does it FAIL when the application is wrong?
  *
  *   run-tests.bat --mutation-check                  the current application: M01–M09, M12–M16 and M19–M20 on the original engine and
- *                                                   tables, plus M10–M11, M17–M18 and M21–M56, bugs that can only exist in the code the
- *                                                   audit, the 13th month and the typed monthly amounts (M46–M56) added
+ *                                                   tables, plus M10–M11, M17–M18 and M21–M69, bugs that can only exist in the code the
+ *                                                   audit, the 13th month, the typed monthly amounts (M46–M56) and the per-employee
+ *                                                   pay schedule and contribution schedule (M58–M69) added
  *   run-tests.bat --mutation-check --app=<folder>   another copy; an older one gets only the mutants marked for it (the older copies
  *                                                   compute contributions from pay, so the ledger no longer matches them in other respects)
  *
@@ -79,12 +80,26 @@ final class Mutations
             'M51' => ['The engine ignores the SSS amount typed on the employee',         $h, "'sss_amount'        => (float)(\$e['sss_amount']        ?? 0),", "'sss_amount'        => 0.0,", '03', 'fixed'],
             'M52' => ['Employees accepts a ₱10,000,000 Pag-IBIG (the amount limits are gone)', 'employee.php', "\$k === 'tax' ? MAX_SALARY_PESOS : MAX_RATE_PESOS", "MAX_SALARY_PESOS", '11', 'fixed'],
             'M53' => ['Editing an employee\'s amounts does not recompute the open payroll', 'employee.php', "if ((float)(\$prev[\"{\$k}_amount\"] ?? 0) !== \$v) \$changed = true;", "if (false) \$changed = true;", '11', 'fixed'],
-            'M54' => ['Settings accept any word as a contribution timing',              'settings.php', "fn(\$v) => in_array(trim(\$v), CONTRIBUTION_TIMING_CHOICES, true) ? null", "fn(\$v) => true ? null", '11', 'fixed'],
+            'M54' => ['Employees accepts any word as a contribution schedule',         'employee.php', "\$timing[\$k] = in_array(\$v, CONTRIBUTION_TIMING_CHOICES, true) ? \$v : \$was[\$k];", "\$timing[\$k] = \$v !== '' ? \$v : \$was[\$k];", '16', 'fixed'],
             'M55' => ['The default SSS schedule is not "1st cut-off, in full" any more', $h, "const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'first',", "const CONTRIBUTION_TIMING_DEFAULT = ['sss' => 'split',", '02', 'fixed'],
             'M56' => ['Finalize cannot see that a later cut-off\'s tax is stale',        $h, "'withholding_tax' => \$c['tax']];", "'withholding_tax' => (float)\$r['withholding_tax']];", '09', 'fixed'],
 
             // ---- the days to compute are the days in the uploaded file (2026-10-10)
             'M57' => ['A day the timesheet marks OFF is deducted as absent',  $h, "    if (\$markedOff) return 'off';", "    if (\$markedOff) return 'absent';", '11', 'fixed'],
+
+            // ---- the pay schedule and the contribution schedule belong to each employee (2026-10-24)
+            'M58' => ['A pay period takes every employee, whatever their pay schedule', $h, "\$onSchedule = fn(\$id) => isset(\$emps[\$id]) && employeeInPeriod(\$emps[\$id], \$ctx['period_type']);", "\$onSchedule = fn(\$id) => isset(\$emps[\$id]);", '16', 'fixed'],
+            'M59' => ['A Weekly period (older databases) no longer takes everybody',    $h, "return \$periodType === 'Weekly' || (\$emp['pay_schedule'] ?? 'Semi-Monthly') === \$periodType;", "return (\$emp['pay_schedule'] ?? 'Semi-Monthly') === \$periodType;", '03', 'fixed'],
+            'M60' => ['A Monthly period beside the cut-offs of the month is refused as an overlap', $h, "AND (? IS NULL OR period_type = ? OR period_type = 'Weekly' OR ? = 'Weekly')", "AND (? IS NULL OR 1 = 1 OR period_type = ? OR ? = 'Weekly')", '16', 'fixed'],
+            'M61' => ['An upload does not bring the other schedule\'s open periods up to date', 'api/save-daily-attendance.php', "\$alsoRecomputed = \$otherSchedule ? recomputeParallelPeriods(\$db, \$period_id, ['role' => \$who['role'], 'scope' => array_map('strval', array_keys(\$otherSchedule))]) : [];", "\$alsoRecomputed = [];", '16', 'fixed'],
+            'M69' => ['Every upload rewrites the other schedule\'s open periods, even for a file of this schedule\'s own employees', 'api/save-daily-attendance.php', "\$alsoRecomputed = \$otherSchedule ? recomputeParallelPeriods(\$db, \$period_id, ['role' => \$who['role'], 'scope' => array_map('strval', array_keys(\$otherSchedule))]) : [];", "\$alsoRecomputed = recomputeParallelPeriods(\$db, \$period_id, \$who);", '16', 'fixed'],
+            'M62' => ['Every employee is taken on the default contribution schedule (their own is ignored)', $h, "\$take[\$k] = contributionTake(\$timing[\$k], \$ctx);", "\$take[\$k] = contributionTake(CONTRIBUTION_TIMING_DEFAULT[\$k], \$ctx);", '16', 'fixed'],
+            'M63' => ['Changing an employee\'s pay schedule does not re-work the open payroll', 'employee.php', "|| (\$prev['pay_schedule'] ?? 'Semi-Monthly') !== \$paySchedule", "|| false", '16', 'fixed'],
+            'M64' => ['A totals file replaces the saved days of every schedule, not only its own', 'api/save-attendance.php', "if (\$payType !== 'Weekly') {", "if (false) {", '16', 'fixed'],
+            'M65' => ['SSS bracket table: the employee share is 4.5% of the credit', $h, "\$ee    = round(\$msc * \$s['ee_rate'], 2);", "\$ee    = round(\$msc * 0.045, 2);", '16', 'fixed'],
+            'M66' => ['The first load gives everybody the old default instead of how they were last paid', $h, "\$last[(int)\$r['employee_id']] = \$r['period_type'];", "\$last = [];", '16', 'fixed'],
+            'M67' => ['create-period still accepts a Weekly period',                     'api/create-period.php', "if (\$asked === 'Weekly') {", "if (false) {", '16', 'fixed'],
+            'M68' => ['The tab of the Employees window does not hide the other tables (the marked-row data is wrong)', 'assets/js/employee.js', "tr.classList.toggle('brk-hit', pay > 0 && v >= lo && v < hi);", "tr.classList.toggle('brk-hit', pay > 0 && v >= lo);", '16', 'fixed'],
         ];
         // an entry without a sixth element applies to both versions of the application
         return array_map(fn($m) => $m + [5 => 'both'], $all);

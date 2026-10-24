@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS employees (
   date_hired         DATE          NULL,
   status             ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
   salary_type        ENUM('monthly','kinsenas','daily') NOT NULL DEFAULT 'monthly',
+  -- How often the employee is paid: a pay period only takes the employees on its own schedule (Semi-Monthly = kinsenas, twice a month)
+  pay_schedule       ENUM('Semi-Monthly','Monthly') NOT NULL DEFAULT 'Semi-Monthly',
   base_salary        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   hours_per_day      DECIMAL(4,2)  NULL DEFAULT NULL,
   rest_days          VARCHAR(20)   NOT NULL DEFAULT '7',
@@ -85,6 +87,12 @@ CREATE TABLE IF NOT EXISTS employees (
   philhealth_amount  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   pagibig_amount     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   tax_amount         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  -- When each amount comes out on a Semi-Monthly month: first = the 1st cut-off in full, split = equal shares at every cut-off,
+  -- second = the last cut-off in full. The month's last cut-off always settles what is still owed. (A Monthly employee has one run.)
+  sss_timing         ENUM('first','split','second') NOT NULL DEFAULT 'first',
+  philhealth_timing  ENUM('first','split','second') NOT NULL DEFAULT 'second',
+  pagibig_timing     ENUM('first','split','second') NOT NULL DEFAULT 'second',
+  tax_timing         ENUM('first','split','second') NOT NULL DEFAULT 'split',
   created_at         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at         TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

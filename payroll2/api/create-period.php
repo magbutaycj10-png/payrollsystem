@@ -1,7 +1,7 @@
 <?php
 // api/create-period.php
 // Creates a payroll period. Admin only - managers upload into existing periods.
-//   { label, start, end, type }   type: Monthly | Semi-Monthly | Weekly
+//   { label, start, end, type }   type: Monthly | Semi-Monthly   (Weekly is no longer offered)
 require '../includes/helpers.php';
 session_start();
 if (empty($_SESSION['logged_in'])) { jsonResponse(['error'=>'Unauthorized'],401); }
@@ -10,8 +10,10 @@ $body  = json_decode(file_get_contents('php://input'), true);
 $label = trim($body['label'] ?? '');
 $start = $body['start'] ?? '';
 $end   = $body['end']   ?? '';
-/* Unknown or missing type -> the Settings default, so old callers keep working */
-$type  = periodType($body['type'] ?? null);
+$asked = $body['type'] ?? null;
+if ($asked === 'Weekly') {
+    jsonResponse(['error' => 'Weekly pay periods are no longer offered. Choose Semi-Monthly (kinsenas) or Monthly.'], 400);
+}
 
 if (!$label || !$start || !$end) {
     jsonResponse(['error'=>'Missing fields'],400);
@@ -23,8 +25,10 @@ if (strtotime($end) < strtotime($start)) {
 try {
     $db = getDB();
     applySchemaPatches();   // period_type column on older databases
-    // Two periods covering the same days would pay those days twice
-    if ($clash = overlappingPeriod($db, $start, $end)) {
+    /* A missing or unknown type -> the schedule most employees are on, so old callers keep working */
+    $type = in_array($asked, PAY_SCHEDULES, true) ? $asked : defaultPaySchedule($db);
+    // Two periods of the same schedule covering the same days would pay those days twice (periods of different schedules hold different employees)
+    if ($clash = overlappingPeriod($db, $start, $end, 0, $type)) {
         $kind = periodTypeLabel($clash);
         $same = $clash['start_date'] === $start && $clash['end_date'] === $end;
         jsonResponse([

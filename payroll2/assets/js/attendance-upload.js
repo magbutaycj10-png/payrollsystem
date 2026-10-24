@@ -25,7 +25,7 @@ const UPLOAD_CFG = Object.assign({
     api:   'api/',                     /* folder holding the save-*.php endpoints */
     after: 'payroll.php',              /* next page once a file is saved (?period=ID appended) */
     afterLabel: 'Payroll Processing',  /* ...and what that page is called */
-    defaultSchedule: 'Semi-Monthly',   /* Settings default, set by the page */
+    defaultSchedule: 'Semi-Monthly',   /* the schedule most employees are on, set by the page */
     createHint: 'create one above',    /* what to do when a schedule has no periods */
 }, window.UPLOAD_CFG || {});
 
@@ -187,7 +187,6 @@ function fillPeriodDates() {
     const monEl  = document.getElementById('newPeriodMonth');
     if (!typeEl || !monEl || !monEl.value) return;
     const [type, half] = typeEl.value.split('|');
-    if (type === 'Weekly') return;                       /* weekly: dates set by hand */
     const [y, m] = monEl.value.split('-').map(Number);
     const last = new Date(y, m, 0).getDate();
     const pad  = n => String(n).padStart(2, '0');
@@ -660,6 +659,13 @@ async function saveDaily(p, c, nameCol, idCol, links) {
     Object.entries(data.elsewhere || {}).forEach(([label, n]) =>
         notes.push(`${n} day record(s) are already saved in ${label} and were not counted again.`));
     if (skipped.length) notes.push(`Not saved - no matching employee: ${skipped.slice(0, 6).join(', ')}${skipped.length > 6 ? ' and ' + (skipped.length - 6) + ' more' : ''}. Check the spelling in Employee Management.`);
+    /* Paid on another schedule: their days are saved, but they are not in THIS pay period */
+    const other = data.other_schedule || [];
+    if (other.length) {
+        notes.push(`${other.length} employee(s) in the file are paid on another schedule, so they are not in this ${String(p.typeLabel).split(' · ')[0]} pay period `
+                 + `(${other.slice(0, 4).map(x => x.name + ' - ' + x.schedule).join(', ')}${other.length > 4 ? ' …' : ''}). `
+                 + `Their days were saved and count in the pay period of their own schedule.`);
+    }
     const offNote = data.days_off ? ` (${data.days_off} of them day(s) off)` : '';
     showResult(p, `${data.inserted} day record(s) saved to ${p.label}${offNote}. Pay is now computed for ${data.count} employee(s).`, notes);
 }
@@ -771,6 +777,7 @@ function showMismatchModal(mismatches, savedCount) {
     const csvOnly = mismatches.filter(m => m.type === 'csv_only').length;
     const empOnly = mismatches.filter(m => m.type === 'emp_only').length;
     const outside = mismatches.filter(m => m.type === 'out_of_scope').length;
+    const otherSched = mismatches.filter(m => m.type === 'other_schedule').length;
 
     document.getElementById('mismatchAlertText').textContent = savedCount > 0
         ? `${savedCount} employee(s) saved, but some names need a look.`
@@ -778,6 +785,7 @@ function showMismatchModal(mismatches, savedCount) {
     const sub = [];
     if (csvOnly) sub.push(`${csvOnly} name(s) in the file match no employee (not saved).`);
     if (outside) sub.push(`${outside} employee(s) are not assigned to you (not saved).`);
+    if (otherSched) sub.push(`${otherSched} employee(s) are paid on another schedule (not saved here).`);
     if (empOnly) sub.push(`${empOnly} employee(s) are missing from the file.`);
     document.getElementById('mismatchAlertSub').textContent = sub.join(' ');
     document.getElementById('mismatchAlert').classList.add('open');
@@ -805,6 +813,9 @@ function seeDetails() {
               m.filter(x => x.type === 'csv_only'), [['Name in file', x => x.name]]) +
         group('Not assigned to you', 'mismatch-csv', 'These employees belong to another manager. Not saved.',
               m.filter(x => x.type === 'out_of_scope'), [['Emp ID', x => x.emp_id], ['Name', x => x.name]]) +
+        group('Paid on another schedule', 'mismatch-csv',
+              'A pay period only takes the employees paid on its schedule (Employees > Pay Schedule). These were not saved here - upload them into a pay period of their own schedule.',
+              m.filter(x => x.type === 'other_schedule'), [['Emp ID', x => x.emp_id], ['Name', x => x.name], ['Paid', x => x.schedule]]) +
         group('Employees missing from the file', 'mismatch-emp',
               'These employees have no payroll line for this pay period unless another file adds them.',
               m.filter(x => x.type === 'emp_only'), [['Emp ID', x => x.emp_id], ['Name', x => x.name]]);
@@ -851,6 +862,7 @@ function downloadDailyTemplate() {
 (function init() {
     let saved = null;
     try { saved = localStorage.getItem('uploadSchedule'); } catch (e) {}
+    if (!['Semi-Monthly', 'Monthly', 'All'].includes(saved)) saved = null;     /* e.g. "Weekly", remembered from before it was removed */
     /* ?period=ID (from Payroll Processing) opens that period directly */
     const want = new URLSearchParams(location.search).get('period');
     setSchedule(want ? 'All' : (saved || UPLOAD_CFG.defaultSchedule));

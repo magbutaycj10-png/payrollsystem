@@ -261,7 +261,7 @@ if ($period_id) {
                 <strong><?= date('M j, Y', strtotime($curPeriod['start_date'])) ?> – <?= date('M j, Y', strtotime($curPeriod['end_date'])) ?></strong>
                 &nbsp;·&nbsp; <?= htmlspecialchars($schedule) ?>
                 &nbsp;·&nbsp; <?= htmlspecialchars($contribNote) ?>
-                &nbsp;·&nbsp; <a href="settings.php">change in Settings</a>
+                &nbsp;·&nbsp; <a href="employee.php">set on each employee</a>
             </div>
             <?php endif; ?>
         </div>
@@ -318,7 +318,7 @@ if ($period_id) {
         <div class="alert alert-warn">
             <span>
                 <strong><?= count($stale) ?> line(s) in this period no longer settle the month correctly.</strong>
-                Their SSS / PhilHealth / Pag-IBIG / tax were taken against earlier cut-offs of the month, the Contribution Schedule or the employee's own monthly amounts, which have since changed
+                Their SSS / PhilHealth / Pag-IBIG / tax were taken against earlier cut-offs of the month, or the employee's own monthly amounts or contribution schedule, which have since changed
                 (<?= htmlspecialchars(implode(', ', array_slice(array_map(fn($id) => $id, array_keys($stale)), 0, 6))) ?><?= count($stale) > 6 ? ', …' : '' ?>).
                 <?= $isOpen ? 'Press <strong>Recompute</strong> to refresh them' : 'Unlock this period, press <strong>Recompute</strong>, then finalize it again' ?>.
             </span>
@@ -511,7 +511,7 @@ if ($period_id) {
 
             <?php if ($company['stale']): ?>
             <div class="alert alert-warn" style="margin-bottom:14px;">
-                <span>An employee's monthly amounts or the Contribution Schedule changed after this pay run was computed -
+                <span>An employee's monthly amounts or contribution schedule changed after this pay run was computed -
                 see the warning at the top of the page. The company shares below follow what was deducted.</span>
             </div>
             <?php endif; ?>
@@ -549,17 +549,17 @@ if ($period_id) {
             <details class="co-more">
                 <summary>Per employee - the monthly amounts and what this pay run took</summary>
                 <p class="co-sub" style="margin:4px 0 10px;">
-                    SSS, PhilHealth, Pag-IBIG and withholding tax are the monthly amounts typed on each employee (Employees &rsaquo; Edit).
-                    This pay run: <?= htmlspecialchars($contribNote) ?>. Whichever cut-off takes them, the month ends at exactly the
-                    amount typed. The company's share is figured on what was deducted.
+                    SSS, PhilHealth, Pag-IBIG and withholding tax are the monthly amounts typed on each employee (Employees &rsaquo; Edit), taken
+                    on the cut-offs chosen for that employee. This pay run: <?= htmlspecialchars($contribNote) ?>. Whichever cut-off takes them,
+                    the month ends at exactly the amount typed. The company's share is figured on what was deducted.
                 </p>
                 <?php
                 /* under an amount: what the employee is set to pay a month, what came out earlier, and when the rest does
                    (HTML-ready, like $peso: only numbers and fixed words go in) */
-                $sub = function (array $b, string $k) use ($peso, $ctx): string {
+                $sub = function (array $b, string $k) use ($peso): string {
                     $s = 'monthly ' . $peso($b['month'][$k]);
                     if ($b['earlier'][$k] > 0) $s .= ' · ' . $peso($b['earlier'][$k]) . ' taken earlier';
-                    if (!$b['due'][$k]) $s .= ' · ' . ($ctx['timing'][$k] === 'first' ? 'taken on the 1st cut-off' : 'waits for the last cut-off');
+                    if (!$b['due'][$k]) $s .= ' · ' . ($b['timing'][$k] === 'first' ? 'taken on the 1st cut-off' : 'waits for the last cut-off');
                     return $s;
                 };
                 ?>

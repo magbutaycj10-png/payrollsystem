@@ -32,6 +32,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                            ? $_POST['salary_type'] : 'monthly';
         $hired           = $_POST['date_hired']            ?: null;
         $portal_password = trim($_POST['portal_password']  ?? '');
+        /* How often they are paid, and which cut-off of the month takes each monthly amount (first | split | second). A choice that is
+           missing or not one of the offered ones keeps what the employee had; a new employee starts on Semi-Monthly with the usual schedule. */
+        $scheduleFor = function (array $prev): array {
+            $pay = in_array($_POST['pay_schedule'] ?? '', PAY_SCHEDULES, true) ? $_POST['pay_schedule']
+                 : (in_array($prev['pay_schedule'] ?? '', PAY_SCHEDULES, true) ? $prev['pay_schedule'] : 'Semi-Monthly');
+            $was = employeeTiming($prev);
+            $timing = [];
+            foreach (CONTRIBUTION_TIMING_DEFAULT as $k => $def) {
+                $v = $_POST["{$k}_timing"] ?? '';
+                $timing[$k] = in_array($v, CONTRIBUTION_TIMING_CHOICES, true) ? $v : $was[$k];
+            }
+            return [$pay, $timing];
+        };
         /* Weekly day(s) off, ISO weekdays: never counted absent, never deducted */
         $restDays = implode(',', restDayList(implode(',', (array)($_POST['rest_days'] ?? []))));
         /* Hours in this employee's duty day; blank = the Settings standard */
@@ -68,13 +81,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = ['type' => 'error', 'text' => "Not saved - $formProblem."];
         } elseif ($action === 'add') {
             $emp_id = nextEmpId($db);
+            [$paySchedule, $timing] = $scheduleFor([]);
             try {
-                $db->prepare("INSERT INTO employees (employee_code,first_name,last_name,position_id,branch_id,email,base_salary,salary_type,date_hired,
-                                                     sss_amount,philhealth_amount,pagibig_amount,tax_amount,rest_days,hours_per_day,
+                $db->prepare("INSERT INTO employees (employee_code,first_name,last_name,position_id,branch_id,email,base_salary,salary_type,pay_schedule,date_hired,
+                                                     sss_amount,philhealth_amount,pagibig_amount,tax_amount,
+                                                     sss_timing,philhealth_timing,pagibig_timing,tax_timing,rest_days,hours_per_day,
                                                      address,phone,emergency_name,emergency_phone,emergency_relation)
-                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
-                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $hired,
-                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours,
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $paySchedule, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'],
+                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours,
                               $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation']]);
                 $empPk = (int)$db->lastInsertId();
                 $msg = ['type' => 'success', 'text' => "Employee $name added (ID: $emp_id)."];
@@ -89,26 +105,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $prev = $db->prepare("SELECT * FROM employees WHERE id = ?");
                 $prev->execute([$id]);
                 $prev = $prev->fetch() ?: [];
-                $db->prepare("UPDATE employees SET employee_code=?,first_name=?,last_name=?,position_id=?,branch_id=?,email=?,base_salary=?,salary_type=?,date_hired=?,
-                                                   sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,rest_days=?,hours_per_day=?,
+                [$paySchedule, $timing] = $scheduleFor($prev);
+                $db->prepare("UPDATE employees SET employee_code=?,first_name=?,last_name=?,position_id=?,branch_id=?,email=?,base_salary=?,salary_type=?,pay_schedule=?,date_hired=?,
+                                                   sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,
+                                                   sss_timing=?,philhealth_timing=?,pagibig_timing=?,tax_timing=?,rest_days=?,hours_per_day=?,
                                                    address=?,phone=?,emergency_name=?,emergency_phone=?,emergency_relation=? WHERE id=?")
-                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $hired,
-                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'], $restDays, $dayHours,
+                   ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $paySchedule, $hired,
+                              $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'],
+                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours,
                               $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation'], $id]);
                 $empPk = $prev ? $id : 0;
                 /* the portal account carries the employee's name */
                 $db->prepare("UPDATE users SET full_name = ? WHERE employee_id = ?")->execute([$name, $id]);
                 $msg = ['type' => 'success', 'text' => "Employee $name updated."];
-                /* Anything the pay computation reads - rate, salary type, day off,
-                   duty hours, the monthly contribution and tax amounts - changes
-                   this employee's open payroll: bring it in line now. (The Date
-                   Hired is only a record: no pay depends on it.) */
+                /* Anything the pay computation reads - rate, salary type, pay schedule, day off,
+                   duty hours, the monthly contribution and tax amounts and the cut-off that
+                   takes each - changes this employee's open payroll: bring it in line now.
+                   (The Date Hired is only a record: no pay depends on it.) */
+                $scheduleWas = employeeTiming($prev);
                 $changed = (float)($prev['base_salary'] ?? 0) !== (float)$salary
                         || ($prev['salary_type'] ?? '') !== $salary_type
+                        || ($prev['pay_schedule'] ?? 'Semi-Monthly') !== $paySchedule
                         || ($prev['rest_days'] ?? '7') !== $restDays
                         || (float)($prev['hours_per_day'] ?? 0) !== (float)($dayHours ?? 0);
                 foreach ($amounts as $k => $v) {
                     if ((float)($prev["{$k}_amount"] ?? 0) !== $v) $changed = true;
+                }
+                foreach ($timing as $k => $v) {
+                    if ($scheduleWas[$k] !== $v) $changed = true;
+                }
+                if (($prev['pay_schedule'] ?? 'Semi-Monthly') !== $paySchedule) {
+                    $msg['text'] .= " Pay schedule is now $paySchedule: from now on they are in the open $paySchedule pay periods and out of the others (finalized pay periods are left alone).";
                 }
                 if ($changed) {
                     $redone = recomputeEmployeeOpenPeriods($db, $emp_id, '1000-01-01', '9999-12-31');
@@ -212,9 +239,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $next_emp_id = nextEmpId($db);
 
-/* Where Settings' Contribution Schedule currently sends each monthly amount (the note under the amount boxes) */
-$scheduleNow = [];
-foreach (contributionTiming() as $k => $t) $scheduleNow[] = CONTRIBUTION_LABELS[$k] . ': ' . CONTRIBUTION_TIMING_LABELS[$t];
+/* The law's brackets, for the "See brackets" window next to the contribution amounts */
+$brackets = contributionBrackets();
 
 /* The branch list and the position titles maintained in Settings (a typed position that is new is added to the list when saved) */
 $branchOptions   = $db->query("SELECT name FROM branches ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
@@ -308,6 +334,8 @@ $total     = count($employees);
                             <span class="badge badge-<?= $st === 'daily' ? 'yellow' : ($st === 'kinsenas' ? 'green' : 'blue') ?>">
                                 <?= salaryTypeLabel($st) ?>
                             </span>
+                            <?php $ps = in_array($e['pay_schedule'] ?? '', PAY_SCHEDULES, true) ? $e['pay_schedule'] : 'Semi-Monthly'; ?>
+                            <br><small style="color:#6b7280;white-space:nowrap;" title="Pay schedule - the pay periods they are in">Paid <?= $ps === 'Monthly' ? 'monthly' : 'semi-monthly' ?></small>
                             <br><small style="color:#6b7280;white-space:nowrap;" title="Day off">Off: <?= htmlspecialchars(restDayLabel($e['rest_days'] ?? null)) ?></small>
                             <?php if (!empty($e['hours_per_day'])): ?>
                                 <br><small style="color:#6b7280;white-space:nowrap;" title="Hours per duty day"><?= rtrim(rtrim(number_format($e['hours_per_day'], 1), '0'), '.') ?>-hour day</small>
@@ -424,6 +452,18 @@ $total     = count($employees);
                     </select>
                 </div>
                 <div class="form-group">
+                    <label>Pay Schedule</label>
+                    <select name="pay_schedule" id="f_pay_schedule" class="form-control">
+                        <?php foreach (PAY_SCHEDULE_LABELS as $val => $text): ?>
+                        <option value="<?= $val ?>"><?= htmlspecialchars($text) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">
+                        How often they are paid: Semi-Monthly (kinsenas) is twice a month. A pay period only includes the employees on its
+                        schedule. Change it at the start of a month: pay already made on the other schedule is not carried over.
+                    </span>
+                </div>
+                <div class="form-group">
                     <label id="salaryLabel">Base Salary <span style="font-weight:400;color:#9ca3af;">(₱/month)</span></label>
                     <input type="number" name="base_salary" id="f_salary" class="form-control" value="0" step="0.01" min="0">
                 </div>
@@ -462,8 +502,12 @@ $total     = count($employees);
 
             <!-- Government contributions and withholding tax: the employee's own monthly amounts -->
             <div style="border-top:1px solid #e5e7eb;margin:18px 0 0;padding-top:16px;">
-                <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px;">Contributions &amp; Withholding Tax
-                    <span style="font-weight:400;color:#9ca3af;">(₱ per month - all optional)</span></p>
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:4px;">
+                    <p style="font-size:.85rem;font-weight:700;color:#374151;margin:0;">Contributions &amp; Withholding Tax
+                        <span style="font-weight:400;color:#9ca3af;">(₱ per month - all optional)</span></p>
+                    <button type="button" class="btn btn-ghost btn-sm" id="seeBrackets" onclick="openBrackets()"
+                            title="The law's brackets for SSS, PhilHealth, Pag-IBIG and withholding tax">See brackets</button>
+                </div>
                 <p style="font-size:.78rem;color:#9ca3af;margin-bottom:10px;">
                     Type what is to be deducted from this employee's pay each month. Leave a box blank - or 0 - when the
                     employee has none: some do not. The amounts are deducted exactly as typed; nothing is worked out from the pay.
@@ -487,19 +531,37 @@ $total     = count($employees);
                         <input type="number" name="tax_amount" id="f_tax" class="form-control" step="0.01" min="0" max="<?= (int)MAX_SALARY_PESOS ?>" placeholder="0.00">
                     </div>
                 </div>
-                <p style="font-size:.76rem;color:#9ca3af;margin-top:4px;">
-                    A monthly payroll takes them in full. On a semi-monthly or weekly payroll it follows
-                    <a href="settings.php#contribSchedule" style="color:#6b7280;">Settings &rsaquo; Contribution Schedule</a>
-                    - now: <?= htmlspecialchars(implode(' · ', $scheduleNow)) ?>.
+
+                <!-- Which cut-off of the month takes each amount (this employee's own schedule) -->
+                <p id="contribSchedule" style="font-size:.85rem;font-weight:700;color:#374151;margin:16px 0 4px;">Contribution Schedule
+                    <span style="font-weight:400;color:#9ca3af;">(when each amount comes out)</span></p>
+                <div class="form-grid" id="f_timing_grid" style="grid-template-columns:1fr 1fr;">
+                    <?php foreach (CONTRIBUTION_LABELS as $k => $lbl): ?>
+                    <div class="form-group">
+                        <label><?= htmlspecialchars($lbl) ?></label>
+                        <select name="<?= $k ?>_timing" id="f_<?= $k ?>_timing" class="form-control">
+                            <?php foreach (CONTRIBUTION_TIMING_LABELS as $val => $text): ?>
+                            <option value="<?= $val ?>"><?= htmlspecialchars(ucfirst($text)) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <p id="timingNoteSemi" style="font-size:.76rem;color:#9ca3af;margin-top:4px;">
+                    With two cut-offs a month, this says which one takes each monthly amount: the 1st cut-off in full, a share at every
+                    cut-off (half each), or the last cut-off in full. Whichever is picked, the last cut-off settles whatever is still owed,
+                    so the month always comes to exactly the amount typed. The pharmacy's own timesheets take SSS in full on the 1st
+                    cut-off and PhilHealth in full on the 2nd.
+                </p>
+                <p id="timingNoteMonthly" style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:none;">
+                    This employee is paid <strong>Monthly</strong>: one pay run a month, so every amount above is taken in full on it
+                    and the schedule here does not apply.
                 </p>
             </div>
 
             <!-- Portal credentials section -->
             <div style="border-top:1px solid #e5e7eb;margin:18px 0 14px;padding-top:16px;">
-                <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:4px;">Employee Portal Access</p>
-                <p style="font-size:.78rem;color:#9ca3af;margin-bottom:12px;">
-                    Employee logs in at <strong>http://localhost:8765/employee/</strong> using their <strong>Email</strong> + this password.
-                </p>
+                <p style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:12px;">Employee Portal Access</p>
                 <div class="form-group">
                     <label>Portal Password <span id="empPassHint" style="font-weight:400;color:#9ca3af;text-transform:none;letter-spacing:0;"></span></label>
                     <input type="password" name="portal_password" id="f_portal_pass" class="form-control"
@@ -542,7 +604,55 @@ $total     = count($employees);
     </div>
 </div>
 
-<script>var _nextEmpId = <?= json_encode($next_emp_id) ?>;</script>
+<!-- See brackets: the law's tables for each contribution and for the withholding tax (reference only - what is typed on the form is what is deducted) -->
+<?php
+$bracketTabs = ['sss' => ['SSS', ['sss']], 'philhealth' => ['PhilHealth', ['philhealth']], 'pagibig' => ['Pag-IBIG', ['pagibig']],
+                'tax' => ['Withholding tax', ['tax_semi', 'tax_month']]];
+$bracketBy = [];
+foreach ($brackets as $tbl) $bracketBy[$tbl['key']] = $tbl;
+?>
+<div id="bracketModal" class="modal-overlay brk-overlay" onclick="if(event.target===this)closeBrackets()">
+    <div class="modal-box brk-box" role="dialog" aria-labelledby="brkTitle">
+        <button type="button" class="modal-close" onclick="closeBrackets()">Close</button>
+        <h2 id="brkTitle" class="modal-title">Brackets - contributions &amp; withholding tax</h2>
+        <p class="brk-intro">
+            What the law prescribes, bracket by bracket. It is a guide for the amounts typed on the employee: payroll does not
+            work them out, it deducts exactly the monthly amounts typed on the form.
+        </p>
+        <p id="brkNow" class="brk-now"></p>
+        <div class="brk-tabs" role="tablist">
+            <?php $firstTab = true; foreach ($bracketTabs as $tab => [$tabTitle]): ?>
+            <button type="button" role="tab" class="brk-tab<?= $firstTab ? ' on' : '' ?>" data-tab="<?= $tab ?>" onclick="showBracketTab('<?= $tab ?>')"><?= htmlspecialchars($tabTitle) ?></button>
+            <?php $firstTab = false; endforeach; ?>
+        </div>
+        <?php $firstTab = true; foreach ($bracketTabs as $tab => [$tabTitle, $keys]): ?>
+        <div class="brk-panel" data-panel="<?= $tab ?>" <?= $firstTab ? '' : 'hidden' ?>>
+            <?php foreach ($keys as $key): $tbl = $bracketBy[$key]; ?>
+            <h3 class="brk-title"><?= htmlspecialchars($tbl['title']) ?></h3>
+            <p class="brk-note"><?= htmlspecialchars($tbl['note']) ?></p>
+            <div class="brk-scroll">
+                <table class="brk-table" data-basis="<?= htmlspecialchars($tbl['basis']) ?>">
+                    <thead><tr><?php foreach ($tbl['head'] as $h): ?><th><?= htmlspecialchars($h) ?></th><?php endforeach; ?></tr></thead>
+                    <tbody>
+                    <?php foreach ($tbl['rows'] as $row): ?>
+                        <tr data-lo="<?= htmlspecialchars((string)$row['lo']) ?>" data-hi="<?= $row['hi'] === null ? '' : htmlspecialchars((string)$row['hi']) ?>">
+                            <?php foreach ($row['cells'] as $cell): ?><td><?= htmlspecialchars($cell) ?></td><?php endforeach; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php $firstTab = false; endforeach; ?>
+    </div>
+</div>
+
+<script>
+var _nextEmpId = <?= json_encode($next_emp_id) ?>;
+/* what a new employee starts with: the pay schedule most employees are on, and the usual contribution schedule */
+var _newEmployeeSchedule = <?= json_encode(['pay' => defaultPaySchedule($db), 'timing' => CONTRIBUTION_TIMING_DEFAULT]) ?>;
+</script>
 <script src="assets/js/employee.js"></script>
 <script>
 (function () {

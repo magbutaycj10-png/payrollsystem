@@ -12,6 +12,7 @@ requireManager();
 $activePage = 'attendance-upload';
 $db         = getDB();
 $periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' ORDER BY start_date DESC")->fetchAll();
+$defaultType = defaultPaySchedule($db);   /* the schedule most employees are paid on */
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -38,7 +39,7 @@ $periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' OR
     <?php uploadPanel([
         'periods'     => $periods,
         'canCreate'   => false,
-        'defaultType' => periodType(null),
+        'defaultType' => $defaultType,
     ]); ?>
 </div>
 
@@ -46,7 +47,7 @@ $periods    = $db->query("SELECT * FROM payroll_periods WHERE status = 'Open' OR
 <script>
 /* Endpoints sit one folder up; saved uploads land on Timesheets for approval. */
 window.UPLOAD_CFG = { api: '/api/', after: '/manager/timesheets.php', afterLabel: 'Timesheets',
-                      defaultSchedule: <?= json_encode(periodType(null)) ?>, createHint: 'ask the admin to create one' };
+                      defaultSchedule: <?= json_encode($defaultType) ?>, createHint: 'ask the admin to create one' };
 </script>
 <script src="/assets/js/attendance-formats.js"></script>
 <script src="/assets/js/attendance-upload.js"></script>
