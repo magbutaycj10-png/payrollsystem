@@ -106,6 +106,7 @@ $canPay    = (bool)$openPeriods;
         .sheet th, .sheet td { white-space: nowrap; }
         .sheet td.num, .sheet th.num { text-align: right; font-variant-numeric: tabular-nums; }
         .sheet .mo { font-size: .76rem; color: #4b5563; }
+        .sheet th.mo { color: inherit; }
         .sheet tr.total td { font-weight: 700; background: #f9fafb; border-top: 2px solid var(--border); }
         .sheet tr.accrual td { font-size: .76rem; color: #6b7280; background: #fafafa; }
         .amt-in { width: 110px; text-align: right; padding: 4px 6px; }
