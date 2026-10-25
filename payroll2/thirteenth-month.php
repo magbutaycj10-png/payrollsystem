@@ -83,24 +83,6 @@ $rows   = $data['rows'];
 $totals = $data['totals'];
 $months = [1 => 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/* ── CSV of the computation sheet (for the accountant) ──────────────────────────────────────────────────────── */
-if (($_GET['export'] ?? '') === 'csv') {
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="13th-month-pay-' . $year . '.csv"');
-    $out = fopen('php://output', 'w');
-    fwrite($out, "\xEF\xBB\xBF");
-    fputcsv($out, array_merge(['Emp ID', 'Name', 'Status'], array_values($months), ['Basic pay earned', '13th month (basic / 12)', 'Paid so far', 'Balance']), ',', '"', '');
-    foreach ($rows as $r) {
-        fputcsv($out, array_merge([$r['emp_id'], $r['full_name'], $r['status']],
-            array_map(fn($v) => number_format($v, 2, '.', ''), array_values($r['months'])),
-            [number_format($r['basic'], 2, '.', ''), number_format($r['due'], 2, '.', ''), number_format($r['paid'], 2, '.', ''), number_format($r['balance'], 2, '.', '')]), ',', '"', '');
-    }
-    fputcsv($out, array_merge(['', 'TOTAL', ''], array_map(fn($m) => '', $months), [number_format($totals['basic'], 2, '.', ''), number_format($totals['due'], 2, '.', ''),
-            number_format($totals['paid'], 2, '.', ''), number_format($totals['balance'], 2, '.', '')]), ',', '"', '');
-    fclose($out);
-    exit;
-}
-
 /* Which open period is the natural place for the payment: the one holding today, else the newest open one */
 $defaultTarget = 0;
 $today = date('Y-m-d');
@@ -133,7 +115,20 @@ $canPay    = (bool)$openPeriods;
         .sheet-tools .search-input { width: 240px; max-width: 100%; }
         .sheet-tools label.chk { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; font-weight: 600; cursor: pointer; }
         .sheet-tools .count { font-size: .8rem; color: #6b7280; margin-left: auto; }
+        #printArea { display: none; }
+        .pm-back { position: fixed; inset: 0; background: rgba(17,24,39,.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .pm-back.open { display: flex; }
+        .pm-box { background: #fff; border-radius: 10px; padding: 22px 24px; width: 380px; max-width: 92vw; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+        .pm-box h3 { margin: 0 0 6px; font-size: 1.05rem; }
+        .pm-box p { margin: 0 0 14px; font-size: .84rem; color: #4b5563; }
+        .pm-box .pm-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
         @media print {
+            body.printing > *:not(#printArea) { display: none !important; }
+            body.printing #printArea { display: block; }
+            #printArea .branch-sheet { page-break-after: always; }
+            #printArea .branch-sheet:last-child { page-break-after: auto; }
+            #printArea h2 { font-size: 12pt; margin: 0 0 2px; }
+            #printArea .sub { font-size: 9pt; color: #374151; margin-bottom: 8px; }
             .no-print, .pay-col { display: none !important; }
             .sheet th, .sheet td { padding: 3px 5px; font-size: 8.5pt; }
             .box { box-shadow: none; border: 1px solid #ccc; }
@@ -159,8 +154,7 @@ $canPay    = (bool)$openPeriods;
                     <?php endforeach; ?>
                 </select>
             </form>
-            <a class="btn btn-ghost" href="thirteenth-month.php?year=<?= $year ?>&amp;export=csv">Export CSV</a>
-            <button type="button" class="btn btn-print" onclick="window.print()">Print sheet</button>
+            <button type="button" class="btn btn-print" onclick="openPrintDialog()">Print sheet</button>
         </div>
     </div>
 
@@ -332,7 +326,95 @@ $canPay    = (bool)$openPeriods;
     <?php endif; ?>
 </div>
 
+<?php if ($rows): ?>
+<div class="pm-back" id="printDlg" onclick="if (event.target === this) closePrintDialog()">
+    <div class="pm-box" role="dialog" aria-modal="true" aria-labelledby="pmTitle">
+        <h3 id="pmTitle">Print 13th Month sheet</h3>
+        <p>Choose the branch to print. &ldquo;All branches&rdquo; prints every branch, each on its own page.</p>
+        <select id="printBranch" class="form-control" style="width:100%;" aria-label="Branch to print">
+            <option value="*">All branches</option>
+            <?php foreach ($branchList as $b): ?>
+                <option value="<?= htmlspecialchars($b) ?>"><?= htmlspecialchars($b) ?></option>
+            <?php endforeach; ?>
+            <?php if ($noBranch): ?><option value="">(No branch)</option><?php endif; ?>
+        </select>
+        <div class="pm-actions">
+            <button type="button" class="btn btn-ghost" onclick="closePrintDialog()">Cancel</button>
+            <button type="button" class="btn btn-print" onclick="printSheet()">Print</button>
+        </div>
+    </div>
+</div>
+<div id="printArea"></div>
+<?php endif; ?>
+
 <script>
+function openPrintDialog() {
+    var sel = document.getElementById('branchSel'), pb = document.getElementById('printBranch');
+    if (pb && sel) pb.value = sel.value;
+    document.getElementById('printDlg').classList.add('open');
+}
+function closePrintDialog() { document.getElementById('printDlg').classList.remove('open'); }
+function cellNum(td) {
+    var t = td.textContent, n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+    if (isNaN(n)) return 0;
+    return /overpaid/i.test(t) ? -n : n;
+}
+/* One sheet per branch (a branch is never mixed with another); "All branches" simply prints every branch in turn */
+function printSheet() {
+    var choice = document.getElementById('printBranch').value;
+    var table = document.querySelector('#payForm table.sheet');
+    var all = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+    var branches = [];
+    all.forEach(function (tr) { if (branches.indexOf(tr.dataset.branch) === -1) branches.push(tr.dataset.branch); });
+    branches.sort(function (a, b) { return (a === '' ? 1 : 0) - (b === '' ? 1 : 0) || a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }); });
+    if (choice !== '*') branches = [choice];
+
+    var area = document.getElementById('printArea');
+    area.innerHTML = '';
+    var heads = table.querySelectorAll('thead th:not(.pay-col)');
+    branches.forEach(function (b) {
+        var trs = all.filter(function (tr) { return tr.dataset.branch === b; });
+        if (!trs.length) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'branch-sheet';
+        var h = document.createElement('h2');
+        h.textContent = '13th Month Pay <?= $year ?> - ' + (b === '' ? '(No branch)' : b);
+        var sub = document.createElement('div');
+        sub.className = 'sub';
+        sub.textContent = trs.length + ' employee(s) · printed ' + new Date().toLocaleDateString();
+        var t = document.createElement('table');
+        t.className = 'data-table sheet';
+        var thead = document.createElement('thead'), hr = document.createElement('tr');
+        heads.forEach(function (th) { hr.appendChild(th.cloneNode(true)); });
+        thead.appendChild(hr); t.appendChild(thead);
+        var tbody = document.createElement('tbody'), sums = [];
+        trs.forEach(function (tr) {
+            var c = tr.cloneNode(true);
+            c.style.display = '';
+            c.querySelectorAll('.pay-col').forEach(function (x) { x.remove(); });
+            Array.prototype.forEach.call(c.children, function (td, i) { if (i >= 4) sums[i] = (sums[i] || 0) + cellNum(td); });
+            tbody.appendChild(c);
+        });
+        t.appendChild(tbody);
+        var tf = document.createElement('tfoot'), fr = document.createElement('tr');
+        fr.className = 'total';
+        for (var i = 0; i < heads.length; i++) {
+            var td = document.createElement('td');
+            if (i === 1) td.textContent = 'TOTAL';
+            if (i >= 4) { td.className = 'num'; td.textContent = (sums[i] || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+            fr.appendChild(td);
+        }
+        tf.appendChild(fr); t.appendChild(tf);
+        wrap.appendChild(h); wrap.appendChild(sub);
+        var tw = document.createElement('div'); tw.className = 'table-wrap'; tw.appendChild(t); wrap.appendChild(tw);
+        area.appendChild(wrap);
+    });
+    closePrintDialog();
+    document.body.classList.add('printing');
+    var done = function () { document.body.classList.remove('printing'); area.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+}
 /* Rows on screen after the search box and the branch filter. Ticks on rows that are filtered out
    are kept (search one name, tick, search the next), and the counter says how many are ticked. */
 function shownRows() {
