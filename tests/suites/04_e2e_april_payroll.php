@@ -188,11 +188,13 @@ T::suite('04 · End to end - April 2026 on a kinsenas calendar', function () {
         $t->money('6315.00', $a['gross_pay'], '6,180 + 3 h OT × 45');
     });
 
-    T::test('days outside the pay period are not saved; a day already saved in another period is not paid twice', function (T $t) use ($S) {
+    T::test('a day goes to the pay period that holds its date (never paid twice in cut-off 2); a day in no period is not saved', function (T $t) use ($S) {
         $stray = [Fixtures::day('ALMA REYES', '2026-05-02', 8), Fixtures::day('ALMA REYES', '2026-04-14', 8), Fixtures::day('ALMA REYES', '2026-04-01', 8)];
         $before = Fixtures::payroll($S->periods[1])[$S->emp['ALMA REYES']]['net_pay'];
         $r = Fixtures::days($S->periods[1], $stray);
-        $t->same(400, $r['status'], 'nothing valid to save: ' . json_encode($r));
+        $t->same(true, $r['success'], 'accepted: ' . json_encode($r));
+        $t->same([2, 1], [$r['inserted'], $r['outside_period']], '04-14 and 04-01 saved, 05-02 is in no pay period');
+        $t->same(['Apr 1-15, 2026' => 2], $r['saved_in'], 'both went to the cut-off that holds their date');
         $t->same($before, Fixtures::payroll($S->periods[1])[$S->emp['ALMA REYES']]['net_pay'], 'cut-off 2 unchanged');
         $r = Fixtures::days($S->periods[0], [Fixtures::day('ALMA REYES', '2026-04-14', 8, 2, 0, 0)]);
         $t->same(true, $r['success'], 'the same day re-sent into its own period replaces itself');

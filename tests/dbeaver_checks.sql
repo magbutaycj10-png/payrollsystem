@@ -201,10 +201,12 @@ SELECT setting_key, setting_value, 'must be a number from 1 to 3' FROM settings
  WHERE setting_key = 'overtime_multiplier'
    AND (setting_value NOT REGEXP '^[0-9]+([.][0-9]+)?$' OR CAST(setting_value AS DECIMAL(14,2)) NOT BETWEEN 1 AND 3);
 
--- @check C32 | Pay lines in a pay period of another schedule than the one the employee is paid on now (their Pay Schedule was changed after that pay run, or the line is older than the schedules) | expect: review
+-- @check C32 | Pay lines in a pay period that does not take the employee's Pay Schedule: a monthly-paid employee's line in a cut-off that is not the month's last (it belongs in the last one), or a kinsenas employee in an older whole-month Monthly period | expect: review
 SELECT pp.period_label, pp.period_type AS period_schedule, e.employee_code, e.full_name, e.pay_schedule AS employee_schedule, p.net_pay, pp.status
   FROM payroll p JOIN payroll_periods pp ON pp.id = p.period_id JOIN employees e ON e.id = p.employee_id
- WHERE pp.period_type <> 'Weekly' AND pp.period_type <> e.pay_schedule
+ WHERE pp.period_type <> 'Weekly'
+   AND ((pp.period_type = 'Monthly' AND e.pay_schedule <> 'Monthly')
+     OR (pp.period_type = 'Semi-Monthly' AND e.pay_schedule = 'Monthly' AND pp.end_date <> LAST_DAY(pp.end_date)))
  ORDER BY pp.start_date, e.full_name;
 
 -- =====================================================================================================================

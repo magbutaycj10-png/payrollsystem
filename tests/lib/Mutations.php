@@ -88,8 +88,8 @@ final class Mutations
             'M57' => ['A day the timesheet marks OFF is deducted as absent',  $h, "    if (\$markedOff) return 'off';", "    if (\$markedOff) return 'absent';", '11', 'fixed'],
 
             // ---- the pay schedule and the contribution schedule belong to each employee (2026-10-24)
-            'M58' => ['A pay period takes every employee, whatever their pay schedule', $h, "\$onSchedule = fn(\$id) => isset(\$emps[\$id]) && employeeInPeriod(\$emps[\$id], \$ctx['period_type']);", "\$onSchedule = fn(\$id) => isset(\$emps[\$id]);", '16', 'fixed'],
-            'M59' => ['A Weekly period (older databases) no longer takes everybody',    $h, "return \$periodType === 'Weekly' || (\$emp['pay_schedule'] ?? 'Semi-Monthly') === \$periodType;", "return (\$emp['pay_schedule'] ?? 'Semi-Monthly') === \$periodType;", '03', 'fixed'],
+            'M58' => ['A pay period takes every employee, whatever their pay schedule', $h, "\$onSchedule = fn(\$id) => isset(\$emps[\$id]) && employeeInPeriod(\$emps[\$id], \$ctx['period_type'], !empty(\$ctx['monthly_here']));", "\$onSchedule = fn(\$id) => isset(\$emps[\$id]);", '16', 'fixed'],
+            'M59' => ['A Weekly period (older databases) no longer takes everybody',    $h, "if (\$periodType === 'Weekly') return true;", "if (false) return true;", '03', 'fixed'],
             'M60' => ['A Monthly period beside the cut-offs of the month is refused as an overlap', $h, "AND (? IS NULL OR period_type = ? OR period_type = 'Weekly' OR ? = 'Weekly')", "AND (? IS NULL OR 1 = 1 OR period_type = ? OR ? = 'Weekly')", '16', 'fixed'],
             'M61' => ['An upload does not bring the other schedule\'s open periods up to date', 'api/save-daily-attendance.php', "\$alsoRecomputed = \$otherSchedule ? recomputeParallelPeriods(\$db, \$period_id, ['role' => \$who['role'], 'scope' => array_map('strval', array_keys(\$otherSchedule))]) : [];", "\$alsoRecomputed = [];", '16', 'fixed'],
             'M69' => ['Every upload rewrites the other schedule\'s open periods, even for a file of this schedule\'s own employees', 'api/save-daily-attendance.php', "\$alsoRecomputed = \$otherSchedule ? recomputeParallelPeriods(\$db, \$period_id, ['role' => \$who['role'], 'scope' => array_map('strval', array_keys(\$otherSchedule))]) : [];", "\$alsoRecomputed = recomputeParallelPeriods(\$db, \$period_id, \$who);", '16', 'fixed'],
@@ -99,6 +99,7 @@ final class Mutations
             'M65' => ['SSS bracket table: the employee share is 4.5% of the credit', $h, "\$ee    = round(\$msc * \$s['ee_rate'], 2);", "\$ee    = round(\$msc * 0.045, 2);", '16', 'fixed'],
             'M66' => ['The first load gives everybody the old default instead of how they were last paid', $h, "\$last[(int)\$r['employee_id']] = \$r['period_type'];", "\$last = [];", '16', 'fixed'],
             'M67' => ['create-period still accepts a Weekly period',                     'api/create-period.php', "if (\$asked === 'Weekly') {", "if (false) {", '16', 'fixed'],
+            'M70' => ['A leave decided late does not reach the monthly-paid employee\'s open last cut-off (the 1st half is finalized)', $h, "WHERE p.status = 'Open' AND p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)", "WHERE 1 = 0 AND p.status = 'Open' AND p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)", '18', 'fixed'],
             'M68' => ['The tab of the Employees window does not hide the other tables (the marked-row data is wrong)', 'assets/js/employee.js', "tr.classList.toggle('brk-hit', pay > 0 && v >= lo && v < hi);", "tr.classList.toggle('brk-hit', pay > 0 && v >= lo);", '16', 'fixed'],
         ];
         // an entry without a sixth element applies to both versions of the application

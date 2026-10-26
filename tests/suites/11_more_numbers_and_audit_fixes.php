@@ -797,7 +797,8 @@ T::suite('11 · More numbers & the audit fixes', function () {
         $t->same(true, $f['json']['success'] ?? null, "finalize September: " . $f['body']);
         $history = Fixtures::payroll($sep)[$e];
         $t->contains('Pay schedule is now Semi-Monthly', qa_edit_employee($e, ['pay_schedule' => 'Semi-Monthly'])['body'], 'the page says what changed');
-        $t->same($history, Fixtures::payroll($sep)[$e], 'the finalized September line is exactly as it was');
+        /* pay_schedule on a pay line is read live from the employee; every stored figure must be untouched */
+        $t->same(array_diff_key($history, ['pay_schedule' => 1]), array_diff_key(Fixtures::payroll($sep)[$e], ['pay_schedule' => 1]), 'the finalized September line is exactly as it was');
 
         // this month so far: the 1st-15th cut-off through today (the 10th), the 7th OFF, the 6th approved leave - the 12th-15th are not in the file yet
         $oct  = Fixtures::period('Oct 1-15, 2026', '2026-10-01', '2026-10-15');

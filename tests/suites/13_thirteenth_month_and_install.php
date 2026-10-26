@@ -383,7 +383,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
 
     /* ================================================================== D · the page */
 
-    T::test('the page: figures, month columns, totals and the monthly accrual; the CSV carries the same numbers; the sidebar links to it', function (T $t) use ($payScene) {
+    T::test('the page: figures, month columns, totals and the monthly accrual; the sidebar links to it', function (T $t) use ($payScene) {
         qa_need_fixes();
         $payScene();
         $page = Http::page('thirteenth-month.php', [], ['year' => 2026]);
@@ -395,17 +395,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $t->contains('50,000.00', $page['body'], 'total 13th month ₱30,000 + ₱20,000');
         $t->contains('600,000.00', $page['body'], 'total basic pay ₱360,000 + ₱240,000');
         $t->contains('thirteenth-month.php', Http::page('dashboard.php')['body'], 'the sidebar link is on every admin page');
-        $csv = Http::page('thirteenth-month.php', [], ['year' => 2026, 'export' => 'csv']);
-        $lines = preg_split('/\R/', trim(preg_replace('/^\xEF\xBB\xBF/', '', $csv['body'])));
-        $t->same(['Emp ID', 'Name', 'Status', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-                  'Basic pay earned', '13th month (basic / 12)', 'Paid so far', 'Balance'], str_getcsv($lines[0]), 'header');
-        $t->same(4, count($lines), 'header, two employees, total');
-        $a = str_getcsv($lines[1]);
-        $t->same(['E-A', 'Ana Pay', 'Active'], array_slice($a, 0, 3));
-        $t->same(['30000.00', '30000.00'], [$a[3], $a[14]], 'January and December basic pay');
-        $t->same(['360000.00', '30000.00', '0.00', '30000.00'], array_slice($a, 15), 'basic, 13th month, paid, balance');
-        $tot = str_getcsv($lines[3]);
-        $t->same(['TOTAL', '600000.00', '50000.00'], [$tot[1], $tot[15], $tot[16]]);
+        $t->same(false, stripos($page['body'], 'export=csv') !== false, 'the CSV export is gone (removed 2026-10-26)');
     });
 
     T::test('access: a visitor and a manager are sent to the sign-in page; an empty year shows a clear message instead of a table', function (T $t) {

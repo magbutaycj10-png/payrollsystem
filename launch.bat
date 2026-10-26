@@ -12,6 +12,9 @@ if exist "%BASE%\secrets.bat" call "%BASE%\secrets.bat"
 set PHP=%BASE%\php\php.exe
 set INI=%BASE%\php\php.ini
 set ROOT=%BASE%\payroll2
+:: On the development PC the current application is in payroll2_std (payroll2 is the older layout, which must not touch the live
+:: database); in the GitHub copy there is only payroll2, so this line changes nothing there.
+if exist "%BASE%\payroll2_std\index.php" set ROOT=%BASE%\payroll2_std
 set PORT=8765
 
 :: If server is already running on the port, just open the browser

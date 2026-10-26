@@ -1911,10 +1911,23 @@ function decideLeave(PDO $db, int $id, string $action, string $note, ?array $sco
     } catch (PDOException $e) {
         $text .= ' The payroll could not be updated yet (Reference: ' . logAppError($e) . '); it will be on the next upload.';
     }
-    /* A finalized period is never changed behind the admin's back */
-    $st = $db->prepare("SELECT period_label FROM payroll_periods
-                         WHERE status <> 'Open' AND start_date <= ? AND end_date >= ?");
-    $st->execute([$lr['date_to'], $lr['date_from']]);
+    /* A finalized period is never changed behind the admin's back. A monthly-paid employee has a line only in the month's last
+       cut-off (or an older whole-month period): the finalized halves before it hold nothing of theirs, so only those can be locked. */
+    $st = $db->prepare("SELECT pay_schedule FROM employees WHERE employee_code = ?");
+    $st->execute([$lr['emp_id']]);
+    if ($st->fetchColumn() === 'Monthly') {
+        $st = $db->prepare("SELECT p.period_label FROM payroll_periods p
+                             WHERE p.status <> 'Open'
+                               AND ((p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)
+                                     AND LAST_DAY(p.start_date) >= ? AND DATE_FORMAT(p.start_date, '%Y-%m-01') <= ?)
+                                 OR (p.period_type = 'Monthly' AND p.start_date <= ? AND p.end_date >= ?))
+                             ORDER BY p.start_date");
+        $st->execute([$lr['date_from'], $lr['date_to'], $lr['date_to'], $lr['date_from']]);
+    } else {
+        $st = $db->prepare("SELECT period_label FROM payroll_periods
+                             WHERE status <> 'Open' AND start_date <= ? AND end_date >= ?");
+        $st->execute([$lr['date_to'], $lr['date_from']]);
+    }
     if ($locked = $st->fetchAll(PDO::FETCH_COLUMN)) {
         $text .= ' ' . implode(', ', $locked) . ' is finalized, so its payroll was not changed - '
                . 'unlock it in Payroll Processing and upload its attendance again to apply this decision.';
@@ -1937,6 +1950,19 @@ function recomputeEmployeeOpenPeriods(PDO $db, string $empId, string $from, stri
     foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
         $ids[(int)$id] = true;
         foreach (laterPeriodsInMonth($db, (int)$id) as $later) $ids[$later] = true;
+    }
+
+    /* A monthly-paid employee is paid for the WHOLE month in the month's last cut-off, so a decision about a day of an earlier half
+       changes that one line - even when the earlier half is finalized (it holds no line of theirs) and so is not looked at above. */
+    $st = $db->prepare("SELECT pay_schedule FROM employees WHERE employee_code = ?");
+    $st->execute([$empId]);
+    if ($st->fetchColumn() === 'Monthly') {
+        $st = $db->prepare("SELECT p.id FROM payroll_periods p
+                             WHERE p.status = 'Open' AND p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)
+                               AND LAST_DAY(p.start_date) >= ? AND DATE_FORMAT(p.start_date, '%Y-%m-01') <= ?
+                               AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.att_date BETWEEN p.start_date AND p.end_date)");
+        $st->execute([$from, $to]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) $ids[(int)$id] = true;
     }
     if (!$ids) return [];
 

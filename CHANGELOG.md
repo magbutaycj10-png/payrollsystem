@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-10-26 (later) - one set of cut-offs; monthly-paid employees are paid in the month's last cut-off; an overtime rate on each employee
+
+* **There is one set of pay periods: the kinsenas cut-offs (1st-15th and 16th-end).** A separate whole-month ("Monthly") pay period is no longer created or offered (`create-period.php` refuses it). Employees whose **Pay Schedule is Monthly** are paid **once, in the month's last cut-off, for the whole month**: their days from the 1st, their absences, SSS / PhilHealth / Pag-IBIG and tax in full, and the bonuses and deductions recorded against **either** half, all in that one pay line (marked *Monthly* on the payroll page; the payslip covers "Apr 1 - Apr 30"). Until the last cut-off holds days of theirs they are *waiting*: the days are saved, nothing is computed, and the upload / payroll / adjustments pages say so.
+* **Upload Attendance**: a file with a half month or the whole month can be uploaded into either cut-off. Every day goes to the cut-off that holds its date; the missing 16th-end cut-off is created; a day whose cut-off is finalized is left alone and reported.
+* **Older databases** that still hold a whole-month pay period keep working (the monthly-paid employees are paid there, never twice); the payroll page offers **Tidy up** to fold such a period into the cut-offs.
+* **Employees > Add / Edit** has an **Overtime Rate** (pesos per hour): blank = the company rate in Settings (now labelled *Company Overtime Rate*), 0 = no overtime pay, a number pays every overtime hour of that employee under either overtime method.
+* **13th Month Pay**: *Print sheet* asks for a branch and prints one page per branch; the CSV export is gone.
+* **Fix**: a leave request decided after the 1st half was already finalized did not change the monthly-paid employee's pay - their one line sits in the (open) last cut-off, which the decision did not look at. It now recomputes that line, and the message names the cut-off that is locked (the last one), not the 1st half, which holds no line of theirs.
+* **Launchers**: `launch.bat` / `launch-lan.bat` serve `payroll2_std` when that folder exists (the development PC). `payroll2` there is the older layout and must not run against the live database - it creates the old tables in it. The GitHub copy has only `payroll2`, so nothing changes there.
+* **DBeaver check C32** now lists a monthly-paid employee's line in a cut-off that is not the month's last, or a kinsenas employee in an older whole-month period (it used to flag every correct monthly-paid line).
+
+### Tests
+Suite 18 (12 tests) covers all of the above, with the late-leave case as test H; mutant M70 guards the fix (70 mutants). Suites 04, 11, 13, 15 and 16 were brought in line with the new design (days go to the cut-off that holds their date, no separate Monthly period, no 13th-month CSV, `overtime_rate` added by the application, a pay line's `pay_schedule` is read from the employee).
+
 ## 2026-10-26 - a real name and a drawn signature for the admin on every receipt; the bonus / deduction receipt is e-signed by the employee
 
 * **Settings > Authorised Signatory** (new card, own form): the admin types the **name** (and position) that prints under the signature and **draws the signature**. Nothing is saved unless the admin also types **their own password**; wrong passwords count with the sign-in attempts (5 in 15 minutes lock the form). Leave the pad empty to keep the signature on file. The two old boxes in *Company & Document Details* are gone (that form has no password); a line there shows the name and points to the new card.

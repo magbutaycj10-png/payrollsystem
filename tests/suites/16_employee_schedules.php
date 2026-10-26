@@ -119,7 +119,8 @@ T::suite('16 · Pay schedule and contribution schedule per employee', function (
         $r = qa_edit_employee($e, ['pay_schedule' => 'Monthly']);
         $t->contains('Pay schedule is now Monthly', $r['body'], 'the page says what changed');
         $t->same('Monthly', Fixtures::empRow($e)['pay_schedule']);
-        $t->same($history, Fixtures::payroll($a)[$e], 'the finalized cut-off 1 is exactly as it was');
+        /* pay_schedule on a pay line is read live from the employee; every stored figure must be untouched */
+        $t->same(array_diff_key($history, ['pay_schedule' => 1]), array_diff_key(Fixtures::payroll($a)[$e], ['pay_schedule' => 1]), 'the finalized cut-off 1 is exactly as it was');
         $t->same([], $lines($b), 'the open cut-off 2 no longer holds the employee');
         $t->same([$e], $lines($m), 'the open Monthly period now does, from the days already saved');
         $t->same(0, (int)getDB()->query("SELECT COUNT(*) FROM attendance_summary WHERE period_id = $b")->fetchColumn(), 'and its attendance summary row went with the pay line');
@@ -364,7 +365,7 @@ T::suite('16 · Pay schedule and contribution schedule per employee', function (
 
     /* ================================================================== F · Weekly is gone; overlaps are per schedule */
 
-    T::test('F - Weekly is no longer offered; two periods of the same schedule cannot overlap, periods of different schedules can; a missing type means the schedule most employees are on', function (T $t) {
+    T::test('F - Weekly is no longer offered; two periods cannot overlap; a separate Monthly period is refused; a missing type is Semi-Monthly', function (T $t) {
         Fixtures::reset();
         $make = fn(string $label, string $from, string $to, ?string $type) => Http::api('create-period.php', ['label' => $label, 'start' => $from, 'end' => $to] + ($type === null ? [] : ['type' => $type]));
         $db = getDB();
@@ -385,33 +386,39 @@ T::suite('16 · Pay schedule and contribution schedule per employee', function (
         $t->same(409, $inside['status'], 'overlapping dates, same schedule: ' . $inside['body']);
         $t->contains('These dates overlap Apr 1-15, 2026', (string)($inside['json']['error'] ?? ''));
         $m = $make('April 2026', '2026-04-01', '2026-04-30', 'Monthly');
-        $t->same(true, $m['json']['success'] ?? null, 'a Monthly period over the same days is no clash: ' . $m['body']);
-        $m2 = $make('Apr 20 - May 10', '2026-04-20', '2026-05-10', 'Monthly');
-        $t->same(409, $m2['status'], 'but two Monthly periods cannot overlap: ' . $m2['body']);
+        $t->same(400, $m['status'], 'a separate Monthly period is refused: monthly-paid staff are paid in the last cut-off: ' . $m['body']);
+        $t->contains('last cut-off', (string)($m['json']['error'] ?? ''));
         $b = $make('Apr 16-30, 2026', '2026-04-16', '2026-04-30', 'Semi-Monthly');
-        $t->same(true, $b['json']['success'] ?? null, 'the second cut-off fits beside the first and under the Monthly one: ' . $b['body']);
-        $t->same(3, $periods());
+        $t->same(true, $b['json']['success'] ?? null, 'the second cut-off fits beside the first: ' . $b['body']);
+        $t->same(2, $periods());
+        // an older database may still hold a whole-month Monthly period: it is no clash for a cut-off over the same days
+        $db->exec("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status) VALUES ('Legacy April', '2026-04-01', '2026-04-30', 'Monthly', 'Open')");
+        $legacy = $make('Apr 1-15 beside legacy', '2026-04-01', '2026-04-15', 'Semi-Monthly');
+        $t->same(409, $legacy['status'], 'the cut-off still clashes with the cut-off already there, not with the Monthly one: ' . $legacy['body']);
+        $t->contains('Apr 1-15, 2026', (string)($legacy['json']['error'] ?? ''), 'and it names the cut-off, not the Monthly period');
+        $db->exec("DELETE FROM payroll_periods WHERE period_label = 'Apr 1-15, 2026'");
+        $beside = $make('Apr 1-15 beside legacy', '2026-04-01', '2026-04-15', 'Semi-Monthly');
+        $t->same(true, $beside['json']['success'] ?? null, 'with the Monthly April present, a cut-off over the same days is no clash: ' . $beside['body']);
+        $db->exec("DELETE FROM payroll_periods WHERE period_label IN ('Legacy April', 'Apr 1-15 beside legacy')");
+        $t->same(1, $periods());
 
-        // a missing or unknown type: the schedule most employees are on
+        // a missing or unknown type: there is only one kind of pay period, whatever the employees' schedules are
         $x = $make('May 1-15', '2026-05-01', '2026-05-15', null);
-        $t->same('Semi-Monthly', $x['json']['type'] ?? null, 'nobody on the payroll: Semi-Monthly');
+        $t->same('Semi-Monthly', $x['json']['type'] ?? null, 'no type: Semi-Monthly');
         Fixtures::employee(['full_name' => 'Vote A', 'pay_schedule' => 'Monthly']);
         Fixtures::employee(['full_name' => 'Vote B', 'pay_schedule' => 'Monthly']);
         Fixtures::employee(['full_name' => 'Vote C', 'pay_schedule' => 'Semi-Monthly']);
-        $y = $make('June', '2026-06-01', '2026-06-30', null);
-        $t->same('Monthly', $y['json']['type'] ?? null, 'most employees Monthly: a period with no type is Monthly');
-        $z = $make('July', '2026-07-01', '2026-07-31', 'Fortnightly');
-        $t->same('Monthly', $z['json']['type'] ?? null, 'and so is one with a type nobody knows');
+        $y = $make('June 1-15', '2026-06-01', '2026-06-15', null);
+        $t->same('Semi-Monthly', $y['json']['type'] ?? null, 'even when most employees are Monthly');
+        $z = $make('July 1-15', '2026-07-01', '2026-07-15', 'Fortnightly');
+        $t->same('Semi-Monthly', $z['json']['type'] ?? null, 'and so is one with a type nobody knows');
 
         // the upload page
         $panel = Http::page('attendance-upload.php')['body'];
         $t->notContains('Weekly', $panel, 'the Upload Attendance page has no Weekly');
-        $t->contains('<option value="Monthly|0" selected>', $panel, 'a new period starts as Monthly: most employees are paid Monthly');
-        $t->contains('defaultSchedule: "Monthly"', $panel, 'and the schedule switch opens on Monthly');
-        $db->exec("UPDATE employees SET pay_schedule = 'Semi-Monthly'");
-        $panel = Http::page('attendance-upload.php')['body'];
-        $t->contains('<option value="Semi-Monthly|1" selected>', $panel, 'once most are Semi-Monthly: the first half is pre-selected');
-        $t->notContains('Weekly', $panel);
+        $t->contains('<option value="Semi-Monthly|1" selected>', $panel, 'a new period starts as the first half');
+        $t->notContains('Monthly|0', $panel, 'there is no separate whole-month option');
+
         $mgr = Http::page('manager/attendance-upload.php', [], [], qa16_manager())['body'];
         $t->notContains('Weekly', $mgr, 'nor has the manager\'s page');
     });
@@ -456,28 +463,26 @@ T::suite('16 · Pay schedule and contribution schedule per employee', function (
         $t->same(0, (int)getDB()->query("SELECT COUNT(*) FROM biometric_daily WHERE employee_id = (SELECT id FROM employees WHERE employee_code = '$k')")->fetchColumn(), 'and removed the kinsenas employee\'s three');
     });
 
-    T::test('G - the manager\'s manual entry goes to the open pay period of the employee\'s own schedule (a Monthly run and a cut-off can hold the same day)', function (T $t) {
+    T::test('G - the manager manual entry goes to the open cut-off that holds the day; a monthly-paid employee is paid in the last cut-off of the month', function (T $t) {
         Fixtures::reset();
         $m = Fixtures::employee(['full_name' => 'Man Ual', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'pay_schedule' => 'Monthly']);
         $k = Fixtures::employee(['full_name' => 'Kin Ual', 'salary_type' => 'daily', 'base_salary' => '500.00']);
-        $semi = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        $mon  = Fixtures::period('April 2026', '2026-04-01', '2026-04-30', 'Monthly');
+        $first  = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+        $second = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
         $mgr  = qa16_manager();
-        $enter = fn(string $emp) => Http::page('manager/manual-attendance.php', ['emp_id' => $emp, 'att_date' => '2026-04-08', 'day_status' => 'worked', 'hours_worked' => '8', 'overtime_hours' => '0', 'late_hours' => '0'], [], $mgr);
+        $enter = fn(string $emp, string $date = '2026-04-08') => Http::page('manager/manual-attendance.php', ['emp_id' => $emp, 'att_date' => $date, 'day_status' => 'worked', 'hours_worked' => '8', 'overtime_hours' => '0', 'late_hours' => '0'], [], $mgr);
         $r = $enter($m);
-        $t->contains('in April 2026', $r['body'], 'the Monthly employee\'s day goes to the Monthly period: ' . substr(strip_tags($r['body']), 0, 200));
-        $t->notContains('in Apr 1-15, 2026', $r['body']);
+        $t->contains('in Apr 1-15, 2026', $r['body'], 'the Monthly employee day goes to the cut-off that holds it: ' . substr(strip_tags($r['body']), 0, 200));
+        $t->contains('is paid monthly', $r['body'], 'and the page says the pay is computed in the last cut-off');
         $r = $enter($k);
-        $t->contains('in Apr 1-15, 2026', $r['body'], 'the kinsenas employee\'s to the cut-off');
-        $t->same([$m], array_keys(Fixtures::payroll($mon)), 'the Monthly period holds the Monthly employee');
-        $t->same([$k], array_keys(Fixtures::payroll($semi)), 'the cut-off holds the kinsenas one');
-        // a Monthly employee with only a cut-off open for the day
-        Fixtures::reset();
-        $m = Fixtures::employee(['full_name' => 'Man Ual', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'pay_schedule' => 'Monthly']);
-        Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
-        $r = Http::page('manager/manual-attendance.php', ['emp_id' => $m, 'att_date' => '2026-04-08', 'day_status' => 'worked', 'hours_worked' => '8', 'overtime_hours' => '0', 'late_hours' => '0'], [], qa16_manager());
-        $t->contains('No open Monthly pay period covers', $r['body'], 'no open period of their schedule: ' . substr(strip_tags($r['body']), 0, 200));
-        $t->same(0, (int)getDB()->query('SELECT COUNT(*) FROM biometric_daily')->fetchColumn(), 'nothing is saved');
+        $t->contains('in Apr 1-15, 2026', $r['body'], 'the kinsenas employee too');
+        $t->same([$k], array_keys(Fixtures::payroll($first)), 'the 1st cut-off holds only the kinsenas employee line');
+        $r = $enter($m, '2026-04-20');
+        $t->contains('in Apr 16-30, 2026', $r['body'], 'a day in the 2nd half goes to the 2nd cut-off');
+        $t->same(true, isset(Fixtures::payroll($second)[$m]), 'and the month pay line is there, in the last cut-off');
+        // a day no open pay period holds
+        $r = $enter($m, '2026-05-08');
+        $t->contains('No open pay period covers', $r['body'], 'no period: ' . substr(strip_tags($r['body']), 0, 200));
     });
 
     /* ================================================================== H · the first load gives everybody what the old Settings said */

@@ -48,6 +48,18 @@ function qa18_period(string $start): ?array
     return $st->fetch() ?: null;
 }
 
+/** a person's full days from..to without the given dates (the days the file leaves out) */
+function qa18_daysExcept(string $name, string $from, string $to, array $skip = []): array
+{
+    return array_values(array_filter(Fixtures::fullDays($name, $from, $to), fn($r) => !in_array($r['att_date'], $skip, true)));
+}
+
+/** the sentence the Leave Requests page answers a decision with */
+function qa18_leaveMessage(array $r): string
+{
+    return preg_match('/Leave request (Approved|Rejected)\.[^<]*/', $r['body'], $m) ? $m[0] : '(no message)';
+}
+
 T::suite('18 · One set of cut-offs, monthly-paid employees, overtime rate per employee', function () {
     $lines  = fn(int $pid): array => array_keys(Fixtures::payroll($pid));
     $sorted = function (array $a): array { sort($a); return $a; };
@@ -445,5 +457,39 @@ T::suite('18 · One set of cut-offs, monthly-paid employees, overtime rate per e
         $r = Http::api('update-payroll.php', ['action' => 'tidy_monthly', 'period_id' => $p2]);
         $t->same(['June 2026'], array_keys($r['json']['result']['kept'] ?? []), 'finalized: kept');
         $t->same(1, (int)getDB()->query("SELECT COUNT(*) FROM payroll_periods WHERE period_type = 'Monthly'")->fetchColumn());
+    });
+
+    T::test('H - a leave decided after the 1st half was finalized still changes the monthly-paid employee one line (in the open last cut-off); the message names the cut-off that is locked', function (T $t) {
+        Fixtures::reset();
+        $mona = Fixtures::employee(['full_name' => 'Mona Monthly', 'salary_type' => 'monthly', 'base_salary' => '26000.00', 'pay_schedule' => 'Monthly']);
+        $kin  = Fixtures::employee(['full_name' => 'Kin Senas', 'salary_type' => 'monthly', 'base_salary' => '26000.00']);
+        $p1 = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+        Fixtures::days($p1, array_merge(qa18_daysExcept('Mona Monthly', '2026-04-01', '2026-04-30', ['2026-04-08', '2026-04-22']),
+                                        qa18_daysExcept('Kin Senas', '2026-04-01', '2026-04-30', ['2026-04-08', '2026-04-22'])));
+        $p2 = (int)qa18_period('2026-04-16')['id'];
+        $t->money('2000.00', Fixtures::payroll($p2)[$mona]['absence_deduction'], 'Mona is absent on the 8th (1st half) and the 22nd: two days in her one line');
+        $t->money('1000.00', Fixtures::payroll($p1)[$kin]['absence_deduction'], 'Kin is absent on the 8th');
+        $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $p1]);
+        $t->same(true, $f['json']['success'] ?? null, $f['body']);
+
+        $lm = Fixtures::leave($mona, '2026-04-08', '2026-04-08', 'Pending');
+        $lk = Fixtures::leave($kin, '2026-04-08', '2026-04-08', 'Pending');
+        $msg = qa18_leaveMessage(Http::page('leave-requests.php', ['leave_id' => $lm, 'action' => 'approve', 'review_note' => 'ok']));
+        $t->money('1000.00', Fixtures::payroll($p2)[$mona]['absence_deduction'], 'approved: only the 22nd is absent now. ' . $msg);
+        $t->contains('Payroll updated for April 16', $msg, 'the message names the cut-off that was updated');
+        $t->notContains('is finalized', $msg, 'and does not send the admin to unlock the 1st half, which holds no line of hers');
+        $msg = qa18_leaveMessage(Http::page('leave-requests.php', ['leave_id' => $lk, 'action' => 'approve', 'review_note' => 'ok']));
+        $t->money('1000.00', Fixtures::payroll($p1)[$kin]['absence_deduction'], 'the finalized 1st half of Kin is not changed. ' . $msg);
+        $t->contains('Apr 1-15, 2026 is finalized', $msg, 'and Kin is told so');
+
+        Http::page('leave-requests.php', ['leave_id' => $lm, 'action' => 'reject', 'review_note' => 'no']);
+        $t->money('2000.00', Fixtures::payroll($p2)[$mona]['absence_deduction'], 'rejected: the 8th is absent again');
+
+        $f = Http::api('update-payroll.php', ['action' => 'finalize', 'period_id' => $p2]);
+        $t->same(true, $f['json']['success'] ?? null, $f['body']);
+        $msg = qa18_leaveMessage(Http::page('leave-requests.php', ['leave_id' => $lm, 'action' => 'approve', 'review_note' => 'late']));
+        $t->money('2000.00', Fixtures::payroll($p2)[$mona]['absence_deduction'], 'the last cut-off is finalized too: nothing changes. ' . $msg);
+        $t->contains('April 16', $msg, 'and the message names that cut-off');
+        $t->notContains('Apr 1-15, 2026 is finalized', $msg);
     });
 });
