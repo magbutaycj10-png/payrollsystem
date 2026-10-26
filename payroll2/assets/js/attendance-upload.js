@@ -166,7 +166,19 @@ function selectedPeriod() {
     const o = sel && sel.options[sel.selectedIndex];
     if (!o || !o.value) return null;
     return { id: o.value, label: o.text.replace(/\s*\[.*\]\s*$/, ''), start: o.dataset.start, end: o.dataset.end,
-             status: o.dataset.status, typeLabel: o.dataset.typeLabel || o.dataset.type };
+             status: o.dataset.status, typeLabel: o.dataset.typeLabel || o.dataset.type, type: o.dataset.type };
+}
+
+/*
+ * The days a pay period can take from one file. A kinsenas cut-off takes the whole month(s) it sits in: a day goes to the cut-off
+ * that holds its date (the server creates a missing half). An older whole-month / weekly period keeps to its own dates.
+ */
+function periodBounds(o) {
+    const start = o.start, end = o.end;
+    if (!o.type || o.type !== 'Semi-Monthly') return { from: start, to: end, wholeMonth: false };
+    const [ey, em] = end.split('-').map(Number);
+    const last = new Date(ey, em, 0).getDate();
+    return { from: start.slice(0, 8) + '01', to: end.slice(0, 8) + String(last).padStart(2, '0'), wholeMonth: true };
 }
 
 function showPeriodMeta() {
@@ -190,20 +202,18 @@ function fillPeriodDates() {
     const [y, m] = monEl.value.split('-').map(Number);
     const last = new Date(y, m, 0).getDate();
     const pad  = n => String(n).padStart(2, '0');
-    const d1   = type === 'Semi-Monthly' && half === '2' ? 16 : 1;
-    const d2   = type === 'Semi-Monthly' && half === '1' ? 15 : last;
+    const d1   = half === '2' ? 16 : 1;
+    const d2   = half === '1' ? 15 : last;
     document.getElementById('newPeriodStart').value = `${y}-${pad(m)}-${pad(d1)}`;
     document.getElementById('newPeriodEnd').value   = `${y}-${pad(m)}-${pad(d2)}`;
-    document.getElementById('newPeriodLabel').value = type === 'Monthly'
-        ? `${MONTHS[m - 1]} ${y}`
-        : `${MONTHS[m - 1]} ${d1}–${d2}, ${y}`;
+    document.getElementById('newPeriodLabel').value = `${MONTHS[m - 1]} ${d1}–${d2}, ${y}`;
 }
 
 async function createPeriod() {
     const label = document.getElementById('newPeriodLabel').value.trim();
     const start = document.getElementById('newPeriodStart').value;
     const end   = document.getElementById('newPeriodEnd').value;
-    const type  = (document.getElementById('newPeriodType')?.value || '').split('|')[0];
+    const type  = 'Semi-Monthly';
 
     if (!label || !start || !end) { alert('Please fill in the label, start date, and end date.'); return; }
 
@@ -530,14 +540,17 @@ function fileDates() {
  */
 function checkDateRange() {
     const warn = document.getElementById('rangeWarn');
+    const info = document.getElementById('rangeInfo');
     warn.hidden = true;
+    if (info) info.hidden = true;
     const dates = fileDates();
     if (!dates.length) return;
 
     const sel = document.getElementById('periodSelect');
     let p = selectedPeriod();
-    if (!p || dates.every(d => d < p.start || d > p.end)) {
-        const fits = sel ? [...sel.options].find(o => o.value && dates.every(d => d >= o.dataset.start && d <= o.dataset.end)) : null;
+    const bounds = o => periodBounds({ start: o.dataset.start, end: o.dataset.end, type: o.dataset.type });
+    if (!p || dates.every(d => d < periodBounds(p).from || d > periodBounds(p).to)) {
+        const fits = sel ? [...sel.options].find(o => o.value && !o.disabled && dates.every(d => d >= bounds(o).from && d <= bounds(o).to)) : null;
         if (fits) {
             usePeriod(fits.value);      /* re-runs this check against the new period */
             showStatus(`Pay period set to “${fits.text.replace(/\s*\[.*\]\s*$/, '')}”, which holds the file's dates.`, 'info');
@@ -550,18 +563,29 @@ function checkDateRange() {
         warn.hidden = false;
         return;
     }
-    const outside = dates.filter(d => d < p.start || d > p.end);
+    const pb = periodBounds(p);
+    const outside = dates.filter(d => d < pb.from || d > pb.to);
+    const sorted = [...dates].sort();
+    /* A file for the whole month (or just the other half), saved from either cut-off: say where its days will go */
+    const inOwn = dates.filter(d => d >= p.start && d <= p.end).length;
+    if (pb.wholeMonth && info && inOwn < dates.length - outside.length) {
+        const other = dates.length - outside.length - inOwn;
+        info.innerHTML = `<div><b>${other} of the ${dates.length} day record(s) belong to the other half of the month.</b>
+            Each day is saved in the cut-off that holds its date (a missing cut-off is created, a finalized one is left alone).
+            Employees paid once a month get their pay for the whole month in the 16–end cut-off.</div>`;
+        info.hidden = false;
+    }
     if (!outside.length) return;
 
-    const sorted = [...dates].sort();
-    let html = `<b>${outside.length} of ${dates.length} day record(s) fall outside ${esc(p.label)}</b>
-                (${esc(fmtDate(p.start))} – ${esc(fmtDate(p.end))}) and will be skipped.
+    let html = `<b>${outside.length} of ${dates.length} day record(s) fall outside ${esc(pb.wholeMonth ? 'the month of ' + p.label : p.label)}</b>
+                (${esc(fmtDate(pb.from))} – ${esc(fmtDate(pb.to))}) and will be skipped.
                 The file covers ${esc(fmtDate(sorted[0]))} – ${esc(fmtDate(sorted[sorted.length - 1]))}.`;
     /* Suggest the pay period that holds most of the file's days */
     let best = null, bestN = dates.length - outside.length;
     [...sel.options].forEach(o => {
         if (!o.value || o.value === p.id) return;
-        const n = dates.filter(d => d >= o.dataset.start && d <= o.dataset.end).length;
+        const ob = bounds(o);
+        const n = dates.filter(d => d >= ob.from && d <= ob.to).length;
         if (n > bestN) { best = o; bestN = n; }
     });
     if (best) {
@@ -860,12 +884,9 @@ function downloadDailyTemplate() {
    Start-up
    ============================================================ */
 (function init() {
-    let saved = null;
-    try { saved = localStorage.getItem('uploadSchedule'); } catch (e) {}
-    if (!['Semi-Monthly', 'Monthly', 'All'].includes(saved)) saved = null;     /* e.g. "Weekly", remembered from before it was removed */
     /* ?period=ID (from Payroll Processing) opens that period directly */
     const want = new URLSearchParams(location.search).get('period');
-    setSchedule(want ? 'All' : (saved || UPLOAD_CFG.defaultSchedule));
+    setSchedule('All');          /* one set of pay periods: nothing to filter */
     if (want) {
         const sel = document.getElementById('periodSelect');
         if ([...sel.options].some(o => o.value === want)) { sel.value = want; showPeriodMeta(); }

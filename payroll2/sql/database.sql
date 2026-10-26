@@ -81,6 +81,8 @@ CREATE TABLE IF NOT EXISTS employees (
   pay_schedule       ENUM('Semi-Monthly','Monthly') NOT NULL DEFAULT 'Semi-Monthly',
   base_salary        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   hours_per_day      DECIMAL(4,2)  NULL DEFAULT NULL,
+  -- Pesos paid per overtime hour for THIS employee; NULL = the company rate in Settings
+  overtime_rate      DECIMAL(10,2) NULL DEFAULT NULL,
   rest_days          VARCHAR(20)   NOT NULL DEFAULT '7',
   -- The employee's own MONTHLY amounts, typed by the admin and deducted as typed (0 = none)
   sss_amount         DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -306,6 +308,34 @@ CREATE TABLE IF NOT EXISTS payslip_signatures (
   KEY idx_payslip_signatures_signed_by (signed_by_user),
   CONSTRAINT fk_payslip_signatures_payroll_id     FOREIGN KEY (payroll_id)     REFERENCES payroll (id) ON UPDATE CASCADE ON DELETE CASCADE,
   CONSTRAINT fk_payslip_signatures_signed_by_user FOREIGN KEY (signed_by_user) REFERENCES users (id)   ON UPDATE CASCADE ON DELETE SET NULL
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The employee's signature on a bonus / deduction receipt: one per bonus_deductions row, stamped with the amount it acknowledges
+-- (a signature for an amount that has since changed no longer counts), like payslip_signatures per pay line.
+CREATE TABLE IF NOT EXISTS adjustment_signatures (
+  id             INT           NOT NULL AUTO_INCREMENT,
+  adjustment_id  INT           NOT NULL,
+  signature_data LONGTEXT      NOT NULL,
+  amount_signed  DECIMAL(12,2) NULL DEFAULT NULL,
+  signed_by_user INT           NULL,
+  signed_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_adjustment_signatures_adjustment (adjustment_id),
+  KEY idx_adjustment_signatures_signed_by (signed_by_user),
+  CONSTRAINT fk_adjustment_signatures_adjustment_id  FOREIGN KEY (adjustment_id)  REFERENCES bonus_deductions (id) ON UPDATE CASCADE ON DELETE CASCADE,
+  CONSTRAINT fk_adjustment_signatures_signed_by_user FOREIGN KEY (signed_by_user) REFERENCES users (id)           ON UPDATE CASCADE ON DELETE SET NULL
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The admin's drawn signature (Settings > Authorised Signatory): a single row, id 1. Its name and position are settings rows
+-- (bir_signatory_name, bir_signatory_position). Printed on a receipt once the receipt's pay period is finalized.
+CREATE TABLE IF NOT EXISTS admin_signature (
+  id             INT       NOT NULL,
+  signature_data LONGTEXT  NOT NULL,
+  updated_by     INT       NULL,
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_admin_signature_updated_by (updated_by),
+  CONSTRAINT fk_admin_signature_updated_by FOREIGN KEY (updated_by) REFERENCES users (id) ON UPDATE CASCADE ON DELETE SET NULL
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------------------------------------------------

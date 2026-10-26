@@ -21,6 +21,14 @@ if ($period_id) {
 }
 
 $isOpen = $curPeriod && $curPeriod['status'] === 'Open';
+$ctx    = $curPeriod ? payContext($db, $period_id) : null;
+/* Monthly-paid employees: paid once, for the whole month, in the month's last cut-off (this one when monthly_here) */
+$wholeMonth = [];
+if ($ctx && !empty($ctx['monthly_here'])) {
+    $wholeMonth = array_flip($db->query("SELECT employee_code FROM employees WHERE pay_schedule = 'Monthly'")->fetchAll(PDO::FETCH_COLUMN));
+}
+$waiting = $curPeriod ? monthlyWaiting($db, $curPeriod) : [];
+$monthFinal = $curPeriod ? monthFinalPeriod($db, $curPeriod['start_date']) : null;
 
 /* Adjustments recorded against this period (step 3 feeds this). */
 $adjBonus = $adjDed = 0.0;
@@ -34,13 +42,31 @@ if ($period_id) {
         $adjCount += (int)$r['c'];
     }
 }
+/* What the history says the pay lines of THIS period carry. A monthly-paid employee's entries do not land in the 1st half (they have
+   no line there) - they land in the month's last cut-off, together with the entries of both halves. */
+$landBonus = $adjBonus;
+$landDed   = $adjDed;
+if ($ctx && $ctx['period_type'] === 'Semi-Monthly') {
+    $st = $db->prepare("SELECT h.type, SUM(h.amount) AS s FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                         WHERE h.period_id = ? AND e.pay_schedule = 'Monthly' GROUP BY h.type");
+    $st->execute([$period_id]);
+    foreach ($st->fetchAll() as $r) { if ($r['type'] === 'Bonus') $landBonus -= (float)$r['s']; else $landDed -= (float)$r['s']; }
+    if (!empty($ctx['monthly_here'])) {
+        $st = $db->prepare("SELECT h.type, SUM(h.amount) AS s FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
+                              JOIN payroll p ON p.employee_id = h.employee_id AND p.period_id = ?
+                              JOIN payroll_periods hp ON hp.id = h.period_id
+                             WHERE e.pay_schedule = 'Monthly' AND hp.period_type <> 'Monthly' AND hp.start_date BETWEEN ? AND ? GROUP BY h.type");
+        $st->execute([$period_id, $ctx['month_start'], date('Y-m-t', strtotime($ctx['month_start']))]);
+        foreach ($st->fetchAll() as $r) { if ($r['type'] === 'Bonus') $landBonus += (float)$r['s']; else $landDed += (float)$r['s']; }
+    }
+}
 
 /* What the payroll rows themselves carry. These should equal the history
    totals; a gap means money was changed outside the adjustments page. */
 $payBonus = array_sum(array_column($payrollRows, 'bonus'));
 $payDed   = array_sum(array_column($payrollRows, 'other_deductions'));
 $payNet   = array_sum(array_column($payrollRows, 'net_pay'));
-$drift    = abs($payBonus - $adjBonus) > 0.01 || abs($payDed - $adjDed) > 0.01;
+$drift    = abs($payBonus - $landBonus) > 0.01 || abs($payDed - $landDed) > 0.01;
 
 /* Revision state: has this period been finalized, re-opened and corrected? */
 $rev = periodRevisionInfo($period_id);
@@ -59,7 +85,6 @@ $stale  = [];     /* lines whose contributions / tax no longer settle the month 
 $hasDays = false; /* the period holds day-by-day records, so it can be recomputed from them */
 $negNet = array_values(array_filter($payrollRows, fn($r) => (float)$r['net_pay'] < 0));
 if ($curPeriod) {
-    $ctx = payContext($db, $period_id);
     $stale = $payrollRows ? settlementDrift($db, $period_id, $ctx) : [];
     /* An OPEN period always reflects today's rates and Settings, so any difference is worth a Recompute. A FINALIZED one is history:
        it is only out of date when an earlier cut-off of its month was corrected after it was finalized - a later raise or Settings
@@ -78,10 +103,12 @@ if ($curPeriod) {
     $print = $q("SELECT COUNT(*) n FROM print_logs WHERE period_id = ?");
     try { $sig = $q("SELECT COUNT(*) n FROM payslip_signatures ps JOIN payroll p ON p.id = ps.payroll_id WHERE p.period_id = ?"); } catch (PDOException $e) { $sig = ['n' => 0]; }
 
+    /* days with hours; a monthly-paid employee's line is the whole month, so their days run from the 1st */
     $st = $db->prepare("SELECT e.employee_code AS emp_id, COUNT(DISTINCT b.att_date) d FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
-                         JOIN payroll_periods pp ON b.att_date BETWEEN pp.start_date AND pp.end_date
+                         JOIN payroll_periods pp ON b.att_date <= pp.end_date
+                          AND b.att_date >= IF(e.pay_schedule = 'Monthly' AND ? = 1, ?, pp.start_date)
                          WHERE pp.id = ? AND b.hours_worked > 0 GROUP BY e.id, e.employee_code");
-    $st->execute([$period_id]);
+    $st->execute([empty($ctx['monthly_here']) ? 0 : 1, $ctx['month_start'], $period_id]);
     foreach ($st->fetchAll() as $r) $daysWorked[$r['emp_id']] = (int)$r['d'];
 
     $nAtt = (int)$att['n'];
@@ -241,7 +268,7 @@ if ($period_id) {
                     $groups = [];
                     foreach ($periods as $p) $groups[periodType($p['period_type'] ?? null)][] = $p;
                     foreach (['Semi-Monthly', 'Monthly', 'Weekly'] as $g): if (empty($groups[$g])) continue; ?>
-                    <optgroup label="<?= $g ?>">
+                    <optgroup label="<?= $g === 'Monthly' ? 'Whole month (older, no longer created)' : ($g === 'Semi-Monthly' ? 'Cut-offs (1st-15th, 16th-end)' : $g) ?>">
                         <?php foreach ($groups[$g] as $p): ?>
                         <option value="<?= $p['id'] ?>" <?= $p['id'] == $period_id ? 'selected' : '' ?>>
                             <?= htmlspecialchars($p['period_label']) ?> [<?= htmlspecialchars(periodTypeLabel($p)) ?> · <?= $p['status'] ?>]
@@ -284,6 +311,18 @@ if ($period_id) {
 
     <div id="alertMsg" class="alert" style="display:none;"></div>
 
+    <?php $oldMonthly = array_filter($periods, fn($p) => periodType($p['period_type'] ?? null) === 'Monthly'); if ($oldMonthly): ?>
+    <!-- Whole-month periods of an older version still sit beside the cut-offs: the same month appears twice -->
+    <div class="alert alert-warn">
+        <span>
+            <strong><?= count($oldMonthly) ?> older whole-month pay period(s) are still in the list</strong>
+            (<?= htmlspecialchars(implode(', ', array_slice(array_column($oldMonthly, 'period_label'), 0, 4))) ?><?= count($oldMonthly) > 4 ? ', …' : '' ?>),
+            so a month can show twice. Employees paid monthly are now paid in the month's last cut-off. Tidy them up to fold them into the cut-offs.
+        </span>
+        <button class="btn btn-ghost btn-sm" type="button" onclick="tidyMonthlyPeriods()">Tidy up</button>
+    </div>
+    <?php endif; ?>
+
     <?php if ($curPeriod): ?>
         <?php if ($isOpen): ?>
             <div class="alert alert-info">
@@ -311,6 +350,31 @@ if ($period_id) {
                 </span>
                 <a href="reports.php?period=<?= $period_id ?>">Issue payslips</a>
             </div>
+        <?php endif; ?>
+
+        <?php if ($wholeMonth): ?>
+        <!-- The month's last cut-off pays the monthly-paid employees for the whole month -->
+        <div class="alert alert-info">
+            <span>
+                <strong>This is the last cut-off of <?= date('F Y', strtotime($curPeriod['start_date'])) ?>.</strong>
+                Employees paid once a month are paid here, for the <strong>whole month</strong> (<?= date('M j', strtotime($ctx['month_start'])) ?> – <?= date('M j', strtotime($curPeriod['end_date'])) ?>),
+                with the bonuses and deductions of both halves. They are marked <span class="rev-tag" style="background:#e0e7ff;color:#3730a3;">Monthly</span> below.
+            </span>
+        </div>
+        <?php endif; ?>
+
+        <?php if ($waiting): ?>
+        <!-- Monthly-paid employees whose days are saved but whose pay waits for the month's last cut-off -->
+        <div class="alert alert-warn">
+            <span>
+                <strong><?= count($waiting) ?> monthly-paid employee(s) are not in the payroll yet</strong> -
+                <?= htmlspecialchars(implode(', ', array_slice(array_column($waiting, 'full_name'), 0, 6))) ?><?= count($waiting) > 6 ? ', …' : '' ?>.
+                They are paid once a month, for the whole month, and
+                <?= $monthFinal ? htmlspecialchars($monthFinal['period_label']) . ' holds no days of theirs yet' : 'the 16th-end cut-off of the month does not exist yet' ?>.
+                Upload the 2nd half (or a whole-month file) and their pay is computed, with the bonuses and deductions of both halves.
+            </span>
+            <a href="attendance-upload.php<?= $monthFinal ? '?period=' . (int)$monthFinal['id'] : '' ?>">Upload attendance</a>
+        </div>
         <?php endif; ?>
 
         <?php if ($stale): ?>
@@ -381,7 +445,7 @@ if ($period_id) {
             <span>
                 The payroll columns hold &#8369;<?= number_format($payBonus, 2) ?> bonus /
                 &#8369;<?= number_format($payDed, 2) ?> deductions, but only
-                &#8369;<?= number_format($adjBonus, 2) ?> / &#8369;<?= number_format($adjDed, 2) ?>
+                &#8369;<?= number_format($landBonus, 2) ?> / &#8369;<?= number_format($landDed, 2) ?>
                 is accounted for in the adjustment history. The difference was entered outside this page.
             </span>
             <a href="history.php?period_id=<?= $period_id ?>">Review history</a>
@@ -424,7 +488,11 @@ if ($period_id) {
                     <?php $isRev = !empty($r['revised_after_finalize']); ?>
                     <tr class="<?= $isRev ? 'is-revised' : '' ?>">
                         <td><?= htmlspecialchars($r['emp_id']) ?></td>
-                        <td><?= htmlspecialchars($r['emp_name']) ?></td>
+                        <td><?= htmlspecialchars($r['emp_name']) ?>
+                            <?php if (isset($wholeMonth[$r['emp_id']])): ?>
+                                <span class="rev-tag" style="background:#e0e7ff;color:#3730a3;"
+                                      title="Paid once a month: this line is the whole month, <?= date('M j', strtotime($ctx['month_start'])) ?> – <?= date('M j', strtotime($curPeriod['end_date'])) ?>">Monthly</span>
+                            <?php endif; ?></td>
                         <td><?= $daysWorked[$r['emp_id']] ?? '-' ?></td>
                         <td style="white-space:nowrap;">
                             <?php $ab = (float)($r['absent_days'] ?? 0); $lv = (float)($r['leave_days'] ?? 0); $of = (float)($r['days_off'] ?? 0);

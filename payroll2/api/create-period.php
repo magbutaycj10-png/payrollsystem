@@ -1,7 +1,9 @@
 <?php
 // api/create-period.php
 // Creates a payroll period. Admin only - managers upload into existing periods.
-//   { label, start, end, type }   type: Monthly | Semi-Monthly   (Weekly is no longer offered)
+//   { label, start, end, type }   type: Semi-Monthly (the kinsenas cut-offs: 1st-15th and 16th-end)
+//   There is ONE set of pay periods. Employees paid once a month are paid in the month's last cut-off, for the whole month, so a
+//   separate whole-month ("Monthly") period is no longer created (Weekly neither).
 require '../includes/helpers.php';
 session_start();
 if (empty($_SESSION['logged_in'])) { jsonResponse(['error'=>'Unauthorized'],401); }
@@ -12,7 +14,11 @@ $start = $body['start'] ?? '';
 $end   = $body['end']   ?? '';
 $asked = $body['type'] ?? null;
 if ($asked === 'Weekly') {
-    jsonResponse(['error' => 'Weekly pay periods are no longer offered. Choose Semi-Monthly (kinsenas) or Monthly.'], 400);
+    jsonResponse(['error' => 'Weekly pay periods are no longer offered. Create the kinsenas cut-offs (1st-15th and 16th-end).'], 400);
+}
+if ($asked === 'Monthly') {
+    jsonResponse(['error' => 'A separate whole-month pay period is no longer needed: employees paid monthly are paid in the month\'s last cut-off (16th-end), '
+                           . 'for the whole month. Create the 1st-15th and 16th-end cut-offs instead.'], 400);
 }
 
 if (!$label || !$start || !$end) {
@@ -25,8 +31,7 @@ if (strtotime($end) < strtotime($start)) {
 try {
     $db = getDB();
     applySchemaPatches();   // period_type column on older databases
-    /* A missing or unknown type -> the schedule most employees are on, so old callers keep working */
-    $type = in_array($asked, PAY_SCHEDULES, true) ? $asked : defaultPaySchedule($db);
+    $type = 'Semi-Monthly';     /* the only kind of pay period there is now */
     // Two periods of the same schedule covering the same days would pay those days twice (periods of different schedules hold different employees)
     if ($clash = overlappingPeriod($db, $start, $end, 0, $type)) {
         $kind = periodTypeLabel($clash);

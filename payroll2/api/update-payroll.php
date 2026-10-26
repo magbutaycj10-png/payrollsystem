@@ -116,6 +116,18 @@ try {
     }
 
     /* ---------------------------------------------------------------
+     * Tidy up - the older whole-month periods that show a month twice beside the cut-offs (retireMonthlyPeriods)
+     * ------------------------------------------------------------- */
+    if ($action === 'tidy_monthly') {
+        $res = retireMonthlyPeriods($db);
+        $parts = [];
+        if ($res['removed']) $parts[] = 'removed ' . implode(', ', $res['removed']) . ' (empty)';
+        if ($res['merged'])  $parts[] = 'folded ' . implode(', ', $res['merged']) . ' into the cut-offs';
+        foreach ($res['kept'] as $label => $why) $parts[] = "kept $label ($why)";
+        jsonResponse(['success' => true, 'result' => $res, 'message' => $parts ? ucfirst(implode('; ', $parts)) . '.' : 'Nothing to tidy up.']);
+    }
+
+    /* ---------------------------------------------------------------
      * Recompute - rebuild an OPEN period (and the open cut-offs after it in the same month) from the days
      * saved for it, with the current rules and Settings. Used after unlocking a period to correct it, or after
      * an earlier cut-off changed. A period built from a totals file has no saved days: upload it again instead.

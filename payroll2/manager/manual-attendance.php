@@ -39,10 +39,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $emp = null;
     foreach ($employees as $e) { if ($e['emp_id'] === $emp_id) $emp = $e; }
 
-    /* The Open period that holds this day - of the schedule the employee is paid on (a Monthly run and the kinsenas cut-offs can hold the same date) */
+    /* The Open cut-off that holds this day - a day belongs to the period of its date, whoever is paid how (a monthly-paid employee's day
+       is saved in the cut-off it falls in, and counts in their pay of the month's last one). Only an older whole-month period, which
+       can hold the same date, is looked at last and only for a monthly-paid employee. */
     $period = null;
     foreach ($openPeriods as $p) {
-        if ($date >= $p['start_date'] && $date <= $p['end_date'] && (!$emp || employeeInPeriod($emp, periodType($p['period_type'] ?? null)))) { $period = $p; break; }
+        if ($date >= $p['start_date'] && $date <= $p['end_date'] && periodType($p['period_type'] ?? null) !== 'Monthly') { $period = $p; break; }
+    }
+    if (!$period) {
+        foreach ($openPeriods as $p) {
+            if ($date >= $p['start_date'] && $date <= $p['end_date'] && (!$emp || employeeInPeriod($emp, periodType($p['period_type'] ?? null)))) { $period = $p; break; }
+        }
     }
 
     if (!$emp) {
@@ -52,8 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($hoursProblem !== null) {
         $msg = ['type' => 'error', 'text' => "Not saved - {$hoursProblem}. Check the hours and try again."];
     } elseif (!$period) {
-        $msg = ['type' => 'error', 'text' => 'No open ' . $emp['pay_schedule'] . ' pay period covers ' . date('M d, Y', strtotime($date))
-                                           . ' (' . $emp['full_name'] . ' is paid ' . strtolower($emp['pay_schedule']) . '). Ask the admin to create or unlock it.'];
+        $msg = ['type' => 'error', 'text' => 'No open pay period covers ' . date('M d, Y', strtotime($date)) . '. Ask the admin to create or unlock it.'];
     } else {
         try {
             $db->prepare("
@@ -71,6 +77,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $msg = ['type' => 'success', 'text' => "Saved {$emp['full_name']}'s " . ($dayOff ? 'day off' : 'attendance') . " for " . date('M d, Y', strtotime($date))
                 . " in {$period['period_label']}. Their other days are kept and the period's pay was recomputed."];
+            if (($emp['pay_schedule'] ?? '') === 'Monthly' && periodType($period['period_type'] ?? null) === 'Semi-Monthly') {
+                $msg['text'] .= ' ' . $emp['full_name'] . ' is paid monthly: this day counts in their pay for the whole month, computed in the month\'s last cut-off.';
+            }
         } catch (PDOException $e) {
             $msg = ['type' => 'error', 'text' => 'The record was not saved. ' . friendlyError($e) . ' (Reference: ' . logAppError($e) . ')'];
         }

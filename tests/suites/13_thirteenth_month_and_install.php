@@ -494,7 +494,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $root->exec('CREATE DATABASE qa_fresh CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
         $fresh = TestDb::root('qa_fresh');
         $statements = splitSqlStatements((string)file_get_contents($sqlFile));
-        $t->same(23, count($statements), 'one CREATE TABLE for each of the 23 tables');
+        $t->same(25, count($statements), 'one CREATE TABLE for each of the 25 tables');
         foreach ($statements as $s) $fresh->exec($s);
         $a = qa13_signature($root, TestDb::DB);
         $b = qa13_signature($root, 'qa_fresh');
@@ -527,7 +527,7 @@ T::suite('13 · 13th Month Pay & fresh install', function () {
         $before = qa13_signature($root, 'qa_fresh3');
         $four = ['attendance_logs', 'biometric_employee_map', 'biometric_agent_state', 'biometric_api_keys'];
         foreach (array_reverse($four) as $tbl) $db->exec("DROP TABLE `$tbl`");
-        $t->same(19, count(array_filter(qa13_signature($root, 'qa_fresh3'), fn($l) => str_starts_with($l, 'table '))), 'the four terminal tables are gone from the copy');
+        $t->same(21, count(array_filter(qa13_signature($root, 'qa_fresh3'), fn($l) => str_starts_with($l, 'table '))), 'the four terminal tables are gone from the copy');
         foreach (splitSqlStatements((string)file_get_contents(AppCopy::root() . '/sql/001_attendance_logs.sql')) as $s) $db->exec($s);
         $t->same($before, qa13_signature($root, 'qa_fresh3'), 'the script builds the four tables - columns, keys and foreign key - exactly as database.sql does');
         $cols = $db->query("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = 'qa_fresh3' AND TABLE_NAME = 'attendance_logs'")->fetchAll(PDO::FETCH_COLUMN);

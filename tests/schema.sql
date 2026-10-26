@@ -56,6 +56,7 @@ CREATE TABLE `employees` (
   `pay_schedule` enum('Semi-Monthly','Monthly') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Semi-Monthly',
   `base_salary` decimal(12,2) NOT NULL DEFAULT '0.00',
   `hours_per_day` decimal(4,2) DEFAULT NULL,
+  `overtime_rate` decimal(10,2) DEFAULT NULL,
   `rest_days` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '7',
   `sss_amount` decimal(12,2) NOT NULL DEFAULT '0.00',
   `philhealth_amount` decimal(12,2) NOT NULL DEFAULT '0.00',
@@ -253,6 +254,30 @@ CREATE TABLE `payslip_signatures` (
   KEY `idx_payslip_signatures_signed_by` (`signed_by_user`),
   CONSTRAINT `fk_payslip_signatures_payroll_id` FOREIGN KEY (`payroll_id`) REFERENCES `payroll` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_payslip_signatures_signed_by_user` FOREIGN KEY (`signed_by_user`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+--;;
+CREATE TABLE `adjustment_signatures` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `adjustment_id` int NOT NULL,
+  `signature_data` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount_signed` decimal(12,2) DEFAULT NULL,
+  `signed_by_user` int DEFAULT NULL,
+  `signed_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_adjustment_signatures_adjustment` (`adjustment_id`),
+  KEY `idx_adjustment_signatures_signed_by` (`signed_by_user`),
+  CONSTRAINT `fk_adjustment_signatures_adjustment_id` FOREIGN KEY (`adjustment_id`) REFERENCES `bonus_deductions` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_adjustment_signatures_signed_by_user` FOREIGN KEY (`signed_by_user`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+--;;
+CREATE TABLE `admin_signature` (
+  `id` int NOT NULL,
+  `signature_data` longtext COLLATE utf8mb4_unicode_ci NOT NULL,
+  `updated_by` int DEFAULT NULL,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_admin_signature_updated_by` (`updated_by`),
+  CONSTRAINT `fk_admin_signature_updated_by` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 --;;
 CREATE TABLE `print_logs` (

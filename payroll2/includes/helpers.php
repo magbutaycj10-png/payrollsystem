@@ -33,6 +33,32 @@ function applySchemaPatches(): void {
         "ALTER TABLE employees ADD COLUMN philhealth_timing ENUM('first','split','second') NOT NULL DEFAULT 'second' AFTER sss_timing",
         "ALTER TABLE employees ADD COLUMN pagibig_timing ENUM('first','split','second') NOT NULL DEFAULT 'second' AFTER philhealth_timing",
         "ALTER TABLE employees ADD COLUMN tax_timing ENUM('first','split','second') NOT NULL DEFAULT 'split' AFTER pagibig_timing",
+        /* 2026-10-26: an overtime rate of the employee's own (NULL = the company rate in Settings) */
+        "ALTER TABLE employees ADD COLUMN overtime_rate DECIMAL(10,2) NULL DEFAULT NULL AFTER hours_per_day",
+        /* 2026-10-26: the admin's drawn signature (Settings > Authorised Signatory, one row, id 1) and the employees' signatures on
+           bonus / deduction receipts (one per bonus_deductions row, like payslip_signatures per payroll line) */
+        "CREATE TABLE IF NOT EXISTS admin_signature (
+           id             INT       NOT NULL,
+           signature_data LONGTEXT  NOT NULL,
+           updated_by     INT       NULL,
+           updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+           PRIMARY KEY (id),
+           KEY idx_admin_signature_updated_by (updated_by),
+           CONSTRAINT fk_admin_signature_updated_by FOREIGN KEY (updated_by) REFERENCES users (id) ON UPDATE CASCADE ON DELETE SET NULL
+         ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+        "CREATE TABLE IF NOT EXISTS adjustment_signatures (
+           id             INT           NOT NULL AUTO_INCREMENT,
+           adjustment_id  INT           NOT NULL,
+           signature_data LONGTEXT      NOT NULL,
+           amount_signed  DECIMAL(12,2) NULL DEFAULT NULL,
+           signed_by_user INT           NULL,
+           signed_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+           PRIMARY KEY (id),
+           UNIQUE KEY uq_adjustment_signatures_adjustment (adjustment_id),
+           KEY idx_adjustment_signatures_signed_by (signed_by_user),
+           CONSTRAINT fk_adjustment_signatures_adjustment_id FOREIGN KEY (adjustment_id) REFERENCES bonus_deductions (id) ON UPDATE CASCADE ON DELETE CASCADE,
+           CONSTRAINT fk_adjustment_signatures_signed_by_user FOREIGN KEY (signed_by_user) REFERENCES users (id) ON UPDATE CASCADE ON DELETE SET NULL
+         ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
 
     /*
@@ -257,7 +283,7 @@ const EMPLOYEE_JOINS   = "LEFT JOIN branches br ON br.id = e.branch_id LEFT JOIN
  * Use with PAY_LINE_JOINS and the payroll table aliased p:
  *     SELECT PAY_LINE_COLUMNS, pp.period_label FROM payroll p PAY_LINE_JOINS JOIN payroll_periods pp ON pp.id = p.period_id
  */
-const PAY_LINE_COLUMNS = "p.*, e.employee_code AS emp_id, e.full_name AS emp_name, COALESCE(br.name, '') AS branch, COALESCE(pos.title, '') AS `position`,
+const PAY_LINE_COLUMNS = "p.*, e.employee_code AS emp_id, e.full_name AS emp_name, e.pay_schedule AS pay_schedule, COALESCE(br.name, '') AS branch, COALESCE(pos.title, '') AS `position`,
         p.sss_deduction AS sss, p.philhealth_deduction AS philhealth, p.pagibig_deduction AS pagibig, p.bonus_pay AS bonus,
         p.gross_pay - p.basic_pay AS ot_late_adj, p.absence_deduction AS absent_deduction, p.tardy_undertime_deduction AS undertime_deduction,
         COALESCE(s.total_hours_worked, 0) AS hours_worked, COALESCE(s.total_overtime_hours, 0) AS overtime_hours,
@@ -725,9 +751,38 @@ function employeeTiming(array $emp): array {
     return $out;
 }
 
-/* Is this employee paid on this pay period's schedule? (payEmployee() row; a Weekly period takes everybody) */
-function employeeInPeriod(array $emp, string $periodType): bool {
-    return $periodType === 'Weekly' || ($emp['pay_schedule'] ?? 'Semi-Monthly') === $periodType;
+/*
+ * Is this employee paid in this pay period? (payEmployee() row)
+ *   Weekly (an older database)   everybody
+ *   Semi-Monthly cut-off         the kinsenas employees - and the monthly-paid ones too, but only in the month's LAST cut-off
+ *                                ($monthlyHere, ctx['monthly_here']): they are paid once, for the whole month, when the month is done
+ *   Monthly (an older whole-month period, no longer created)   the monthly-paid employees
+ */
+function employeeInPeriod(array $emp, string $periodType, bool $monthlyHere = false): bool {
+    if ($periodType === 'Weekly') return true;
+    $sched = $emp['pay_schedule'] ?? 'Semi-Monthly';
+    if ($periodType === 'Semi-Monthly' && $sched === 'Monthly') return $monthlyHere;
+    return $sched === $periodType;
+}
+
+/* Is this a monthly-paid employee being paid in a Semi-Monthly cut-off (the month's last one): their pay run is the whole month */
+function paidForWholeMonth(array $emp, array $ctx): bool {
+    return ($emp['pay_schedule'] ?? 'Semi-Monthly') === 'Monthly' && ($ctx['period_type'] ?? '') === 'Semi-Monthly' && !empty($ctx['monthly_here']);
+}
+
+/*
+ * The pay context an employee is computed with. A kinsenas employee takes the cut-off's own (half a month, the contribution
+ * schedule of the cut-off); a monthly-paid employee in the month's last cut-off is a whole-month run: the full month's pay, and the
+ * month's contributions and tax taken in full (nothing was taken by an earlier cut-off - they were not in it).
+ */
+function employeeCtx(array $ctx, array $emp): array {
+    if (!paidForWholeMonth($emp, $ctx)) return $ctx;
+    $ctx['period_type']  = 'Monthly';
+    $ctx['fraction']     = 1.0;
+    $ctx['semi']         = false;
+    $ctx['final']        = true;
+    $ctx['earlier_runs'] = 0;
+    return $ctx;
 }
 
 /*
@@ -759,7 +814,8 @@ function contributionTake(string $timing, array $ctx): string {
 function contributionPlanText(array $ctx): string {
     if ($ctx['period_type'] === 'Monthly') return "the month's contributions and tax are taken in full";
     if ($ctx['final']) {
-        return "last cut-off of the month: SSS, PhilHealth, Pag-IBIG and withholding tax are settled in full, minus what earlier cut-offs took";
+        return "last cut-off of the month: SSS, PhilHealth, Pag-IBIG and withholding tax are settled in full, minus what earlier cut-offs took"
+             . (!empty($ctx['monthly_here']) ? "; employees paid monthly are paid here for the whole month, with their contributions and tax in full" : '');
     }
     return "SSS, PhilHealth, Pag-IBIG and withholding tax follow each employee's own contribution schedule";
 }
@@ -790,6 +846,7 @@ function contributionPlanText(array $ctx): string {
  *   ee_total, er_total
  */
 function contributionBreakdown(array $emp, float $basic, array $ctx): array {
+    $ctx  = employeeCtx($ctx, $emp);
     $prev = $ctx['earlier'][$emp['emp_id'] ?? ''] ?? EARLIER_NONE;
     $cents = fn($v): int => (int)round((float)$v * 100);       /* whole centavos: no float noise in a split or a balance */
 
@@ -897,6 +954,8 @@ function payEmployee(array $e): array {
         'pagibig_timing'    => $timing['pagibig'],
         'tax_timing'        => $timing['tax'],
         'hours_per_day'     => isset($e['hours_per_day']) && $e['hours_per_day'] !== null ? (float)$e['hours_per_day'] : null,
+        /* pesos per overtime hour for this employee alone; null = the company rate in Settings */
+        'overtime_rate'     => isset($e['overtime_rate']) && $e['overtime_rate'] !== null && $e['overtime_rate'] !== '' ? max(0.0, (float)$e['overtime_rate']) : null,
         'rest_days'         => $e['rest_days'] ?? '7',
     ];
 }
@@ -970,6 +1029,7 @@ function dayUndertime(array $d, float $dayHours): float {
  * (payroll.basic_pay, overtime_pay, tardy_undertime_deduction = late_deduction + undertime_deduction, absence_deduction.)
  */
 function computePayLine(array $emp, float $paidHours, float $ot, float $late, bool $perDay, array $ctx, array $abs = []): array {
+    $ctx       = employeeCtx($ctx, $emp);      /* a monthly-paid employee's run is the whole month */
     $rate      = (float)$emp['base_salary'];
     $type      = $emp['salary_type'] ?? 'monthly';
     $frac      = $ctx['fraction'];
@@ -1001,7 +1061,7 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
         $payDen    = $workDays;                                    /* … over its working days */
     }
 
-    $otPay  = overtimePay($ot, $payCents, $payDen, $dayHours, $ctx);
+    $otPay  = overtimePay($ot, $payCents, $payDen, $dayHours, $ctx, $emp['overtime_rate'] ?? null);
     $otLate = round($otPay - $lateDeduction, 2);
     $gross  = round($basic + $otLate, 2);
 
@@ -1025,9 +1085,12 @@ function computePayLine(array $emp, float $paidHours, float $ot, float $late, bo
  *               The hourly rate is a day's pay ÷ the duty hours; a salaried employee's day's pay is the month's pay ÷
  *               working days. Worked in integers so a half centavo always rounds up.
  * $payCents ÷ $payDen is the pay of one duty day, in centavos.
+ * $ownRate is the overtime rate typed on the employee (Employees > Add / Edit): when there is one it pays every overtime hour of that
+ * employee, whichever method Settings uses; null = the company way above.
  */
-function overtimePay(float $ot, int $payCents, int $payDen, float $dayHours, array $ctx): float {
+function overtimePay(float $ot, int $payCents, int $payDen, float $dayHours, array $ctx, ?float $ownRate = null): float {
     if ($ot <= 0) return 0.0;
+    if ($ownRate !== null) return round($ot * $ownRate, 2);
     if (($ctx['ot_method'] ?? 'flat') !== 'labor_code') return round($ot * $ctx['overtime_rate'], 2);
     $hh   = (int)round($ot * 100);                       /* hundredths of an hour */
     $dayH = (int)round($dayHours * 100);
@@ -1140,11 +1203,40 @@ function periodType(?string $stored): string {
     return in_array($stored, ['Monthly', 'Semi-Monthly', 'Weekly'], true) ? $stored : defaultPaySchedule();
 }
 
+/*
+ * The dates a pay line covers: its pay period's dates - except a monthly-paid employee's line in the month's last cut-off, which is the
+ * whole month. $r needs start_date, end_date (the pay period) and pay_schedule (the employee). Returns [from, to] as Y-m-d.
+ */
+function payLineRange(array $r): array {
+    $from = (string)($r['start_date'] ?? '');
+    $to   = (string)($r['end_date'] ?? '');
+    if ($from !== '' && $to !== '' && ($r['pay_schedule'] ?? '') === 'Monthly' && $to >= date('Y-m-t', strtotime($from))) {
+        $from = date('Y-m-01', strtotime($from));
+    }
+    return [$from, $to];
+}
+
+/*
+ * The calendar a forecast runs on, from the pay periods that hold payroll (period_type and start_date, oldest first): how often a pay
+ * run happens in a month. A kinsenas shop has two a month - unless every run so far is a month's LAST cut-off (a company whose
+ * employees are all paid monthly), which is one a month. The last period's own type decides otherwise.
+ * Returns ['period_type' => Semi-Monthly | Monthly | Weekly, 'periods_per_month' => 2 | 1 | 4].
+ */
+function payrollCalendar(array $periodsWithPayroll): array {
+    $type  = periodType($periodsWithPayroll ? ($periodsWithPayroll[count($periodsWithPayroll) - 1]['period_type'] ?? null) : null);
+    if ($type === 'Semi-Monthly') {
+        $firstHalf = array_filter($periodsWithPayroll, fn($p) => (int)date('j', strtotime($p['start_date'])) <= 15);
+        if ($periodsWithPayroll && !$firstHalf) $type = 'Monthly';     /* only the month-end runs pay anybody */
+    }
+    return ['period_type' => $type, 'periods_per_month' => match ($type) { 'Semi-Monthly' => 2, 'Weekly' => 4, default => 1 }];
+}
+
 /* "Semi-Monthly · 1st half" etc., for period pickers and headings */
 function periodTypeLabel(array $period): string {
     $type = periodType($period['period_type'] ?? null);
+    if ($type === 'Monthly') return 'Whole month (older)';      /* no longer created: the cut-offs below pay the monthly employees */
     if ($type !== 'Semi-Monthly') return $type;
-    return 'Semi-Monthly · ' . ((int)date('j', strtotime($period['start_date'])) <= 15 ? '1st half' : '2nd half');
+    return 'Cut-off · ' . ((int)date('j', strtotime($period['start_date'])) <= 15 ? '1st half' : '2nd half');
 }
 
 /*
@@ -1186,16 +1278,21 @@ function payContext(PDO $db, int $periodId): array {
         $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND start_date >= ? AND end_date < ? AND period_type = ?");
         $st->execute([$periodId, $monthStart, $start, (string)($row['period_type'] ?? '')]);
         $earlierRuns = (int)$st->fetchColumn();
+        /* An older whole-month (Monthly) period over this month already pays the monthly-paid employees: they are not paid again here */
+        $monthEnd = date('Y-m-t', strtotime($start));
+        $st = $db->prepare("SELECT COUNT(*) FROM payroll_periods WHERE id <> ? AND period_type = 'Monthly' AND start_date <= ? AND end_date >= ?");
+        $st->execute([$periodId, $monthEnd, $monthStart]);
+        $legacyMonthly = (int)$st->fetchColumn() > 0;
     } catch (PDOException $e) { /* older database: no history, each run stands alone */ }
 
-    return buildPayContext($row, $earlier, $earlierRuns);
+    return buildPayContext($row, $earlier, $earlierRuns, $legacyMonthly ?? false);
 }
 
 /*
  * The pay context for a period row (start_date, end_date, period_type),
  * given what earlier runs of the month carried (emp_id => EARLIER_NONE shape).
  */
-function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 0): array {
+function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 0, bool $legacyMonthly = false): array {
     $start = $period['start_date'];
     $end   = $period['end_date'] ?? $start;
     $type  = periodType($period['period_type'] ?? null);
@@ -1217,6 +1314,9 @@ function buildPayContext(array $period, array $earlier = [], int $earlierRuns = 
         'semi'             => $type === 'Semi-Monthly',
         'half'             => (int)date('j', strtotime($start)) <= 15 ? 1 : 2,
         'final'            => $final,        /* last pay run of the month */
+        /* the month's last kinsenas cut-off is where the monthly-paid employees are paid, for the whole month (employeeCtx) */
+        'monthly_here'     => $type === 'Semi-Monthly' && $final && !$legacyMonthly,
+        'month_start'      => date('Y-m-01', strtotime($start)),
         'earlier'          => $earlier,      /* emp_id => already earned / deducted / withheld this month */
         'earlier_runs'     => $earlierRuns,  /* earlier pay periods this month in the system */
         'working_days'     => workingDaysInMonth($start),
@@ -1268,27 +1368,28 @@ function monthlyEquivalent(string $salaryType, float $baseSalary, int $workingDa
 
 /*
  * Labor Code Art. 87: overtime on an ordinary working day is paid at the hourly rate PLUS at least 25% of it.
- * Under the default 'flat' method every employee gets Settings' one peso rate per overtime hour, which for a
+ * Under the default 'flat' method every employee gets Settings' one peso rate per overtime hour (or the rate typed on the employee), which for a
  * ₱480 day (₱60/h) is below the legal ₱75/h. This lists the active employees the flat rate underpays:
  *   [ ['emp_id', 'full_name', 'legal' => ₱/h the law requires, 'paid' => ₱/h the flat rate pays, 'gap' => ₱/h short], … ]
- * Empty when overtime is paid by the Labor Code method, or when the flat rate is high enough for everyone.
+ * Empty when overtime is paid by the Labor Code method (an employee's own typed rate is still checked), or when the rate is high enough for everyone.
  * (Rest-day, holiday and night-shift premiums are higher still - they are not modelled; see tests/AUDIT_FINDINGS.md D-14.)
  */
 function overtimeShortfalls(PDO $db): array {
-    if (getSetting('overtime_method', 'flat') === 'labor_code') return [];
+    $byLaw = getSetting('overtime_method', 'flat') === 'labor_code';     /* then only an employee's own typed rate can fall short */
     $flat = (float)getSetting('overtime_rate', '150');
     $std  = max(1.0, (float)getSetting('standard_hours', '8'));
     $out  = [];
     foreach ($db->query("SELECT * FROM employees WHERE status = 'Active' ORDER BY full_name")->fetchAll() as $row) {
         $e = payEmployee($row);
-        if ($e['base_salary'] <= 0) continue;
+        if ($e['base_salary'] <= 0 || ($byLaw && $e['overtime_rate'] === null)) continue;
         $workDays = max(1, workingDaysInMonth(date('Y-m-01'), restDayList($e['rest_days'])));
         $dayRate  = monthlyEquivalent($e['salary_type'], $e['base_salary'], $workDays) / $workDays;
         $hours    = $e['hours_per_day'] !== null && $e['hours_per_day'] > 0 ? $e['hours_per_day'] : $std;
         $legal    = round($dayRate / $hours * 1.25, 2);
-        if ($legal > $flat + 0.004) {
-            $out[] = ['emp_id' => $e['emp_id'], 'full_name' => $e['full_name'], 'legal' => $legal, 'paid' => round($flat, 2),
-                      'gap' => round($legal - $flat, 2)];
+        $paid     = $e['overtime_rate'] ?? $flat;      /* the employee's own rate, else the company one */
+        if ($legal > $paid + 0.004) {
+            $out[] = ['emp_id' => $e['emp_id'], 'full_name' => $e['full_name'], 'legal' => $legal, 'paid' => round($paid, 2),
+                      'gap' => round($legal - $paid, 2)];
         }
     }
     return $out;
@@ -1508,32 +1609,48 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     $emps = [];
     foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $emps[$er['employee_code']] = payEmployee($er);
     $inScope = fn($id) => $who['scope'] === null || in_array((string)$id, array_map('strval', $who['scope']), true);
-    /* A pay period takes the employees paid on its schedule: a Monthly employee is not in a Semi-Monthly cut-off and the other way
-       round. Their days are saved all the same and count in the pay period of their own schedule. */
-    $onSchedule = fn($id) => isset($emps[$id]) && employeeInPeriod($emps[$id], $ctx['period_type']);
+    /* A pay period takes the employees paid on its schedule: the kinsenas employees in every cut-off, the monthly-paid ones only in the
+       month's last cut-off (where they are paid for the whole month). Their days are saved all the same. */
+    $onSchedule = fn($id) => isset($emps[$id]) && employeeInPeriod($emps[$id], $ctx['period_type'], !empty($ctx['monthly_here']));
+    /* A monthly-paid employee in the month's last cut-off is paid for the whole month: their days run from the 1st of the month */
+    $wholeMonth = fn($id) => isset($emps[$id]) && paidForWholeMonth($emps[$id], $ctx);
+    $monthFrom  = min($per['start_date'], $ctx['month_start']);
+    $firstDay   = fn($id) => $wholeMonth($id) ? $monthFrom : $per['start_date'];
 
-    /* Every day saved inside the period's dates (a day belongs to the period that holds its date) */
+    /* Every day saved inside the period's dates (a day belongs to the period that holds its date) - and, for the monthly-paid
+       employees of the month's last cut-off, every day of the month up to it */
     $st = $db->prepare("SELECT e.employee_code AS emp_id, b.att_date, b.hours_worked, b.overtime_hours, b.late_hours, b.undertime_hours, b.is_day_off, b.entered_by
                           FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
                          WHERE b.att_date BETWEEN ? AND ?");
-    $st->execute([$per['start_date'], $per['end_date']]);
+    $st->execute([!empty($ctx['monthly_here']) ? $monthFrom : $per['start_date'], $per['end_date']]);
     $byEmp   = [];   /* emp_id => that employee's day rows */
     $worked  = [];   /* emp_id => [date => true]: days with hours */
     $offDay  = [];   /* emp_id => [date => true]: days the timesheet marks OFF */
     $covered = [];   /* emp_id => last date any record covers (worked, off or a 0-hour day) */
     $manual  = [];   /* emp_id => true: a day was typed in by hand (Manual Attendance) */
+    $ownDays = [];   /* emp_id => records inside THIS period's dates; ownWorked / ownOff: how many of them have hours / are days off */
+    $ownWorked = [];
+    $ownOff    = [];
     foreach ($st->fetchAll() as $d) {
-        $byEmp[$d['emp_id']][] = $d;
-        if ((float)$d['hours_worked'] > 0) $worked[$d['emp_id']][$d['att_date']] = true;
-        elseif ((int)$d['is_day_off'] === 1) $offDay[$d['emp_id']][$d['att_date']] = true;
-        $covered[$d['emp_id']] = max($covered[$d['emp_id']] ?? '', $d['att_date']);
-        if ($d['entered_by'] !== null) $manual[$d['emp_id']] = true;
+        $id = $d['emp_id'];
+        if ($d['att_date'] < $firstDay($id)) continue;          /* an earlier cut-off's day is that cut-off's, not this one's */
+        $byEmp[$id][] = $d;
+        if ((float)$d['hours_worked'] > 0) $worked[$id][$d['att_date']] = true;
+        elseif ((int)$d['is_day_off'] === 1) $offDay[$id][$d['att_date']] = true;
+        $covered[$id] = max($covered[$id] ?? '', $d['att_date']);
+        if ($d['entered_by'] !== null) $manual[$id] = true;
+        if ($d['att_date'] >= $per['start_date']) {
+            $ownDays[$id] = ($ownDays[$id] ?? 0) + 1;
+            if ((float)$d['hours_worked'] > 0) $ownWorked[$id] = ($ownWorked[$id] ?? 0) + 1;
+            elseif ((int)$d['is_day_off'] === 1) $ownOff[$id] = ($ownOff[$id] ?? 0) + 1;
+        }
     }
 
-    /* One line per employee: someone whose only records are days off gets no payroll line. */
+    /* One line per employee: someone whose only records are days off gets no payroll line. A monthly-paid employee gets theirs
+       once the month's LAST cut-off holds days of theirs - until then (only the first half was uploaded) they are waiting. */
     $lines = [];
     foreach ($byEmp as $id => $days) {
-        if ($onSchedule($id) && $inScope($id) && (isset($worked[$id]) || count($days) > count($offDay[$id] ?? []))) {
+        if ($onSchedule($id) && $inScope($id) && (isset($ownWorked[$id]) || ($ownDays[$id] ?? 0) > ($ownOff[$id] ?? 0))) {
             $lines[$id] = true;
         }
     }
@@ -1562,7 +1679,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     }
 
     $cal = attendanceCalendar($db, array_merge(array_keys($lines), array_keys($covered)),
-                              $per['start_date'], $per['end_date']);
+                              $monthFrom, $per['end_date']);
     $judgedTo = [];   /* branch => last day the uploads cover */
     foreach ($covered as $id => $last) {
         $b = $cal[$id]['branch'] ?? '';
@@ -1576,7 +1693,7 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
         $absent = $leave = $off = 0;
         $upTo   = $judgedTo[$cal[$id]['branch'] ?? ''] ?? '';
         $salary = $emp['salary_type'] !== 'daily';
-        for ($d = $per['start_date']; $d <= $per['end_date']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+        for ($d = $firstDay($id); $d <= $per['end_date']; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
             $s = dayStatus($cal[$id] ?? null, $d, isset($worked[$id][$d]), isset($offDay[$id][$d]));
             if ($s === 'leave')                    $leave++;
             if ($s === 'off'    && $d <= $upTo)    $off++;
@@ -1604,7 +1721,163 @@ function recomputePeriodFromDaily(PDO $db, int $periodId, array $who): int {
     }
 
     rewritePeriodRows($db, $periodId, $who, $attRows, $payRows);
+    syncMonthlyAdjustments($db, $periodId, $ctx);
     return count($payRows);
+}
+
+/* =============================================================
+ *  One set of pay periods: the kinsenas cut-offs (1-15 and 16-end)
+ *
+ *  Employees paid twice a month are paid in both cut-offs. Employees paid once a month are paid in the month's LAST cut-off,
+ *  for the whole month - the 1st-15th and the 16th-end together, with the bonuses and deductions of both halves. Until the last
+ *  cut-off holds days of theirs they are "waiting": the days are saved, nothing is computed yet.
+ *  (Older databases may still hold a whole-month "Monthly" period beside the cut-offs; it is no longer created, and while one
+ *  covers a month the monthly-paid employees are paid there, not a second time in the cut-off.)
+ * ============================================================= */
+
+/* The month's last kinsenas cut-off (the one that ends on the month's last day) for a date in that month; null when there is none yet */
+function monthFinalPeriod(PDO $db, string $dateInMonth): ?array {
+    $ms = date('Y-m-01', strtotime($dateInMonth));
+    $me = date('Y-m-t', strtotime($dateInMonth));
+    $st = $db->prepare("SELECT * FROM payroll_periods WHERE period_type = 'Semi-Monthly' AND start_date BETWEEN ? AND ? AND end_date >= ?
+                         ORDER BY start_date DESC, id DESC LIMIT 1");
+    $st->execute([$ms, $me, $me]);
+    return $st->fetch() ?: null;
+}
+
+/*
+ * What each employee's bonuses and deductions of a month add up to, from the history (every cut-off of that month): employees.id =>
+ * ['Bonus' => pesos, 'Deduction' => pesos]. A monthly-paid employee's pay line carries all of them.
+ */
+function monthAdjustmentTotals(PDO $db, string $dateInMonth): array {
+    $ms = date('Y-m-01', strtotime($dateInMonth));
+    $me = date('Y-m-t', strtotime($dateInMonth));
+    $st = $db->prepare("SELECT h.employee_id, h.type, SUM(h.amount) AS s FROM bonus_deductions h JOIN payroll_periods hp ON hp.id = h.period_id
+                         WHERE hp.period_type <> 'Monthly' AND hp.start_date BETWEEN ? AND ? GROUP BY h.employee_id, h.type");
+    $st->execute([$ms, $me]);
+    $out = [];
+    foreach ($st->fetchAll() as $r) $out[(int)$r['employee_id']][$r['type']] = round((float)$r['s'], 2);
+    return $out;
+}
+
+/*
+ * The monthly-paid pay lines of a cut-off carry the month's bonuses and deductions - those recorded against the 1st half as well as
+ * the last cut-off - so a line is brought in line with the history whenever it is (re)built. Money added in Adjustments goes through
+ * recordAdjustments(); this keeps a rebuilt line (a new upload, a recompute) from losing the part recorded against the other half.
+ * Nothing happens in a cut-off that does not pay the monthly employees.
+ */
+function syncMonthlyAdjustments(PDO $db, int $periodId, array $ctx): void {
+    if (empty($ctx['monthly_here'])) return;
+    $totals = monthAdjustmentTotals($db, $ctx['month_start']);
+    $st = $db->prepare("SELECT p.id, p.employee_id, p.gross_pay, p.withholding_tax, p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction,
+                               p.bonus_pay, p.other_deductions, p.net_pay
+                          FROM payroll p JOIN employees e ON e.id = p.employee_id
+                         WHERE p.period_id = ? AND e.pay_schedule = 'Monthly'");
+    $st->execute([$periodId]);
+    $upd = $db->prepare("UPDATE payroll SET bonus_pay = ?, other_deductions = ?, net_pay = ?, updated_at = updated_at WHERE id = ?");
+    foreach ($st->fetchAll() as $r) {
+        $bonus = $totals[(int)$r['employee_id']]['Bonus'] ?? 0.0;
+        $ded   = $totals[(int)$r['employee_id']]['Deduction'] ?? 0.0;
+        $net   = round(((float)$r['gross_pay'] + $bonus)
+               - ((float)$r['withholding_tax'] + (float)$r['sss_deduction'] + (float)$r['philhealth_deduction'] + (float)$r['pagibig_deduction'] + $ded), 2);
+        if (abs($bonus - (float)$r['bonus_pay']) >= 0.005 || abs($ded - (float)$r['other_deductions']) >= 0.005 || abs($net - (float)$r['net_pay']) >= 0.005) {
+            $upd->execute([$bonus, $ded, $net, $r['id']]);
+        }
+    }
+}
+
+/*
+ * The monthly-paid employees that have days saved in this period's month but no pay line yet, because the month's last cut-off
+ * holds none of their days (or does not exist yet): [['emp_id', 'full_name', 'days', 'last_day']]. Empty for a month an older whole-month
+ * period covers, and for a period that is not a kinsenas cut-off.
+ */
+function monthlyWaiting(PDO $db, array $period): array {
+    if (periodType($period['period_type'] ?? null) !== 'Semi-Monthly') return [];
+    $ms = date('Y-m-01', strtotime($period['start_date']));
+    $me = date('Y-m-t', strtotime($period['start_date']));
+    $st = $db->prepare("SELECT 1 FROM payroll_periods WHERE period_type = 'Monthly' AND start_date <= ? AND end_date >= ? LIMIT 1");
+    $st->execute([$me, $ms]);
+    if ($st->fetchColumn()) return [];
+    $final = monthFinalPeriod($db, $period['start_date']);
+    $st = $db->prepare("SELECT e.employee_code AS emp_id, e.full_name, COUNT(*) AS days, MAX(b.att_date) AS last_day
+                          FROM biometric_daily b JOIN employees e ON e.id = b.employee_id
+                         WHERE e.pay_schedule = 'Monthly' AND e.status = 'Active' AND b.att_date BETWEEN ? AND ?
+                           AND (b.hours_worked > 0 OR b.is_day_off = 0)
+                           AND NOT EXISTS (SELECT 1 FROM payroll p WHERE p.employee_id = e.id AND p.period_id = ?)
+                         GROUP BY e.id, e.employee_code, e.full_name ORDER BY e.full_name");
+    $st->execute([$ms, $me, (int)($final['id'] ?? 0)]);
+    return $st->fetchAll();
+}
+
+/*
+ * Tidies up the older whole-month ("Monthly") pay periods, which showed the same month twice beside the cut-offs:
+ *   empty                        removed
+ *   Open, built from saved days  folded into the cut-offs: the missing 1st-15th / 16th-end are created, its bonuses and deductions move
+ *                                to the month's last cut-off, the period is removed and the cut-offs are recomputed from the saved days
+ *   finalized, or built from a totals file   kept as they are (unlock a finalized one first and run this again)
+ * Returns ['removed' => labels, 'merged' => labels, 'kept' => [label => why]].
+ */
+function retireMonthlyPeriods(PDO $db): array {
+    $out = ['removed' => [], 'merged' => [], 'kept' => []];
+    $count = fn(string $sql, int $id) => (function () use ($db, $sql, $id) { $st = $db->prepare($sql); $st->execute([$id]); return (int)$st->fetchColumn(); })();
+    foreach ($db->query("SELECT * FROM payroll_periods WHERE period_type = 'Monthly' ORDER BY start_date, id")->fetchAll() as $p) {
+        $id = (int)$p['id'];
+        $held = $count("SELECT COUNT(*) FROM payroll WHERE period_id = ?", $id) + $count("SELECT COUNT(*) FROM attendance_summary WHERE period_id = ?", $id)
+              + $count("SELECT COUNT(*) FROM bonus_deductions WHERE period_id = ?", $id);
+        if ($held === 0) {
+            $db->prepare("DELETE FROM payroll_periods WHERE id = ?")->execute([$id]);
+            $out['removed'][] = $p['period_label'];
+            continue;
+        }
+        if ($p['status'] !== 'Open') { $out['kept'][$p['period_label']] = 'it is finalized - unlock it, then tidy up again'; continue; }
+        $st = $db->prepare("SELECT COUNT(*) FROM biometric_daily WHERE att_date BETWEEN ? AND ?");
+        $st->execute([$p['start_date'], $p['end_date']]);
+        if ((int)$st->fetchColumn() === 0) { $out['kept'][$p['period_label']] = 'it was built from a totals file, which cannot be rebuilt - upload the month again into the cut-offs'; continue; }
+
+        ensureMonthPeriods($db, $p['start_date']);
+        $final = monthFinalPeriod($db, $p['start_date']);
+        if (!$final || $final['status'] !== 'Open') { $out['kept'][$p['period_label']] = 'the month\'s last cut-off is finalized - unlock it first'; continue; }
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("UPDATE bonus_deductions SET period_id = ? WHERE period_id = ?")->execute([(int)$final['id'], $id]);
+            $db->prepare("DELETE FROM payroll_periods WHERE id = ?")->execute([$id]);
+            $db->commit();
+        } catch (PDOException $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            throw $e;
+        }
+        /* the cut-offs of that month, oldest first, from the days saved */
+        $st = $db->prepare("SELECT id FROM payroll_periods WHERE period_type = 'Semi-Monthly' AND status = 'Open' AND start_date BETWEEN ? AND ? ORDER BY start_date, id");
+        $st->execute([date('Y-m-01', strtotime($p['start_date'])), date('Y-m-t', strtotime($p['start_date']))]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $pid) recomputePeriodFromDaily($db, (int)$pid, ['role' => 'admin', 'scope' => null]);
+        $out['merged'][] = $p['period_label'];
+    }
+    return $out;
+}
+
+/* "October 1–15, 2026" - the label a cut-off gets */
+function cutoffLabel(string $start, string $end): string {
+    return date('F', strtotime($start)) . ' ' . (int)date('j', strtotime($start)) . '–' . (int)date('j', strtotime($end)) . ', ' . date('Y', strtotime($start));
+}
+
+/*
+ * Makes sure the two kinsenas cut-offs of a month exist (1st-15th and 16th-end), creating the missing one as Open - so a file for the
+ * whole month can be saved from the first half, and its second half has somewhere to go. A half that is already covered by some
+ * period (of any dates) is left alone. Returns the labels of the periods created.
+ */
+function ensureMonthPeriods(PDO $db, string $dateInMonth): array {
+    $ms = date('Y-m-01', strtotime($dateInMonth));
+    $me = date('Y-m-t', strtotime($dateInMonth));
+    $made = [];
+    foreach ([[$ms, date('Y-m-15', strtotime($ms))], [date('Y-m-16', strtotime($ms)), $me]] as [$s, $e]) {
+        if (overlappingPeriod($db, $s, $e, 0, 'Semi-Monthly')) continue;
+        $label = cutoffLabel($s, $e);
+        $db->prepare("INSERT INTO payroll_periods (period_label, start_date, end_date, period_type, status, created_by) VALUES (?,?,?,'Semi-Monthly','Open',?)")
+           ->execute([$label, $s, $e, currentUserId()]);
+        $made[] = $label;
+    }
+    return $made;
 }
 
 /*
@@ -1881,6 +2154,39 @@ function thirteenthMonthData(PDO $db, int $year): array {
 }
 
 /*
+ * Where a bonus or deduction recorded against a kinsenas cut-off goes for a MONTHLY-paid employee, who has no pay line in the 1st half:
+ * into their pay line of the month's last cut-off. Returns null when this does not apply (a kinsenas employee, an older whole-month
+ * period, an employee with no days saved in the month), otherwise
+ *   ['period' => the month's last cut-off row or null (not created yet), 'row' => the employee's payroll row there or null (waiting),
+ *    'locked' => that cut-off is finalized, 'emp' => ['id', 'full_name']]
+ */
+function monthlyAdjustmentTarget(PDO $db, array $period, string $empCode): ?array {
+    if (periodType($period['period_type'] ?? null) !== 'Semi-Monthly') return null;
+    $st = $db->prepare("SELECT id, full_name, pay_schedule FROM employees WHERE employee_code = ?");
+    $st->execute([$empCode]);
+    $emp = $st->fetch();
+    if (!$emp || $emp['pay_schedule'] !== 'Monthly') return null;
+    $ms = date('Y-m-01', strtotime($period['start_date']));
+    $me = date('Y-m-t', strtotime($period['start_date']));
+    $st = $db->prepare("SELECT 1 FROM payroll_periods WHERE period_type = 'Monthly' AND start_date <= ? AND end_date >= ? LIMIT 1");
+    $st->execute([$me, $ms]);
+    if ($st->fetchColumn()) return null;
+    $st = $db->prepare("SELECT 1 FROM biometric_daily WHERE employee_id = ? AND att_date BETWEEN ? AND ? LIMIT 1");
+    $st->execute([$emp['id'], $ms, $me]);
+    if (!$st->fetchColumn()) return null;
+    $final = monthFinalPeriod($db, $period['start_date']);
+    $row = null;
+    if ($final) {
+        $st = $db->prepare("SELECT p.id, p.employee_id, e.employee_code AS emp_id, e.full_name AS emp_name, p.gross_pay, p.withholding_tax,
+                                   p.sss_deduction, p.philhealth_deduction, p.pagibig_deduction, p.bonus_pay, p.other_deductions
+                              FROM payroll p JOIN employees e ON e.id = p.employee_id WHERE p.period_id = ? AND p.employee_id = ?");
+        $st->execute([$final['id'], $emp['id']]);
+        $row = $st->fetch() ?: null;
+    }
+    return ['period' => $final, 'row' => $row, 'locked' => $final && $final['status'] !== 'Open', 'emp' => $emp];
+}
+
+/*
  * recordAdjustments() - add bonuses or deductions to the payroll lines of ONE open period. The single code path behind the
  * Adjustments page and the 13th Month Pay page, so both obey the same rules and leave the same trail.
  *
@@ -1894,7 +2200,12 @@ function thirteenthMonthData(PDO $db, int $year): array {
  *   · a Bonus that takes the employee's bonuses for the period's calendar year over ₱90,000, the tax-exempt ceiling for
  *     13th-month pay and other benefits - unless $confirmOverExempt says a person decided to record it anyway
  *
- * Returns ['applied', 'applied_ids', 'skipped' (no payroll line), 'negative' / 'over' (texts), 'over_ids', 'cycle', 'is_revision'].
+ * A MONTHLY-paid employee has no pay line in the 1st half: their entry is kept against the period chosen and lands on their pay line of the
+ * month's last cut-off (monthlyAdjustmentTarget) - at once when that line exists, otherwise when it is computed ('waiting'). It is held back
+ * ('locked') when that cut-off is finalized: unlock it first.
+ *
+ * Returns ['applied', 'applied_ids', 'skipped' (no payroll line), 'negative' / 'over' (texts), 'over_ids', 'cycle', 'is_revision',
+ *          'waiting' (employee names whose pay line does not exist yet), 'locked' (names held back by a finalized last cut-off)].
  * A database error rolls everything back and is thrown.
  */
 function recordAdjustments(PDO $db, array $period, array $lines, string $type, string $reason, bool $confirmOverExempt = false): array {
@@ -1923,8 +2234,11 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
                                WHERE p.employee_id = ? AND YEAR(pp.start_date) = ?");
 
     $applied = [];
-    $skipped = $negative = $over = $overIds = [];
+    $skipped = $negative = $over = $overIds = $waiting = $locked = [];
     $total   = 0.0;
+    /* a monthly-paid employee's bonuses of the month that no pay line carries yet (the line is not computed) */
+    $pendingBonus = $db->prepare("SELECT COALESCE(SUM(h.amount), 0) FROM bonus_deductions h JOIN payroll_periods hp ON hp.id = h.period_id
+                                   WHERE h.employee_id = ? AND h.type = 'Bonus' AND hp.period_type <> 'Monthly' AND hp.start_date BETWEEN ? AND ?");
     try {
         $db->beginTransaction();
         foreach ($lines as $eid => $amount) {
@@ -1934,7 +2248,33 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
 
             $getPR->execute([$periodId, $eid]);
             $row = $getPR->fetch();
-            if (!$row) { $skipped[] = $eid; continue; }
+            $lineRev = $isRevision;           /* is the pay line that takes the entry in a cut-off finalized before? */
+            if (!$row) {
+                $alt = monthlyAdjustmentTarget($db, $period, $eid);
+                if ($alt === null) { $skipped[] = $eid; continue; }
+                if ($alt['locked']) { $locked[] = $alt['emp']['full_name'] . ' (' . $alt['period']['period_label'] . ' is finalized)'; continue; }
+                $row     = $alt['row'];
+                $lineRev = (int)($alt['period']['finalize_count'] ?? 0) > 0;
+                if ($row === null) {
+                    /* no pay line yet - the entry is kept, and the line picks it up when it is computed (syncMonthlyAdjustments) */
+                    if ($type === 'Bonus' && !$confirmOverExempt) {
+                        $ytdBonus->execute([$alt['emp']['id'], $periodYear]);
+                        $pendingBonus->execute([$alt['emp']['id'], date('Y-m-01', strtotime($period['start_date'])), date('Y-m-t', strtotime($period['start_date']))]);
+                        $ytd = (float)$ytdBonus->fetchColumn() + (float)$pendingBonus->fetchColumn() + $amount;
+                        if ($ytd > BIR_EXEMPT_BENEFITS + 0.004) {
+                            $over[]    = $alt['emp']['full_name'] . ' (' . $periodYear . ' bonuses would be ₱' . number_format($ytd, 2)
+                                       . ', ₱' . number_format($ytd - BIR_EXEMPT_BENEFITS, 2) . ' over)';
+                            $overIds[] = $eid;
+                            continue;
+                        }
+                    }
+                    $histIns->execute([$alt['emp']['id'], $type, $amount, $reason, $who, $periodId, $cycle]);
+                    $applied[$eid] = $amount;
+                    $waiting[]     = $alt['emp']['full_name'];
+                    $total        += $amount;
+                    continue;
+                }
+            }
 
             $bonus = (float)$row['bonus_pay'];
             $ded   = (float)$row['other_deductions'];
@@ -1961,7 +2301,7 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
                 }
             }
 
-            ($isRevision ? $updPRrev : $updPR)->execute([$bonus, $ded, round($net, 2), $row['id']]);
+            ($lineRev ? $updPRrev : $updPR)->execute([$bonus, $ded, round($net, 2), $row['id']]);
             $histIns->execute([$row['employee_id'], $type, $amount, $reason, $who, $periodId, $cycle]);
             $applied[$eid] = $amount;
             $total += $amount;
@@ -1980,7 +2320,8 @@ function recordAdjustments(PDO $db, array $period, array $lines, string $type, s
           . " ($reason) applied to " . count($applied) . " employee(s) after finalize #$cycle.");
     }
     return ['applied' => count($applied), 'applied_ids' => array_keys($applied), 'skipped' => $skipped,
-            'negative' => $negative, 'over' => $over, 'over_ids' => $overIds, 'cycle' => $cycle, 'is_revision' => $isRevision];
+            'negative' => $negative, 'over' => $over, 'over_ids' => $overIds, 'cycle' => $cycle, 'is_revision' => $isRevision,
+            'waiting' => $waiting, 'locked' => $locked];
 }
 
 /*
@@ -2383,6 +2724,90 @@ function savePayslipSignature(PDO $db, array $payrollRow, string $signatureData)
                                 signed_by_user = VALUES(signed_by_user), signed_at = NOW()
     ")->execute([$payrollRow['id'], $signatureData, $payrollRow['net_pay'], currentUserId()]);
     return [true, 'Signature saved.'];
+}
+
+/* A drawn signature as the pads send it: a PNG data URL of a sane size */
+function signatureDataValid(string $data): bool {
+    return (bool)preg_match('#^data:image/png;base64,[A-Za-z0-9+/]+={0,2}$#', $data) && strlen($data) <= 2000000;
+}
+
+/*
+ * Save the employee's signature on a bonus / deduction receipt - only once the entry's pay period is finalized (the entry is
+ * paid out with that period), stamped with the amount it acknowledges. $adj needs id, period_id and amount.
+ * Returns [ok, message].
+ */
+function saveAdjustmentSignature(PDO $db, array $adj, string $signatureData): array {
+    if (!signatureDataValid($signatureData)) {
+        return [false, 'That signature could not be read. Clear the pad and sign again.'];
+    }
+    $status = null;
+    if (!empty($adj['period_id'])) {
+        $st = $db->prepare("SELECT status FROM payroll_periods WHERE id = ?");
+        $st->execute([$adj['period_id']]);
+        $status = $st->fetchColumn();
+    }
+    if ($status === false || $status === null || $status === 'Open') {
+        return [false, 'This entry\'s pay period is still open, so the entry can still be corrected. '
+                     . 'Finalize the period in Payroll Processing first, then collect the signature.'];
+    }
+    $db->prepare("
+        INSERT INTO adjustment_signatures (adjustment_id, signature_data, amount_signed, signed_by_user)
+        VALUES (?,?,?,?)
+        ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), amount_signed = VALUES(amount_signed),
+                                signed_by_user = VALUES(signed_by_user), signed_at = NOW()
+    ")->execute([$adj['id'], $signatureData, $adj['amount'], currentUserId()]);
+    return [true, 'Signature saved.'];
+}
+
+/* The admin's drawn signature (a PNG data URL) as Settings saved it, or null when there is none */
+function adminSignatureData(): ?string {
+    try {
+        $v = getDB()->query("SELECT signature_data FROM admin_signature WHERE id = 1")->fetchColumn();
+        return ($v !== false && $v !== '') ? (string)$v : null;
+    } catch (PDOException $e) {
+        return null;
+    }
+}
+
+/*
+ * Settings > Authorised Signatory: the real name and position printed under the admin's signature on every receipt, and
+ * the drawn signature itself. Nothing is saved unless the signed-in admin types their own password. $signatureData '' keeps
+ * the signature already on file. Wrong passwords count with the sign-in attempts, so a left-open session cannot be used to
+ * guess it. Returns [ok, message].
+ */
+function saveSignatory(PDO $db, string $name, string $position, string $signatureData, string $password): array {
+    $name     = trim(preg_replace('/\s+/', ' ', $name));
+    $position = trim(preg_replace('/\s+/', ' ', $position));
+    if ($name === '' || mb_strlen($name) < 2 || mb_strlen($name) > 100) {
+        return [false, 'Enter the signatory\'s full name (2 to 100 characters).'];
+    }
+    if (mb_strlen($position) > 100) return [false, 'The position can be at most 100 characters.'];
+    if ($signatureData !== '' && !signatureDataValid($signatureData)) {
+        return [false, 'That signature could not be read. Clear the pad and sign again.'];
+    }
+
+    $me = $db->prepare("SELECT id, email, password_hash FROM users WHERE id = ? AND role = 'Admin'");
+    $me->execute([currentUserId()]);
+    $me = $me->fetch();
+    if (!$me) return [false, 'Only the signed-in admin can change the signatory.'];
+
+    if (loginBlocked($db, (string)$me['email'])) {
+        return [false, 'Too many wrong passwords. Wait 15 minutes and try again.'];
+    }
+    if ($password === '' || !password_verify($password, $me['password_hash'])) {
+        recordLogin($db, (string)$me['email'], false);
+        return [false, 'Your password is incorrect, so the signatory was not changed.'];
+    }
+
+    setSetting('bir_signatory_name', $name);
+    setSetting('bir_signatory_position', $position);
+    if ($signatureData !== '') {
+        $db->prepare("INSERT INTO admin_signature (id, signature_data, updated_by) VALUES (1, ?, ?)
+                      ON DUPLICATE KEY UPDATE signature_data = VALUES(signature_data), updated_by = VALUES(updated_by)")
+           ->execute([$signatureData, $me['id']]);
+    }
+    return [true, 'Signatory saved. ' . ($signatureData !== '' ? 'The new signature' : 'Your signature')
+                . ' will be printed on every receipt whose pay period is finalized.'];
 }
 
 /*

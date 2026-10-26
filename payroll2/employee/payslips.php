@@ -106,7 +106,8 @@ if ($rows) {
                 <div>
                     <strong style="font-size:1.05rem;"><?= htmlspecialchars($r['period_label']) ?></strong>
                     <br><small style="color:#6b7280;">
-                        <?= date('M d', strtotime($r['start_date'])) ?> – <?= date('M d, Y', strtotime($r['end_date'])) ?>
+                        <?php [$covFrom, $covTo] = payLineRange($r); ?>
+                        <?= date('M d', strtotime($covFrom)) ?> – <?= date('M d, Y', strtotime($covTo)) ?><?= $covFrom !== $r['start_date'] ? ' (whole month)' : '' ?>
                     </small>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">

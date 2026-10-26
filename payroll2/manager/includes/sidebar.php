@@ -12,6 +12,7 @@ $nav  = [
     'manual-attendance'  => ['label' => 'Manual Attendance',  'short' => 'Manual',   'href' => '/manager/manual-attendance.php'],
     'month-attendance'   => ['label' => "This Month's Attendance", 'short' => 'Month', 'href' => '/manager/month-attendance.php'],
     'sign-payslip'       => ['label' => 'Sign Payslip',       'short' => 'Sign',     'href' => '/manager/sign-payslip.php'],
+    'sign-adjustment'    => ['label' => 'Sign Bonus Receipt', 'short' => 'Bonus',    'href' => '/manager/sign-adjustment.php'],
     'employee-profiles'  => ['label' => 'Employee Profiles',  'short' => 'Profiles', 'href' => '/manager/employee-profiles.php'],
 ];
 $activePage = $activePage ?? '';

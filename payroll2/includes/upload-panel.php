@@ -8,8 +8,10 @@ if (get_included_files()[0] === __FILE__) { http_response_code(404); exit; }
  * Driven by assets/js/attendance-formats.js + attendance-upload.js.
  *
  * The two ideas a new user needs, said on screen:
- *   - A pay period (cut-off) is WHAT you pay for: Semi-Monthly or Monthly. It takes the employees paid on that schedule
- *     (Employees > Add / Edit > Pay Schedule); the other employees' days are saved and count in their own pay period.
+ *   - A pay period (cut-off) is WHAT you pay for: the 1st-15th or the 16th-end of a month. There is one set of them. A file may hold
+ *     a half month or the whole month - each day goes to the cut-off that holds its date. Employees paid twice a month are paid in
+ *     both cut-offs; employees paid once a month (Employees > Add / Edit > Pay Schedule) are paid in the month's last cut-off, for the
+ *     whole month, once it holds days of theirs.
  *   - A file is HOW attendance arrives: day-by-day rows add up inside the period,
  *     a totals file (one line per employee) replaces the period's attendance.
  */
@@ -118,22 +120,19 @@ function uploadPanel(array $o): void {
             <span class="up-num">1</span>
             <div>
                 <h2>Choose the pay period</h2>
-                <p>The cut-off you are paying for. Every upload goes into one pay period.</p>
+                <p>The cut-off you are paying for. A file can hold a half month or the whole month - every day goes to the cut-off that holds its date.</p>
             </div>
         </div>
         <div class="up-card-body">
             <div class="up-row">
                 <div class="up-field">
-                    <label>Pay schedule</label>
-                    <div class="schedule-switch" role="group" aria-label="Pay schedule">
-                        <button type="button" data-type="Semi-Monthly" onclick="setSchedule('Semi-Monthly')">Semi-Monthly</button>
-                        <button type="button" data-type="Monthly" onclick="setSchedule('Monthly')">Monthly</button>
-                        <button type="button" data-type="All" onclick="setSchedule('All')">All</button>
-                    </div>
-                    <p class="up-hint" style="margin:8px 0 0;">
-                        <b>Semi-Monthly</b> (kinsenas) pays twice a month: 1–15 and 16–end.
-                        <b>Monthly</b> pays once for the whole month. A pay period takes the employees on its schedule
-                        (set on each employee).
+                    <label>How the month is paid</label>
+                    <p class="up-hint" style="margin:0;">
+                        Pay periods are the <b>kinsenas cut-offs</b>: 1–15 and 16–end. Upload a half month or the whole month into either.<br>
+                        Employees paid <b>twice a month</b> are paid in both cut-offs. Employees paid <b>once a month</b> are not
+                        in the 1st half: their days are saved, and their pay for the <b>whole month</b> - with the bonuses and deductions of both
+                        halves - is computed in the 16–end cut-off, as soon as it holds days of theirs (the 2nd half, or a whole-month file).
+                        This is set on each employee (Employees &rsaquo; Pay Schedule).
                     </p>
                 </div>
                 <div class="up-field">
@@ -159,11 +158,10 @@ function uploadPanel(array $o): void {
                 <summary>+ Create a new pay period</summary>
                 <div class="up-create">
                     <div class="up-field">
-                        <label for="newPeriodType">Schedule</label>
+                        <label for="newPeriodType">Cut-off</label>
                         <select id="newPeriodType" onchange="fillPeriodDates()">
-                            <option value="Semi-Monthly|1" <?= $o['defaultType'] === 'Semi-Monthly' ? 'selected' : '' ?>>Semi-Monthly - 1st half (1–15)</option>
-                            <option value="Semi-Monthly|2">Semi-Monthly - 2nd half (16–end)</option>
-                            <option value="Monthly|0" <?= $o['defaultType'] === 'Monthly' ? 'selected' : '' ?>>Monthly (whole month)</option>
+                            <option value="Semi-Monthly|1" selected>1st half (1–15)</option>
+                            <option value="Semi-Monthly|2">2nd half (16–end)</option>
                         </select>
                     </div>
                     <div class="up-field">
@@ -247,6 +245,7 @@ function uploadPanel(array $o): void {
         <div class="up-card-body">
             <div id="kindNote"></div>
             <div id="rangeWarn" class="up-warn" hidden></div>
+            <div id="rangeInfo" class="up-kind daily" hidden></div>
             <div id="periodLinkBox"></div>
 
             <div id="previewSection">

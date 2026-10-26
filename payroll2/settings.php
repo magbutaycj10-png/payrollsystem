@@ -23,7 +23,15 @@ const SETTINGS_LISTS = [
                      'uses'  => ['employee' => ['employees', 'position_id']]],
 ];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['list_action']) && isset(SETTINGS_LISTS[$_POST['list'] ?? ''])) {
+/* ── Authorised signatory: the name, position and drawn signature printed on every receipt ──
+ * Kept out of the general form on purpose: it is saved only when the admin types their own password. */
+$sigMsg = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['signatory_action'])) {
+    [$sigOk, $sigText] = saveSignatory($db, (string)($_POST['sig_name'] ?? ''), (string)($_POST['sig_position'] ?? ''),
+                                       (string)($_POST['sig_data'] ?? ''), (string)($_POST['sig_password'] ?? ''));
+    $sigMsg = ['type' => $sigOk ? 'success' : 'error', 'text' => $sigText];
+
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['list_action']) && isset(SETTINGS_LISTS[$_POST['list'] ?? ''])) {
     $kind   = $_POST['list'];
     $cfg    = SETTINGS_LISTS[$kind];
     $action = $_POST['list_action'];
@@ -101,7 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['list_action']) && iss
         'overtime_method', 'overtime_multiplier',
         // Company details - printed on every payslip, receipt and report
         'bir_registered_name', 'bir_business_style', 'bir_address', 'bir_tin',
-        'bir_system_name', 'bir_signatory_name', 'bir_signatory_position',
+        'bir_system_name',
+        /* (the signatory's name and position are saved by their own password-protected form, Authorised Signatory) */
     ];
     /* What a value must be to be saved. A negative overtime rate used to be accepted - and then SUBTRACTED from pay. */
     $settingErrors = [];
@@ -168,6 +177,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['list_action']) && iss
 
 $s           = $db->query("SELECT setting_key, setting_value FROM settings")->fetchAll(PDO::FETCH_KEY_PAIR);
 $bir         = birConfig();   // company letterhead fields, with defaults filled in
+$sigRow      = null;          // the admin's drawn signature on file (null: none yet, or the table is not there yet)
+try {
+    $sigRow = $db->query("SELECT s.signature_data, s.updated_at, COALESCE(u.full_name, '') AS by_name
+                            FROM admin_signature s LEFT JOIN users u ON u.id = s.updated_by WHERE s.id = 1")->fetch() ?: null;
+} catch (PDOException $e) {}
 $serAR       = birSeriesStatus('AR');   // payslip / receipt numbering
 $serADJ      = birSeriesStatus('ADJ');  // bonus / deduction numbering
 
@@ -314,15 +328,15 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_logs")->fetchColumn();
                             Next number to be issued. <?= (int)$serADJ['issued'] ?> receipt(s) issued so far.
                         </span>
                     </div>
-                    <div class="form-group">
+                    <div class="form-group" style="grid-column:span 2;">
                         <label>Authorised Signatory</label>
-                        <input type="text" name="bir_signatory_name" class="form-control"
-                               value="<?= htmlspecialchars($bir['bir_signatory_name']) ?>" placeholder="Name printed on the receipt">
-                    </div>
-                    <div class="form-group">
-                        <label>Signatory Position</label>
-                        <input type="text" name="bir_signatory_position" class="form-control"
-                               value="<?= htmlspecialchars($bir['bir_signatory_position']) ?>">
+                        <div style="padding:9px 12px;border-radius:7px;border:1.5px solid #e5e7eb;background:#f9fafb;font-weight:600;color:#111827;">
+                            <?= htmlspecialchars($bir['bir_signatory_name'] !== '' ? $bir['bir_signatory_name'] : 'Not set yet') ?>
+                            <span style="font-weight:400;color:#6b7280;"> - <?= htmlspecialchars($bir['bir_signatory_position']) ?></span>
+                        </div>
+                        <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">
+                            The name and signature on every receipt are set in <a href="#signatory" style="color:#6b7280;">Authorised Signatory</a> below (needs your password).
+                        </span>
                     </div>
                 </div>
             </div>
@@ -351,8 +365,9 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_logs")->fetchColumn();
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Overtime Rate (₱/hr) - flat method</label>
+                        <label>Company Overtime Rate (₱/hr) - flat method</label>
                         <input type="number" name="overtime_rate" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>" value="<?= htmlspecialchars($s['overtime_rate'] ?? '150') ?>">
+                        <span style="font-size:.78rem;color:#9ca3af;margin-top:4px;display:block;">Used for every employee who has no overtime rate of their own - set one in Employees &rsaquo; Add / Edit.</span>
                     </div>
                     <div class="form-group">
                         <label>Overtime Multiplier - Labor Code method</label>
@@ -409,6 +424,75 @@ $logCount    = $db->query("SELECT COUNT(*) FROM print_logs")->fetchColumn();
         </div>
 
     </form>
+
+    <!-- Authorised signatory: its own form, saved only with the admin's password -->
+    <div class="box" id="signatory" style="margin-bottom:20px;">
+        <div class="box-header">
+            <h2>Authorised Signatory</h2>
+            <span style="font-size:.8rem;color:#6b7280;">Printed on every payslip and bonus / deduction receipt once its pay period is finalized</span>
+        </div>
+        <div class="box-body">
+            <?php if ($sigMsg): ?>
+                <div class="alert alert-<?= $sigMsg['type'] ?>"><?= htmlspecialchars($sigMsg['text']) ?></div>
+            <?php endif; ?>
+            <style>
+                .sg-outer  { border: 2px solid #e5e7eb; border-radius: 10px; background: #fff; touch-action: none; max-width: 520px; }
+                .sg-canvas { display: block; width: 100%; border-radius: 8px; cursor: crosshair; }
+                .sg-on-file { display:inline-block; border:1px dashed #cbd5e1; border-radius:8px; padding:8px 14px; background:#fff; }
+                .sg-on-file img { display:block; max-height:70px; max-width:260px; }
+            </style>
+            <form method="POST" action="#signatory" id="signatoryForm" autocomplete="off">
+                <input type="hidden" name="signatory_action" value="save">
+                <input type="hidden" name="sig_data" id="sigData">
+                <div class="form-grid" style="grid-template-columns:repeat(auto-fill,minmax(240px,1fr));margin-bottom:16px;">
+                    <div class="form-group">
+                        <label>Signatory Name *</label>
+                        <input type="text" name="sig_name" class="form-control" required maxlength="100"
+                               value="<?= htmlspecialchars($_POST['sig_name'] ?? $bir['bir_signatory_name']) ?>" placeholder="Full name printed under the signature">
+                    </div>
+                    <div class="form-group">
+                        <label>Position</label>
+                        <input type="text" name="sig_position" class="form-control" maxlength="100"
+                               value="<?= htmlspecialchars($_POST['sig_position'] ?? $bir['bir_signatory_position']) ?>">
+                    </div>
+                </div>
+
+                <label style="font-weight:700;font-size:.9rem;display:block;margin-bottom:8px;">Signature</label>
+                <?php if ($sigRow): ?>
+                <div style="margin-bottom:12px;">
+                    <div class="sg-on-file"><img src="<?= htmlspecialchars($sigRow['signature_data']) ?>" alt="Signature on file"></div>
+                    <div style="font-size:.78rem;color:#6b7280;margin-top:4px;">
+                        On file since <?= date('M d, Y g:i A', strtotime($sigRow['updated_at'])) ?><?= $sigRow['by_name'] !== '' ? ' (' . htmlspecialchars($sigRow['by_name']) . ')' : '' ?>.
+                        Draw below only to replace it.
+                    </div>
+                </div>
+                <?php else: ?>
+                <div class="alert alert-warn" style="margin-bottom:12px;">
+                    <span>No signature on file yet - receipts show only the name until you draw one below.</span>
+                </div>
+                <?php endif; ?>
+                <div class="sg-outer"><canvas id="sigCanvas" class="sg-canvas" height="180"></canvas></div>
+                <div style="font-size:.78rem;color:#9ca3af;margin:6px 0 14px;">Draw with the mouse or a finger. It is stamped on the receipts once payroll is finalized - never on a period that is still open.</div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="sigPad.clear()" style="margin-bottom:16px;">Clear</button>
+
+                <div class="form-group" style="max-width:320px;">
+                    <label>Your Password *</label>
+                    <input type="password" name="sig_password" class="form-control" required autocomplete="current-password" placeholder="Confirms it is you">
+                    <span style="font-size:.78rem;color:#6b7280;margin-top:4px;display:block;">Required to change the name or the signature.</span>
+                </div>
+                <div class="form-actions" style="margin-top:14px;">
+                    <button type="submit" class="btn btn-primary">Save Signatory</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="assets/js/sig-pad.js"></script>
+    <script>
+    const sigPad = SigPad(document.getElementById('sigCanvas'), { height: 180 });
+    document.getElementById('signatoryForm').addEventListener('submit', function () {
+        document.getElementById('sigData').value = sigPad.hasInk() ? sigPad.toDataURL() : '';
+    });
+    </script>
 
     <?php
     /*

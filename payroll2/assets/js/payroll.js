@@ -32,6 +32,20 @@ async function unlockPayroll() {
     }
 }
 
+/* Fold the older whole-month periods into the cut-offs (they show a month twice) */
+async function tidyMonthlyPeriods() {
+    if (!confirm('Tidy up the older whole-month pay periods?\n\n'
+        + 'Empty ones are removed. An open one is folded into the cut-offs: the 1st-15th and 16th-end are rebuilt from the saved days, '
+        + 'and its bonuses and deductions move to the last cut-off of the month. Finalized ones are left alone.')) return;
+    const data = await periodAction('tidy_monthly');
+    if (data.success) {
+        showAlert(data.message, 'alert-success');
+        setTimeout(() => location.reload(), 2200);
+    } else {
+        showAlert('Error: ' + data.error, 'alert-error');
+    }
+}
+
 /* Rebuild the period from its saved days with the current rules and Settings (open periods only) */
 async function recomputePayroll() {
     if (!confirm('Recompute this period?\n\n'

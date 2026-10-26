@@ -43,6 +43,7 @@ function openModal() {
     TIMING_KEYS.forEach(k => { document.getElementById('f_' + k + '_timing').value = _newEmployeeSchedule.timing[k]; });
     setRestDays('7');                                   /* Sunday off unless changed */
     document.getElementById('f_day_hours').value = '';
+    document.getElementById('f_ot_rate').value = '';
     updateSalaryLabel();
     updateScheduleState();
     modal.classList.add('open');
@@ -82,6 +83,7 @@ function editEmp(e) {
     });
     setRestDays(e.rest_days ?? '7');
     document.getElementById('f_day_hours').value = e.hours_per_day ? parseFloat(e.hours_per_day) : '';
+    document.getElementById('f_ot_rate').value = e.overtime_rate !== null && e.overtime_rate !== undefined && e.overtime_rate !== '' ? parseFloat(e.overtime_rate) : '';
     updateSalaryLabel();
     updateScheduleState();
     modal.classList.add('open');

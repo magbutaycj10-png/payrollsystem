@@ -24,6 +24,7 @@ $navGroups = [
         'thirteenth-month'  => ['label' => '13th Month Pay',     'href' => 'thirteenth-month.php'],
         'reports'           => ['label' => 'Reports & Payslips', 'href' => 'reports.php'],
         'sign-payslip'      => ['label' => 'Sign Payslip',       'href' => 'sign-payslip.php'],
+        'sign-adjustment'   => ['label' => 'Sign Bonus Receipt', 'href' => 'sign-adjustment.php'],
     ],
     'Records' => [
         'history'           => ['label' => 'Adjustment History', 'href' => 'history.php'],

@@ -14,7 +14,11 @@
  *             the payroll row was already updated while the period was open.
  *
  * Only employees who actually have a payroll row in the selected period can be
- * adjusted - there is nothing to add a bonus to otherwise.
+ * adjusted - there is nothing to add a bonus to otherwise. The exception is a
+ * MONTHLY-paid employee: they are paid once, in the month's last cut-off, for the
+ * whole month, so a bonus or deduction recorded against the 1st half (or the 2nd)
+ * is added to that one pay line - at once if it exists, otherwise as soon as the
+ * month's last cut-off is computed.
  */
 
 require 'includes/helpers.php';
@@ -80,12 +84,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $applied = $res['applied']; $skipped = $res['skipped'];
             $negative = $res['negative']; $overExempt = $res['over']; $overExemptIds = $res['over_ids'];
             $cycle = $res['cycle']; $isRevision = $res['is_revision'];
+            $waiting = $res['waiting']; $lockedOut = $res['locked'];
 
             /* What the guards held back is always said, whether or not anything else was applied */
             $held = '';
             if ($skipped) {
                 $held .= ' Skipped ' . count($skipped) . ' employee(s) with no payroll record in this period: '
                        . implode(', ', $skipped) . '.';
+            }
+            if ($lockedOut) {
+                $held .= ' NOT applied to ' . count($lockedOut) . ' monthly-paid employee(s), because their pay is in the month\'s last cut-off and that one is finalized: '
+                       . implode('; ', $lockedOut) . '. Unlock it in Payroll Processing, then record this again.';
             }
             if ($negative) {
                 $held .= ' NOT applied to ' . count($negative) . ' employee(s), because the deduction would make their net pay negative: '
@@ -101,12 +110,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($applied) {
                 $text = "$type of \u{20B1}" . number_format($amount, 2) . " applied to $applied employee(s) for "
                       . $curPeriod['period_label'] . '. Payroll and history both updated.';
+                if ($waiting) {
+                    $text .= ' ' . implode(', ', $waiting) . (count($waiting) === 1 ? ' is' : ' are') . ' paid monthly and the pay is not computed yet'
+                           . ' (it waits for the last cut-off of the month): the entry is saved and will be in the monthly pay when it is.';
+                }
                 if ($isRevision) {
                     $text .= " This period was already finalized {$cycle}\u{00D7}, so the change is recorded as a revision"
                            . ' and those employees are now flagged Revised. Finalize the period again when you are done.';
                 }
-                $msg = ['type' => ($negative || $overExempt) ? 'warn' : 'success', 'text' => $text . $held];
-            } elseif ($negative || $overExempt) {
+                $msg = ['type' => ($negative || $overExempt || $lockedOut) ? 'warn' : 'success', 'text' => $text . $held];
+            } elseif ($negative || $overExempt || $lockedOut) {
                 $msg = ['type' => 'error', 'text' => 'Nothing applied.' . $held];
             } else {
                 $msg = ['type' => 'warn', 'text' => 'Nothing applied - none of the selected employees have a payroll record in '
@@ -137,6 +150,37 @@ if ($period_id) {
     );
     $st->execute([$period_id]);
     $roster = $st->fetchAll();
+
+    /* Monthly-paid employees with days this month but no line in THIS cut-off (they are paid in the last one, for the whole month):
+       listed too, with the figures of their line there when it exists */
+    $monthlyListed = [];
+    if (periodType($curPeriod['period_type'] ?? null) === 'Semi-Monthly') {
+        $have = array_column($roster, 'emp_name', 'emp_id');
+        $ms = date('Y-m-01', strtotime($curPeriod['start_date']));
+        $me = date('Y-m-t', strtotime($curPeriod['start_date']));
+        $legacy = $db->prepare("SELECT 1 FROM payroll_periods WHERE period_type = 'Monthly' AND start_date <= ? AND end_date >= ? LIMIT 1");
+        $legacy->execute([$me, $ms]);
+        if (!$legacy->fetchColumn()) {
+            $final = monthFinalPeriod($db, $curPeriod['start_date']);
+            $st = $db->prepare(
+                "SELECT e.employee_code AS emp_id, e.full_name AS emp_name, fp.bonus_pay AS bonus, fp.other_deductions, fp.net_pay,
+                        COALESCE(fp.revised_after_finalize, 0) AS revised_after_finalize, COALESCE(pos.title, '') AS `position`, fp.id AS line_id
+                   FROM employees e
+              LEFT JOIN positions pos ON pos.id = e.position_id
+              LEFT JOIN payroll fp ON fp.employee_id = e.id AND fp.period_id = ?
+                  WHERE e.pay_schedule = 'Monthly' AND e.status = 'Active'
+                    AND EXISTS (SELECT 1 FROM biometric_daily b WHERE b.employee_id = e.id AND b.att_date BETWEEN ? AND ?)
+               ORDER BY e.full_name ASC");
+            $st->execute([(int)($final['id'] ?? 0), $ms, $me]);
+            foreach ($st->fetchAll() as $m) {
+                if (isset($have[$m['emp_id']])) continue;
+                $m['monthly'] = true;
+                $m['waiting'] = $m['line_id'] === null;
+                $roster[] = $m;
+                $monthlyListed[$m['emp_id']] = true;
+            }
+        }
+    }
 }
 
 /* Has this period been finalized and re-opened? Drives the revision notice. */
@@ -398,11 +442,25 @@ if ($period_id) {
                                     <span class="rev-tag" title="This employee's pay was changed after the period was finalized">Revised</span>
                                 <?php endif; ?>
                             </div>
+                            <?php if (!empty($e['monthly'])): ?>
+                                <div class="emp-fig">
+                                    <span class="rev-tag" style="background:#e0e7ff;color:#3730a3;"
+                                          title="Paid once a month, in the month's last cut-off, for the whole month - bonuses and deductions of both halves go into that one pay">Monthly</span>
+                                    <?php if (!empty($e['waiting'])): ?>
+                                        pay waits for the last cut-off
+                                    <?php else: ?>
+                                        month: bonus <b>&#8369;<?= number_format($e['bonus'], 2) ?></b>
+                                        &bull; ded <b>&#8369;<?= number_format($e['other_deductions'], 2) ?></b>
+                                        &bull; net <b>&#8369;<?= number_format($e['net_pay'], 2) ?></b>
+                                    <?php endif; ?>
+                                </div>
+                            <?php else: ?>
                             <div class="emp-fig">
                                 bonus <b>&#8369;<?= number_format($e['bonus'], 2) ?></b>
                                 &bull; ded <b>&#8369;<?= number_format($e['other_deductions'], 2) ?></b>
                                 &bull; net <b>&#8369;<?= number_format($e['net_pay'], 2) ?></b>
                             </div>
+                            <?php endif; ?>
                         </div>
                     </label>
                     <?php endforeach; ?>

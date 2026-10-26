@@ -45,7 +45,7 @@ $ctx = [
 ];
 
 $select = "
-    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date,
+    SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date, pp.status AS period_status,
            (SELECT ps.signature_data
               FROM payslip_signatures ps
              WHERE ps.payroll_id = p.id
@@ -70,6 +70,7 @@ $rows = $st->fetchAll();
 if (!$withSig) {
     foreach ($rows as &$r) { $r['signature_data'] = null; }
     unset($r);
+    $ctx['blank_sig'] = true;
 }
 
 $ctx['period_label'] = $rows[0]['period_label'] ?? '';

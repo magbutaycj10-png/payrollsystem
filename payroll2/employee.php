@@ -51,6 +51,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dayHoursRaw = trim((string)($_POST['hours_per_day'] ?? ''));
         $dayHours = (float)$dayHoursRaw;
         $dayHours = $dayHours >= 1 && $dayHours <= 24 ? round($dayHours * 2) / 2 : null;
+        /* Pesos per overtime hour for this employee; blank = the company rate in Settings (0 is allowed: no overtime pay) */
+        $otRaw = trim((string)($_POST['overtime_rate'] ?? ''));
         /* Contact details and the emergency contact - blank is stored as empty */
         $profile = [];
         foreach (['address', 'phone', 'emergency_name', 'emergency_phone', 'emergency_relation'] as $col) {
@@ -61,6 +63,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         /* A salary is a real, non-negative number: a negative one used to be accepted and produced a negative payslip,
            and an absurd one (₱1e12) a payroll nobody could pay. Duty-day hours, when given, are 1 to 24. */
         $formProblem = pesoProblem('Salary', $_POST['base_salary'] ?? '', $salary_type === 'daily' ? MAX_RATE_PESOS : MAX_SALARY_PESOS);
+        if ($formProblem === null && $otRaw !== '') $formProblem = pesoProblem('Overtime rate', $otRaw, MAX_RATE_PESOS);
+        $otRate = $otRaw === '' ? null : round((float)$otRaw, 2);
         if ($formProblem === null && $first === '') $formProblem = 'The first name is required';
         if ($formProblem === null && $dayHoursRaw !== '' && $dayHours === null) $formProblem = 'Duty-day hours must be a number from 1 to 24 (or blank for the standard day)';
         $branchId = branchId($db, $branch);
@@ -85,12 +89,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $db->prepare("INSERT INTO employees (employee_code,first_name,last_name,position_id,branch_id,email,base_salary,salary_type,pay_schedule,date_hired,
                                                      sss_amount,philhealth_amount,pagibig_amount,tax_amount,
-                                                     sss_timing,philhealth_timing,pagibig_timing,tax_timing,rest_days,hours_per_day,
+                                                     sss_timing,philhealth_timing,pagibig_timing,tax_timing,rest_days,hours_per_day,overtime_rate,
                                                      address,phone,emergency_name,emergency_phone,emergency_relation)
-                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+                              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
                    ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $paySchedule, $hired,
                               $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'],
-                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours,
+                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours, $otRate,
                               $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation']]);
                 $empPk = (int)$db->lastInsertId();
                 $msg = ['type' => 'success', 'text' => "Employee $name added (ID: $emp_id)."];
@@ -108,11 +112,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 [$paySchedule, $timing] = $scheduleFor($prev);
                 $db->prepare("UPDATE employees SET employee_code=?,first_name=?,last_name=?,position_id=?,branch_id=?,email=?,base_salary=?,salary_type=?,pay_schedule=?,date_hired=?,
                                                    sss_amount=?,philhealth_amount=?,pagibig_amount=?,tax_amount=?,
-                                                   sss_timing=?,philhealth_timing=?,pagibig_timing=?,tax_timing=?,rest_days=?,hours_per_day=?,
+                                                   sss_timing=?,philhealth_timing=?,pagibig_timing=?,tax_timing=?,rest_days=?,hours_per_day=?,overtime_rate=?,
                                                    address=?,phone=?,emergency_name=?,emergency_phone=?,emergency_relation=? WHERE id=?")
                    ->execute([$emp_id, $first, $last, positionId($db, $pos), $branchId, $email !== '' ? $email : null, $salary, $salary_type, $paySchedule, $hired,
                               $amounts['sss'], $amounts['philhealth'], $amounts['pagibig'], $amounts['tax'],
-                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours,
+                              $timing['sss'], $timing['philhealth'], $timing['pagibig'], $timing['tax'], $restDays, $dayHours, $otRate,
                               $profile['address'], $profile['phone'], $profile['emergency_name'], $profile['emergency_phone'], $profile['emergency_relation'], $id]);
                 $empPk = $prev ? $id : 0;
                 /* the portal account carries the employee's name */
@@ -127,7 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         || ($prev['salary_type'] ?? '') !== $salary_type
                         || ($prev['pay_schedule'] ?? 'Semi-Monthly') !== $paySchedule
                         || ($prev['rest_days'] ?? '7') !== $restDays
-                        || (float)($prev['hours_per_day'] ?? 0) !== (float)($dayHours ?? 0);
+                        || (float)($prev['hours_per_day'] ?? 0) !== (float)($dayHours ?? 0)
+                        || (($prev['overtime_rate'] ?? null) === null) !== ($otRate === null)
+                        || (float)($prev['overtime_rate'] ?? 0) !== (float)($otRate ?? 0);
                 foreach ($amounts as $k => $v) {
                     if ((float)($prev["{$k}_amount"] ?? 0) !== $v) $changed = true;
                 }
@@ -135,7 +141,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($scheduleWas[$k] !== $v) $changed = true;
                 }
                 if (($prev['pay_schedule'] ?? 'Semi-Monthly') !== $paySchedule) {
-                    $msg['text'] .= " Pay schedule is now $paySchedule: from now on they are in the open $paySchedule pay periods and out of the others (finalized pay periods are left alone).";
+                    $msg['text'] .= $paySchedule === 'Monthly'
+                        ? " Pay schedule is now Monthly: from now on they are paid once a month, in the month's last cut-off, for the whole month (finalized pay periods are left alone)."
+                        : " Pay schedule is now Semi-Monthly: from now on they are paid at every cut-off (finalized pay periods are left alone).";
                 }
                 if ($changed) {
                     $redone = recomputeEmployeeOpenPeriods($db, $emp_id, '1000-01-01', '9999-12-31');
@@ -335,7 +343,10 @@ $total     = count($employees);
                                 <?= salaryTypeLabel($st) ?>
                             </span>
                             <?php $ps = in_array($e['pay_schedule'] ?? '', PAY_SCHEDULES, true) ? $e['pay_schedule'] : 'Semi-Monthly'; ?>
-                            <br><small style="color:#6b7280;white-space:nowrap;" title="Pay schedule - the pay periods they are in">Paid <?= $ps === 'Monthly' ? 'monthly' : 'semi-monthly' ?></small>
+                            <br><small style="color:#6b7280;white-space:nowrap;" title="<?= $ps === 'Monthly' ? 'Paid once a month, at the last cut-off, for the whole month' : 'Paid every cut-off' ?>">Paid <?= $ps === 'Monthly' ? 'monthly' : 'semi-monthly' ?></small>
+                            <?php if (isset($e['overtime_rate']) && $e['overtime_rate'] !== null && $e['overtime_rate'] !== ''): ?>
+                                <br><small style="color:#6b7280;white-space:nowrap;" title="Overtime rate of this employee (the company rate is in Settings)">OT ₱<?= rtrim(rtrim(number_format((float)$e['overtime_rate'], 2, '.', ''), '0'), '.') ?: '0' ?>/h</small>
+                            <?php endif; ?>
                             <br><small style="color:#6b7280;white-space:nowrap;" title="Day off">Off: <?= htmlspecialchars(restDayLabel($e['rest_days'] ?? null)) ?></small>
                             <?php if (!empty($e['hours_per_day'])): ?>
                                 <br><small style="color:#6b7280;white-space:nowrap;" title="Hours per duty day"><?= rtrim(rtrim(number_format($e['hours_per_day'], 1), '0'), '.') ?>-hour day</small>
@@ -459,8 +470,10 @@ $total     = count($employees);
                         <?php endforeach; ?>
                     </select>
                     <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">
-                        How often they are paid: Semi-Monthly (kinsenas) is twice a month. A pay period only includes the employees on its
-                        schedule. Change it at the start of a month: pay already made on the other schedule is not carried over.
+                        Semi-Monthly (kinsenas): paid at every cut-off, 1–15 and 16–end. Monthly: paid once, in the month's last cut-off (16–end),
+                        for the whole month - the days of both halves, with the bonuses and deductions of both halves. Their 1st-half days are
+                        saved, but they are not in the payroll until the 2nd half (or a whole-month file) is uploaded. Change it at the start
+                        of a month: pay already made on the other schedule is not carried over.
                     </span>
                 </div>
                 <div class="form-group">
@@ -476,6 +489,12 @@ $total     = count($employees);
                     <input type="number" name="hours_per_day" id="f_day_hours" class="form-control" step="0.5" min="1" max="24"
                            placeholder="<?= htmlspecialchars(getSetting('standard_hours', '8')) ?>">
                     <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">For a longer shift, e.g. 10 - a daily rate then covers 10 hours and undertime costs rate ÷ 10 an hour.</span>
+                </div>
+                <div class="form-group">
+                    <label>Overtime Rate <span style="font-weight:400;color:#9ca3af;">(₱ per hour - blank = <?= htmlspecialchars(rtrim(rtrim(number_format((float)getSetting('overtime_rate', '150'), 2, '.', ''), '0'), '.')) ?>, the company rate)</span></label>
+                    <input type="number" name="overtime_rate" id="f_ot_rate" class="form-control" step="0.01" min="0" max="<?= (int)MAX_RATE_PESOS ?>"
+                           placeholder="<?= htmlspecialchars(rtrim(rtrim(number_format((float)getSetting('overtime_rate', '150'), 2, '.', ''), '0'), '.')) ?>">
+                    <span style="font-size:.76rem;color:#9ca3af;margin-top:4px;display:block;">What each overtime hour of this employee pays. Leave it blank to use the company rate set in Settings.</span>
                 </div>
             </div>
             <p style="font-size:.78rem;color:#9ca3af;margin:12px 0 0;">

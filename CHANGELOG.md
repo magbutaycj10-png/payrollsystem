@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-26 - a real name and a drawn signature for the admin on every receipt; the bonus / deduction receipt is e-signed by the employee
+
+* **Settings > Authorised Signatory** (new card, own form): the admin types the **name** (and position) that prints under the signature and **draws the signature**. Nothing is saved unless the admin also types **their own password**; wrong passwords count with the sign-in attempts (5 in 15 minutes lock the form). Leave the pad empty to keep the signature on file. The two old boxes in *Company & Document Details* are gone (that form has no password); a line there shows the name and points to the new card.
+* **Both receipts** (the payslip & acknowledgement receipt, and the bonus advice / deduction conforme) now print that **real name** in the admin signature block. The bonus receipt used to print the account name, which is just "Admin"; that name is used only when no signatory is set. The admin's **drawn signature is stamped on the receipt once its pay period is finalized** - on an open or re-opened period the box stays empty. A *Blank Copies* print (`sig=0`) carries neither signature, both are signed in ink. The employee portal's copy has it too.
+* **Bonus / deduction receipts can be e-signed by the employee** like the payslip: new page **Sign Bonus Receipt** in the admin sidebar and in the manager portal (a manager sees and signs only for the employees they manage). Only after the entry's pay period is finalized; the signature is kept with the amount it acknowledges and is shown on both copies of the receipt; **Adjustment History** has a new *E-signed* column.
+* **Database**: two new tables, `adjustment_signatures` (one signature per `bonus_deductions` row, deleted with it) and `admin_signature` (one row). The first page load on an existing database creates them (`CREATE TABLE IF NOT EXISTS`, also in `sql/database.sql`); nothing existing changes. The admin's name and position stay in `settings` (`bir_signatory_name`, `bir_signatory_position`).
+* New `assets/js/sig-pad.js`: the signature pad, cropped to the ink so a small signature still prints large.
+
+### Tests
+New suite 17 (13 tests: the password-protected signatory form and its lock-out, the real name and the finalize rule on both receipts and in the employee portal, blank copies, the e-signing by admin and manager with scope, deductions, History, the upgrade of an existing database). Suite 13 counts 25 tables. `Http::call()` accepts `server` (e.g. `HTTP_X_REQUESTED_WITH`).
+
 ## 2026-10-24 - the pay schedule and the contribution schedule are set on each employee; "See brackets"; Settings tidied
 
 Not every employee is paid the same way: some are paid **Monthly**, some **kinsenas** (twice a month), and not all of them have their SSS, PhilHealth, Pag-IBIG and withholding tax taken on the same cut-off. So the two settings that used to hold this for everybody moved onto the employee.

@@ -386,6 +386,17 @@ function birFooter(array $cfg): string {
 }
 
 /* =============================================================
+ *  THE ADMIN'S SIGNATURE ON A RECEIPT
+ *  Settings > Authorised Signatory holds the drawn signature; it is printed only once the receipt's pay period is finalized
+ *  (the row carries period_status) and never on a blank copy ($ctx['blank_sig']), which is signed in ink on both sides.
+ * ============================================================= */
+function birAdminSigImg(array $row, array $ctx): string {
+    $status = (string)($row['period_status'] ?? '');
+    if (empty($ctx['admin_sig']) || $status === '' || $status === 'Open') return '';
+    return '<img src="' . birEsc($ctx['admin_sig']) . '" alt="Authorised signatory signature">';
+}
+
+/* =============================================================
  *  ONE PAYSLIP / ACKNOWLEDGEMENT-RECEIPT COPY
  * ============================================================= */
 function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
@@ -412,7 +423,8 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
 
     $periodRange = '-';
     if (!empty($r['start_date']) && !empty($r['end_date'])) {
-        $periodRange = date('M j', strtotime($r['start_date'])) . ' &ndash; ' . date('M j, Y', strtotime($r['end_date']));
+        [$covFrom, $covTo] = payLineRange($r);      /* a monthly-paid employee's line covers the whole month */
+        $periodRange = date('M j', strtotime($covFrom)) . ' &ndash; ' . date('M j, Y', strtotime($covTo));
     }
 
     /* This employee's pay was changed after the period had been finalized, so
@@ -504,7 +516,7 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
       <div class="rl">Received by - Employee signature over printed name</div></div>
     </div>
     <div class="sig">
-      <div class="box"></div>
+      <div class="box">' . birAdminSigImg($r, $ctx) . '</div>
       <div class="ln"><div class="nm">' . $signatory . '</div>
       <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Authorised signatory</div></div>
     </div>
@@ -527,6 +539,8 @@ function birRenderPayslipDoc(array $rows, array $ctx): string {
     $labels = $copies === 'employee' ? ['EMPLOYEE COPY']
             : ($copies === 'company' ? ['COMPANY COPY']
             : ['EMPLOYEE COPY', 'COMPANY COPY']);
+
+    $ctx['admin_sig'] = empty($ctx['blank_sig']) ? adminSignatureData() : null;
 
     $sheets = '';
     foreach ($rows as $r) {
@@ -729,7 +743,13 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
         ? 'I acknowledge having received from ' . birEsc($cfg['bir_registered_name']) . ' the amount stated above as the bonus / additional compensation described, and that it forms part of my compensation for the pay period indicated.'
         : 'I confirm that the deduction stated above was explained to me, that I consent to it being withheld from my salary for the pay period indicated, and that the reason given is correct.';
 
-    $signatory = trim($cfg['bir_signatory_name']) !== '' ? birEsc($cfg['bir_signatory_name']) : '&nbsp;';
+    /* The signatory's real name (Settings > Authorised Signatory); only without one does the account that recorded the entry
+       - which for the built-in admin account is just "Admin" - stand in */
+    $signatory = trim($cfg['bir_signatory_name']) !== '' ? birEsc($cfg['bir_signatory_name'])
+               : (trim((string)($h['processed_by'] ?? '')) !== '' ? birEsc($h['processed_by']) : '&nbsp;');
+    $empSigImg = !empty($h['signature_data'])
+        ? '<img src="' . birEsc($h['signature_data']) . '" alt="Employee signature">'
+        : '';
     $entryDate = !empty($h['entry_date']) ? date('M j, Y', strtotime($h['entry_date'])) : '-';
 
     /* An entry recorded after the period was already finalized is a correction.
@@ -772,13 +792,13 @@ function birAdjustmentCopy(array $h, array $ctx, string $copyLabel): string {
 
   <div class="sigs">
     <div class="sig">
-      <div class="box"></div>
+      <div class="box">' . $empSigImg . '</div>
       <div class="ln"><div class="nm">' . birEsc($h['emp_name']) . '</div>
       <div class="rl">' . $sigRole . '</div></div>
     </div>
     <div class="sig">
-      <div class="box"></div>
-      <div class="ln"><div class="nm">' . (birEsc($h['processed_by'] ?? '') ?: $signatory) . '</div>
+      <div class="box">' . birAdminSigImg($h, $ctx) . '</div>
+      <div class="ln"><div class="nm">' . $signatory . '</div>
       <div class="rl">' . birEsc($cfg['bir_signatory_position']) . ' - Processed by</div></div>
     </div>
   </div>
@@ -794,6 +814,8 @@ function birRenderAdjustmentDoc(array $rows, array $ctx): string {
     $labels = $copies === 'employee' ? ['EMPLOYEE COPY']
             : ($copies === 'company' ? ['COMPANY COPY']
             : ['EMPLOYEE COPY', 'COMPANY COPY']);
+
+    $ctx['admin_sig'] = empty($ctx['blank_sig']) ? adminSignatureData() : null;
 
     $sheets = '';
     foreach ($rows as $h) {

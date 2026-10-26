@@ -32,7 +32,13 @@
                     done:  o.getAttribute('data-signed') === '1'
                 };
             });
+        /* data-emp-search-all: the select's empty option ("All Employees") is offered first, so a filter can be cleared */
+        if (sel.hasAttribute('data-emp-search-all')) {
+            var allOpt = Array.prototype.filter.call(sel.options, function (o) { return o.value === ''; })[0];
+            items.unshift({ value: '', name: allOpt ? allOpt.text.trim() : 'All', id: '', done: false, all: true });
+        }
         items.forEach(function (it) { it.key = norm(it.name + ' ' + it.id); });
+        function labelOf(it) { return !it || it.all ? '' : it.name + ' (' + it.id + ')'; }
 
         var box = document.createElement('div');
         box.className = 'emp-search';
@@ -53,7 +59,7 @@
         sel.style.display = 'none';
 
         var current = items.filter(function (it) { return it.value === sel.value; })[0];
-        var label = current ? current.name + ' (' + current.id + ')' : '';
+        var label = labelOf(current);
         input.value = label;
 
         var shown = [], active = -1;
@@ -103,7 +109,8 @@
         }
         function pick(it) {
             close();
-            input.value = it.name + ' (' + it.id + ')';
+            input.value = labelOf(it);
+            label = input.value;
             if (sel.value === it.value) return;
             sel.value = it.value;
             sel.form.submit();

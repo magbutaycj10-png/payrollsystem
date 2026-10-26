@@ -15,10 +15,10 @@ $activePage = 'forecast';
 /* The payroll calendar drives the wording: a kinsenas shop forecasts the
    next PERIOD (the other half of the month), not the next month. */
 /* …read from the most recent period that has payroll (each period carries its own schedule); the schedule most employees are on when there is none */
-$fcLast        = getDB()->query("SELECT pp.period_type FROM payroll_periods pp
+$fcCalendar    = payrollCalendar(getDB()->query("SELECT pp.period_type, pp.start_date FROM payroll_periods pp
                                   WHERE EXISTS (SELECT 1 FROM payroll p WHERE p.period_id = pp.id)
-                                  ORDER BY pp.start_date DESC, pp.id DESC LIMIT 1")->fetchColumn();
-$fcPeriodType  = periodType($fcLast ?: null);
+                                  ORDER BY pp.start_date, pp.id")->fetchAll());
+$fcPeriodType  = $fcCalendar['period_type'];
 $fcIsSplit     = $fcPeriodType !== 'Monthly';
 $fcPeriodWord  = $fcPeriodType === 'Weekly' ? 'week' : ($fcIsSplit ? 'cut-off' : 'month');
 $fcPeriodNoun  = $fcPeriodType === 'Weekly' ? 'Next Week' : ($fcIsSplit ? 'Next Cut-off' : 'Next Month');

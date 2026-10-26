@@ -53,7 +53,7 @@ if ($doc === 'payslip') {
     $withSig   = ($_GET['sig'] ?? '1') !== '0';
 
     $select = "
-        SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date,
+        SELECT " . PAY_LINE_COLUMNS . ", pp.period_label, pp.start_date, pp.end_date, pp.status AS period_status,
                (SELECT ps.signature_data
                   FROM payslip_signatures ps
                  WHERE ps.payroll_id = p.id
@@ -75,6 +75,7 @@ if ($doc === 'payslip') {
     if (!$withSig) {
         foreach ($rows as &$r) { $r['signature_data'] = null; }
         unset($r);
+        $ctx['blank_sig'] = true;      /* the admin's stored signature stays off too: both sides sign in ink */
     }
 
     $ctx['period_label'] = $rows[0]['period_label'] ?? '';
@@ -123,13 +124,25 @@ if ($doc === "adjustment") {
     if (!in_array($copies, ["both", "employee", "company"], true)) $copies = "both";
 
     $st = $db->prepare("
-        SELECT " . ADJ_LINE_COLUMNS . ", pp.period_label
+        SELECT " . ADJ_LINE_COLUMNS . ", pp.period_label, pp.status AS period_status,
+               (SELECT s.signature_data
+                  FROM adjustment_signatures s
+                 WHERE s.adjustment_id = h.id
+                   AND (s.amount_signed IS NULL OR ABS(s.amount_signed - h.amount) < 0.005)
+              ORDER BY s.signed_at DESC LIMIT 1) AS signature_data
           FROM bonus_deductions h " . ADJ_LINE_JOINS . "
      LEFT JOIN payroll_periods pp ON pp.id = h.period_id
          WHERE h.id = ?
     ");
     $st->execute([$id]);
     $rows = $st->fetchAll();
+
+    /* sig=0: a blank copy - no stored signature on either side, both sign in ink */
+    if (($_GET["sig"] ?? "1") === "0") {
+        foreach ($rows as &$r) { $r["signature_data"] = null; }
+        unset($r);
+        $ctx["blank_sig"] = true;
+    }
 
     $ctx["period_label"] = $rows[0]["period_label"] ?? "";
     $ctx["copies"]       = $copies;

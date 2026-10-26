@@ -21,7 +21,12 @@ if ($fPeriod) { $where .= ' AND h.period_id = ?';   $params[] = $fPeriod; }
 if ($fType)   { $where .= ' AND h.type = ?';        $params[] = $fType; }
 if ($fRev)    { $where .= ' AND h.finalize_cycle > 0'; }
 
-$st = $db->prepare("SELECT " . ADJ_LINE_COLUMNS . " FROM bonus_deductions h " . ADJ_LINE_JOINS . "
+/* signed_at: when the employee e-signed the receipt for this amount (NULL = not signed; see Sign Bonus Receipt) */
+$st = $db->prepare("SELECT " . ADJ_LINE_COLUMNS . ",
+                           (SELECT s.signed_at FROM adjustment_signatures s
+                             WHERE s.adjustment_id = h.id AND (s.amount_signed IS NULL OR ABS(s.amount_signed - h.amount) < 0.005)
+                             ORDER BY s.signed_at DESC LIMIT 1) AS signed_at
+                      FROM bonus_deductions h " . ADJ_LINE_JOINS . "
                      WHERE $where ORDER BY h.entry_date DESC, h.id DESC LIMIT 300");
 $st->execute($params);
 $history   = $st->fetchAll();
@@ -69,10 +74,11 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
     <form method="GET" class="toolbar" style="margin-bottom:16px;">
         <div class="form-group" style="flex-direction:row;align-items:center;gap:6px;">
             <label style="font-size:.8rem;font-weight:600;color:#6b7280;white-space:nowrap;">Employee</label>
-            <select name="emp_id" class="form-control" style="min-width:200px;">
+            <select name="emp_id" class="form-control" style="min-width:200px;" data-emp-search data-emp-search-all>
                 <option value="">All Employees</option>
                 <?php foreach ($employees as $e): ?>
-                <option value="<?= htmlspecialchars($e['emp_id']) ?>" <?= $fEmp === $e['emp_id'] ? 'selected' : '' ?>>
+                <option value="<?= htmlspecialchars($e['emp_id']) ?>" <?= $fEmp === $e['emp_id'] ? 'selected' : '' ?>
+                        data-name="<?= htmlspecialchars($e['full_name']) ?>" data-id="<?= htmlspecialchars($e['emp_id']) ?>">
                     <?= htmlspecialchars($e['emp_id']) ?> - <?= htmlspecialchars($e['full_name']) ?>
                 </option>
                 <?php endforeach; ?>
@@ -98,7 +104,8 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
             </select>
         </div>
         <div class="form-group" style="flex-direction:row;align-items:center;gap:6px;">
-            <label style="font-size:.8rem;font-weight:600;color:#6b7280;white-space:nowrap;">
+            <label style="font-size:.8rem;font-weight:600;color:#6b7280;white-space:nowrap;"
+                   title="Only entries added after a pay period had already been finalized (it was re-opened to fix something). They carry a Revision tag below.">
                 <input type="checkbox" name="rev" value="1" <?= $fRev ? 'checked' : '' ?>
                        style="vertical-align:middle;margin-right:4px;">
                 Corrections only
@@ -131,14 +138,14 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                 <thead>
                     <tr>
                         <th>Date</th><th>ID</th><th>Employee</th><th>Type</th>
-                        <th>Amount</th><th>Reason</th><th>Period</th><th>By</th>
+                        <th>Amount</th><th>Reason</th><th>Period</th><th>By</th><th>E-signed</th>
                         <th class="no-print">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                 <?php if (empty($history)): ?>
                     <tr>
-                        <td colspan="9" style="text-align:center;color:#9ca3af;padding:30px;">
+                        <td colspan="10" style="text-align:center;color:#9ca3af;padding:30px;">
                             No entries found.
                             <?php if ($fEmp || $fPeriod || $fType): ?>
                                 <a href="history.php">Clear filters</a>
@@ -173,6 +180,13 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
                             <?php endif; ?>
                         </td>
                         <td><?= htmlspecialchars($h['processed_by']) ?></td>
+                        <td>
+                            <?php if ($h['signed_at']): ?>
+                                <span class="badge badge-green" title="<?= date('M d, Y g:i A', strtotime($h['signed_at'])) ?>">Signed <?= date('M d', strtotime($h['signed_at'])) ?></span>
+                            <?php else: ?>
+                                <span style="color:#9ca3af;">-</span>
+                            <?php endif; ?>
+                        </td>
                         <td class="no-print">
                             <button class="btn btn-print btn-sm" onclick="printReceipt(<?= (int)$h['id'] ?>)">
                                 Print Receipt
@@ -187,6 +201,7 @@ foreach ($history as $h) { if ((int)($h['finalize_cycle'] ?? 0) > 0) $revCount++
     </div>
 </div>
 
+<script src="assets/js/emp-search.js"></script>
 <script src="assets/js/history.js"></script>
 </body>
 </html>

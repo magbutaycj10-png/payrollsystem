@@ -39,6 +39,11 @@ $pp = $db->prepare("SELECT start_date, end_date, period_type FROM payroll_period
 $pp->execute([$period_id]);
 $perRow  = $pp->fetch();
 $payType = periodType($perRow['period_type'] ?? null);   /* the pay schedule this period is for */
+/* Rates, period share of a month, working days - see computePayLine() in helpers.php. Its monthly_here says whether the monthly-paid
+   employees are paid in this period too (the month's last cut-off: they are paid there for the whole month) */
+$ctx = payContext($db, $period_id);
+$monthlyHere = !empty($ctx['monthly_here']);
+$schedules   = $monthlyHere ? ['Semi-Monthly', 'Monthly'] : [$payType];   /* the schedules this period takes */
 $dayScope = '';
 $dayArgs  = [$perRow['start_date'], $perRow['end_date']];   /* a day belongs to the period that holds its date */
 if ($who['scope'] !== null) {
@@ -50,8 +55,8 @@ if ($who['scope'] !== null) {
 /* Only the days of the employees this period takes (those paid on its schedule): the others' days belong to their own pay period,
    which a totals file here neither counts nor replaces */
 if ($payType !== 'Weekly') {
-    $dayScope .= ' AND employee_id IN (SELECT id FROM employees WHERE pay_schedule = ?)';
-    $dayArgs[] = $payType;
+    $dayScope .= ' AND employee_id IN (SELECT id FROM employees WHERE pay_schedule IN (' . implode(',', array_fill(0, count($schedules), '?')) . '))';
+    $dayArgs = array_merge($dayArgs, $schedules);
 }
 $dc = $db->prepare("SELECT COUNT(*) FROM biometric_daily WHERE att_date BETWEEN ? AND ?$dayScope");
 $dc->execute($dayArgs);
@@ -71,7 +76,7 @@ foreach ($db->query("SELECT employee_code AS emp_id, full_name, pay_schedule FRO
 }
 $scope = $who['scope'] === null ? $names : array_intersect_key($names, array_flip($who['scope']));
 /* An employee paid on another schedule is not in this pay period (a Weekly one takes everybody) */
-$otherSchedule = fn(string $id): bool => $payType !== 'Weekly' && ($paidOn[$id] ?? 'Semi-Monthly') !== $payType;
+$otherSchedule = fn(string $id): bool => !employeeInPeriod(['pay_schedule' => $paidOn[$id] ?? 'Semi-Monthly'], $payType, $monthlyHere);
 
 /*
  * Match each row to an employee by name and give it that employee's system
@@ -83,8 +88,8 @@ $mismatches = [];
 $matched    = [];
 $invalid    = [];   /* lines whose hours cannot be right (negative, text, more than the period holds) - not saved, reported */
 
-/* How many calendar days the period holds: the most hours a line can honestly carry */
-$periodDays = $perRow ? (int)round((strtotime($perRow['end_date']) - strtotime($perRow['start_date'])) / 86400) + 1 : 31;
+/* How many calendar days the period holds: the most hours a line can honestly carry (the whole month where it pays the monthly employees) */
+$periodDays = $perRow ? (int)round((strtotime($perRow['end_date']) - strtotime($monthlyHere ? min($perRow['start_date'], $ctx['month_start']) : $perRow['start_date'])) / 86400) + 1 : 31;
 
 foreach ($rows as $r) {
     $name = trim((string)($r['emp_name'] ?? ''));
@@ -157,9 +162,6 @@ if (!$rows) {
     jsonResponse(['success' => true, 'count' => 0, 'mismatches' => $mismatches]);
 }
 
-/* Rates, period share of a month, working days - see computePayLine() in helpers.php */
-$ctx = payContext($db, $period_id);
-
 /* Each employee as the pay computation reads them (rate, type, duty hours, monthly contribution and tax amounts) */
 $empData = [];
 foreach ($db->query("SELECT * FROM employees")->fetchAll() as $er) $empData[$er['employee_code']] = payEmployee($er);
@@ -200,6 +202,7 @@ try {
     /* Replace the period's rows - the whole period for the admin, only their
        own employees for a manager. Safe to repeat: see rewritePeriodRows() */
     rewritePeriodRows($db, $period_id, $who, $attRows, $payRows);
+    syncMonthlyAdjustments($db, $period_id, $ctx);      /* a monthly-paid line carries the month's bonuses and deductions */
 
     /* Confirmed replace: the period's day records go too, or the next daily
        upload would bring them back and overwrite these totals */

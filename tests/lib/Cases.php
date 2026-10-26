@@ -112,7 +112,7 @@ function qa_edit_employee(string $empId, array $change, array $omit = []): array
     $e = Fixtures::empRow($empId);
     $post = ['action' => 'edit', 'id' => $e['id'], 'emp_id' => $e['emp_id'], 'first_name' => $e['first_name'], 'last_name' => (string)$e['last_name'], 'position' => (string)$e['position'],
              'branch' => (string)$e['branch'], 'email' => (string)$e['email'], 'salary_type' => $e['salary_type'], 'pay_schedule' => $e['pay_schedule'], 'base_salary' => $e['base_salary'],
-             'date_hired' => (string)$e['date_hired'], 'hours_per_day' => (string)$e['hours_per_day'],
+             'date_hired' => (string)$e['date_hired'], 'hours_per_day' => (string)$e['hours_per_day'], 'overtime_rate' => (string)$e['overtime_rate'],
              'rest_days' => $e['rest_days'] === '' ? [] : explode(',', $e['rest_days']),
              'sss_amount' => $e['sss_amount'], 'philhealth_amount' => $e['philhealth_amount'], 'pagibig_amount' => $e['pagibig_amount'], 'tax_amount' => $e['tax_amount'],
              'sss_timing' => $e['sss_timing'], 'philhealth_timing' => $e['philhealth_timing'], 'pagibig_timing' => $e['pagibig_timing'], 'tax_timing' => $e['tax_timing']];

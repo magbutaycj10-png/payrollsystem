@@ -29,6 +29,8 @@ const QA15_FAIL = 'qa_std_fail';
 const QA15_LEFTOVERS = ['bak_emp_employees', 'users_unmatched'];
 /** the columns of employees that the application's own patch list adds after the migration (the migration itself does not know them) */
 const QA15_PATCH_COLUMNS = ['pay_schedule', 'sss_timing', 'philhealth_timing', 'pagibig_timing', 'tax_timing'];
+/** the tables the application's own patch list creates after the migration (the signatures of 2026-10-26; suite 17 test D shows them arriving) */
+const QA15_PATCH_TABLES = ['adjustment_signatures', 'admin_signature'];
 const QA15_STANDARD_TABLES = ['settings', 'branches', 'departments', 'positions', 'employees', 'users', 'user_scopes', 'payroll_periods', 'biometric_daily',
                               'attendance_summary', 'leave_requests', 'bonus_deductions', 'payroll', 'payslip_signatures', 'print_logs', 'period_audit',
                               'login_attempts', 'document_series', 'document_serials', 'attendance_logs', 'biometric_employee_map', 'biometric_agent_state',
@@ -232,7 +234,10 @@ function qa15_signature(PDO $root, string $schema): array
     /* the leftover tables of the earlier update are left out - and so are the five employee columns the application adds itself on its first page
        (the pay schedule and the contribution schedule, a patch of 2026-10-24): the migration does not create them, test H shows them arriving */
     $patched = '/^column employees \| (' . implode('|', QA15_PATCH_COLUMNS) . ') \|/';
-    return array_values(array_filter($out, fn($l) => !preg_match('/^(column|index|foreign key|table) (' . implode('|', QA15_LEFTOVERS) . ')\b/', $l) && !preg_match($patched, $l)));
+    /* and the two signature tables the patch list creates (a patch of 2026-10-26) */
+    $patchedTables = '/^(column|index|foreign key|table) (' . implode('|', QA15_PATCH_TABLES) . ')\b/';
+    return array_values(array_filter($out, fn($l) => !preg_match('/^(column|index|foreign key|table) (' . implode('|', QA15_LEFTOVERS) . ')\b/', $l)
+                                                   && !preg_match($patched, $l) && !preg_match($patchedTables, $l)));
 }
 
 /** the migration file, whole */
@@ -624,6 +629,8 @@ T::suite('15 · The standard-layout migration (sql/migrate-standard-schema.sql)'
         $want = QA15_PATCH_COLUMNS;
         sort($want);
         $t->same($want, $cols, 'the application added the pay schedule and the four contribution schedules to employees');
+        $tbl = $db->query("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = '" . QA15_DB . "' AND TABLE_NAME IN ('" . implode("','", QA15_PATCH_TABLES) . "') ORDER BY TABLE_NAME")->fetchAll(PDO::FETCH_COLUMN);
+        $t->same(QA15_PATCH_TABLES, $tbl, 'and created the two signature tables (the admin\'s signature, the employees\' signatures on bonus / deduction receipts)');
         // every employee starts where the old Settings had them: SSS in two shares and tax on the 1st cut-off (the two Settings the seed changed), the usual for the rest;
         // paid Semi-Monthly - the schedule of the pay periods they were paid in (and of the old default for the four who have no pay yet)
         $rows = $db->query("SELECT employee_code, pay_schedule, sss_timing, philhealth_timing, pagibig_timing, tax_timing FROM employees ORDER BY id")->fetchAll(PDO::FETCH_NUM);

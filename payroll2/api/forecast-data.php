@@ -54,14 +54,9 @@ $rows = $db->query("
  * seasonal signal is (month, half) rather than month on its own.
  */
 /* …read from the most recent period itself (each period carries its own schedule); the schedule most employees are on when there is none */
-$lastType        = null;
-foreach ($rows as $r0) { if ((float)$r0['total_net'] > 0) $lastType = $r0['period_type'] ?? null; }
-$periodType      = periodType($lastType);
-$periodsPerMonth = match ($periodType) {
-    'Semi-Monthly' => 2,
-    'Weekly'       => 4,
-    default        => 1,
-};
+$cal             = payrollCalendar(array_values(array_filter($rows, fn($r0) => (float)$r0['total_net'] > 0)));
+$periodType      = $cal['period_type'];
+$periodsPerMonth = $cal['periods_per_month'];
 
 /* What the company adds on top of the pay it hands out (employer SSS, EC, PhilHealth, Pag-IBIG), per period */
 $employer = employerSharesByPeriod($db);

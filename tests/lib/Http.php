@@ -156,6 +156,7 @@ $_SERVER['REQUEST_URI']    = $_SERVER['SCRIPT_NAME'] . (empty($spec['query']) ? 
 $_SERVER['REMOTE_ADDR']    = '127.0.0.1';
 $_SERVER['HTTP_HOST']      = 'localhost';
 if (($spec['body'] ?? '') !== '') $_SERVER['CONTENT_TYPE'] = 'application/json';
+foreach (($spec['server'] ?? []) as $k => $v) $_SERVER[$k] = $v;      /* e.g. HTTP_X_REQUESTED_WITH for the pages that answer a fetch() */
 $_GET     = $spec['query'] ?? [];
 $_POST    = $spec['post'] ?? [];
 $_REQUEST = array_merge($_GET, $_POST);
