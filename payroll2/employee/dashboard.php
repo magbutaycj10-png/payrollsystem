@@ -38,23 +38,25 @@ if ($latest) {
 }
 
 /* ── Pay history ────────────────────────────────────────────────────────
- * Last six periods, oldest first, so the chart reads left to right like a
- * timeline. Also drives the "vs. last period" comparison.
+ * The last six months (the newest payslip's month included), oldest first, so
+ * the charts read left to right like a timeline. The "vs. last period"
+ * comparison below looks at the two newest payslips, whatever their month.
  */
 $history = $db->prepare("
-    SELECT p.net_pay, p.gross_pay, COALESCE(s.total_hours_worked, 0) AS hours_worked, COALESCE(s.total_overtime_hours, 0) AS overtime_hours, pp.period_label
+    SELECT p.net_pay, p.gross_pay, COALESCE(s.total_hours_worked, 0) AS hours_worked, COALESCE(s.total_overtime_hours, 0) AS overtime_hours, pp.period_label, pp.start_date
     FROM payroll p
     JOIN payroll_periods pp ON pp.id = p.period_id
     LEFT JOIN attendance_summary s ON s.period_id = p.period_id AND s.employee_id = p.employee_id
     WHERE p.employee_id = ?
     ORDER BY pp.start_date DESC, pp.id DESC
-    LIMIT 6
+    LIMIT 36
 ");
 $history->execute([$empPk]);
-$history = array_reverse($history->fetchAll());
+$allPay  = $history->fetchAll();                         /* newest first */
+$history = array_reverse(withinTrendWindow($allPay));    /* the chart's six months, oldest first */
 
 /* Change against the previous period */
-$prevNet = count($history) >= 2 ? (float)$history[count($history) - 2]['net_pay'] : null;
+$prevNet = count($allPay) >= 2 ? (float)$allPay[1]['net_pay'] : null;
 $netDiff = ($prevNet !== null && $latest) ? (float)$latest['net_pay'] - $prevNet : null;
 $netPct  = ($prevNet) ? round($netDiff / $prevNet * 100, 1) : null;
 
@@ -266,7 +268,7 @@ $dedTotal = array_sum(array_column($dedBreakdown, 'amount'));
         <div class="p-box">
             <div class="p-box-header">
                 <h2>Pay Trend</h2>
-                <span class="badge badge-blue">Last <?= count($history) ?> period(s)</span>
+                <span class="badge badge-blue">Last 6 months (<?= count($history) ?> period(s))</span>
             </div>
             <div class="p-box-body">
                 <?php if (count($history) < 2): ?>

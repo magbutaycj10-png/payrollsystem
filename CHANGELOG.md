@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-27 (later) - every payslip says WHY: the reason behind each bonus and deduction, and what absence and lateness cost
+
+* **Employee portal > My Payslips**: each payslip now has an always-visible **"Why your pay is what it is"** list (it used to be a short list of the period's own entries, and only when there were any). It shows
+  * **Bonuses** - every bonus the admin recorded in Bonus & Deductions (Adjustment Details), with its reason, date and amount;
+  * **Deductions** - the amount of the Deductions tile split into *Tax & contributions* (withholding tax, SSS, PhilHealth, Pag-IBIG; each one is still under Details) and every **deduction entry with its reason**, date and amount, so the list adds up to the tile;
+  * **Attendance** - **absent days** (how many, and the pay lost: one day's pay each) and **late / undertime** (hours, and the pay taken off), marked as already out of Basic Pay, so they are not part of the Deductions tile. A late arrival that cost nothing says so ("the day was not left short"); a daily-rate employee's absent days say they carry no pay.
+  * An amount on the payslip that no entry explains (an older line, or a database edited by hand) is shown as its own row, "no reason was recorded for this amount - ask your admin", so nothing is left without a line.
+* **Monthly-paid employees**: the single pay line of the month's last cut-off carries the bonuses and deductions recorded against the **1st half** as well (it always has, in the totals); until now the payslip listed only the entries recorded against the last cut-off, so part of the Bonus / Deductions had no reason beside it. The page now lists all of them.
+* **Printed payslip** (admin and employee copy): two compact lines under the attendance line, **Bonus / Allowance:** and **Other Deductions:**, each entry with its reason and amount; the attendance line also names **late** hours (alone, or with undertime). Both copies still fit one A4 page.
+* New `payLineReasons()` in `includes/helpers.php` does the work for both; `employee/payslips.php` and `includes/bir-print.php` only draw it. No table or column changed.
+* Tests: suite 18, new test E2 (bonus and deduction reasons incl. the 1st half's, absent, late and undertime, an unexplained amount, the admin's and the employee's printed slip); mutants M71-M73 guard it (73 mutants). Suites 11, 15, 16, 17, 09 and 04 pass unchanged.
+
+## 2026-10-27 - every trend chart shows the last six months, the newest month included
+
+* **Admin dashboard** (payroll trend and its forecast), **Salary Forecast** chart, **employee dashboard** (Pay Trend and Hours Worked) and **manager dashboard** (Team Hours Trend) now show the **last six calendar months**: the month of the newest period that has data and the five months before it. Before, they showed the last six *periods* (about three months on a kinsenas calendar, or years of data on the forecast chart). The window ends at the newest period with data, not at today's date, so a chart is never empty because nothing was paid this month yet. New helpers `trendWindowStart()` / `withinTrendWindow()` in `includes/helpers.php`; `lastSixMonths()` in `assets/js/forecast.js`.
+* The dashboard's "Predicted next cut-off net payroll" is a straight-line trend on the same six months. The Random Forest and ARIMA models on the Salary Forecast page are still trained on the **whole** history (more data makes them better, and ARIMA needs 5 periods); only the picture is cut.
+* The employee's "Vs. Last Period" still compares the two newest payslips, whichever month they fall in. Chart headings say "Last 6 months (N period(s))".
+* Tests: suite 05 (dashboard window, employee and manager charts), suite 07 (forecast page chart), suite 08.
+
 ## 2026-10-26 (later) - one set of cut-offs; monthly-paid employees are paid in the month's last cut-off; an overtime rate on each employee
 
 * **There is one set of pay periods: the kinsenas cut-offs (1st-15th and 16th-end).** A separate whole-month ("Monthly") pay period is no longer created or offered (`create-period.php` refuses it). Employees whose **Pay Schedule is Monthly** are paid **once, in the month's last cut-off, for the whole month**: their days from the 1st, their absences, SSS / PhilHealth / Pag-IBIG and tax in full, and the bonuses and deductions recorded against **either** half, all in that one pay line (marked *Monthly* on the payroll page; the payslip covers "Apr 1 - Apr 30"). Until the last cut-off holds days of theirs they are *waiting*: the days are saved, nothing is computed, and the upload / payroll / adjustments pages say so.

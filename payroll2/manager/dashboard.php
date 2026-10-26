@@ -55,9 +55,9 @@ $approvalPct = $attTotal ? round($attApproved / $attTotal * 100) : 0;
 $avgHours    = $people ? ($sumHours + $sumOt) / $people : 0;
 $otShare     = ($sumHours + $sumOt) ? round($sumOt / ($sumHours + $sumOt) * 100, 1) : 0;
 
-/* ── Team hours across the last six periods - the trend ───────────────── */
+/* ── Team hours over the last six months - the trend ───────────────── */
 $trendSt = $db->prepare("
-    SELECT pp.period_label,
+    SELECT pp.period_label, pp.start_date,
            COALESCE(SUM(a.total_hours_worked),0)   AS hours,
            COALESCE(SUM(a.total_overtime_hours),0) AS ot
     FROM payroll_periods pp
@@ -66,10 +66,10 @@ $trendSt = $db->prepare("
     WHERE 1=1 $scopeWhere
     GROUP BY pp.id, pp.period_label, pp.start_date
     ORDER BY pp.start_date DESC
-    LIMIT 6
+    LIMIT 36
 ");
 $trendSt->execute($scopeParams);
-$trend = array_reverse($trendSt->fetchAll());
+$trend = array_reverse(withinTrendWindow($trendSt->fetchAll()));   /* newest period's month and the five before it */
 
 /* ── Hours logged per employee this period ────────────────────────────── */
 $teamHours = [];
@@ -337,7 +337,7 @@ $recentLeave = $recentLeave->fetchAll();
     <div class="p-box" style="margin-bottom:22px;">
         <div class="p-box-header">
             <h2>Team Hours Trend</h2>
-            <span class="badge badge-blue">Last <?= count($trend) ?> period(s)</span>
+            <span class="badge badge-blue">Last 6 months (<?= count($trend) ?> period(s))</span>
         </div>
         <div class="p-box-body">
             <?php if (count($trend) < 2): ?>

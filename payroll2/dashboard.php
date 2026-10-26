@@ -50,7 +50,7 @@ if ($latestPeriod) {
  * Uses ALL periods (Open + Locked) - no longer requires Finalized status -
  * so the prediction works as soon as attendance is uploaded.
  */
-/* The SIX MOST RECENT periods up to the one shown (newest first inside, oldest first outside) - the trend is about now, not about the first six ever */
+/* The last SIX MONTHS up to the period shown, that month included (newest first inside, oldest first outside) - the trend is about now, not about the oldest data */
 $tq = $db->prepare("
     SELECT * FROM (
         SELECT pp.id, pp.period_label, pp.start_date,
@@ -62,12 +62,16 @@ $tq = $db->prepare("
         GROUP BY pp.id
         HAVING total_net > 0
         ORDER BY pp.start_date DESC, pp.id DESC
-        LIMIT 6
+        LIMIT 36
     ) latest
     ORDER BY start_date ASC, id ASC
 ");
 $tq->execute([$latestPeriodRow['end_date'] ?? '9999-12-31']);
 $monthly = $tq->fetchAll();
+if ($monthly) {   /* keep the months from five before the newest period's month up to it */
+    $windowFrom = trendWindowStart((string)end($monthly)['start_date']);
+    $monthly    = array_values(array_filter($monthly, fn($r) => (string)$r['start_date'] >= $windowFrom));
+}
 
 /* Linear regression on the net pay series to forecast the next point (next month / cut-off / week, see $nextWord) */
 $nets      = array_map('floatval', array_column($monthly, 'total_net'));
@@ -436,7 +440,7 @@ $avgNet = $totals['headcount'] ? $totals['total_net'] / $totals['headcount'] : 0
             </div>
             <div class="card-sub">
                 <?php if ($n >= 2): ?>
-                    Linear regression based on <?= $n ?> period(s) &nbsp;&nbsp;
+                    Linear regression on the last 6 months (<?= $n ?> period(s)) &nbsp;&nbsp;
                     <a href="forecast.php" style="color:#0ea5e9;font-weight:600;">
                         See full AI forecast &rarr;
                     </a>

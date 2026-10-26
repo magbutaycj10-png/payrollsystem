@@ -355,6 +355,83 @@ T::suite('18 · One set of cut-offs, monthly-paid employees, overtime rate per e
         $t->contains('negative', $body);
     });
 
+    T::test('E2 - every payslip says WHY: the admin\'s bonus / deduction reasons (the 1st half\'s too, for a monthly-paid employee), absent days, late and undertime; the printed slip says it too', function (T $t) {
+        Fixtures::reset();
+        [$k, $m] = qa18_people();
+        $j  = Fixtures::employee(['full_name' => 'Plain Joe', 'salary_type' => 'kinsenas', 'base_salary' => '15000.00']);
+        $p1 = Fixtures::period('Apr 1-15, 2026', '2026-04-01', '2026-04-15');
+        $p2 = Fixtures::period('Apr 16-30, 2026', '2026-04-16', '2026-04-30');
+        $adj = fn(int $pid, string $emp, string $type, string $amt, string $reason) =>
+            Http::page('adjustments.php', ['period_id' => $pid, 'emp_ids' => [$emp], 'entry_type' => $type, 'amount' => $amt, 'reason_select' => $reason])['body'];
+        $page = fn(string $emp, string $name, string $script = 'employee/payslips.php', array $q = []) => Http::page($script, [], $q, Http::employee($emp, 0, $name));
+
+        // Kin Senas is 1 h late on Tue 7th but works the full day; Mon Thly misses Wed 8th (absent) and on Tue 21st is 1 h late and 2 h short
+        $kin = array_map(fn($r) => $r['att_date'] === '2026-04-07' ? Fixtures::day('Kin Senas', '2026-04-07', 8, 0, 1, 0) : $r, Fixtures::fullDays('Kin Senas', '2026-04-01', '2026-04-15'));
+        Fixtures::days($p1, array_merge($kin, qa18_daysExcept('Mon Thly', '2026-04-01', '2026-04-15', ['2026-04-08']), Fixtures::fullDays('Plain Joe', '2026-04-01', '2026-04-15')));
+        $adj($p1, $m, 'Bonus', '500.00', 'Holiday Bonus');                 // against the 1st half, where Mon Thly has no pay line
+        $mon = array_merge(qa18_daysExcept('Mon Thly', '2026-04-16', '2026-04-30', ['2026-04-21']), [Fixtures::day('Mon Thly', '2026-04-21', 6, 0, 1, 2)]);
+        Fixtures::days($p2, array_merge($mon, Fixtures::fullDays('Kin Senas', '2026-04-16', '2026-04-30'), Fixtures::fullDays('Plain Joe', '2026-04-16', '2026-04-30')));
+        $adj($p2, $m, 'Deduction', '300.00', 'Cash Advance');
+        $adj($p1, $m, 'Bonus', '100.00', 'Attendance Bonus');
+        $adj($p1, $k, 'Deduction', '200.00', 'Uniform / ID Deduction');
+
+        $line = Fixtures::payroll($p2)[$m];
+        $t->moneyMap(['gross_pay' => '24750.00', 'bonus' => '600.00', 'other_deductions' => '300.00', 'absent_deduction' => '1000.00', 'undertime_deduction' => '250.00', 'net_pay' => '23050.00'],
+                     $line, 'M: 26,000 − 1,000 absent − 250 undertime + 600 bonus − 2,000 contributions − 300 deduction');
+
+        // the employee portal, Mon Thly: both halves' entries are explained on the one line, and so is what attendance cost
+        $r = $page($m, 'Mon Thly');
+        $t->same(200, $r['status']);
+        $t->same([], $r['warnings'] ?? [], 'no PHP warnings');
+        $b = $r['body'];
+        $t->contains('Why your pay is what it is', $b);
+        $t->contains('Holiday Bonus', $b, 'the bonus recorded against the 1st half is on the monthly line');
+        $t->contains('+₱500.00', $b);
+        $t->contains('Attendance Bonus', $b);
+        $t->contains('+₱100.00', $b);
+        $t->contains('Cash Advance', $b, 'the deduction, with its reason');
+        $t->contains('−₱300.00', $b);
+        $t->contains('Tax &amp; contributions', $b, 'the Deductions amount is reconciled: tax / SSS / Pag-IBIG are named');
+        $t->contains('−₱2,000.00', $b);
+        $t->contains('1 day(s) not in the timesheet and not on approved leave - one day&#039;s pay each', $b, 'the absent day');
+        $t->contains('−₱1,000.00', $b);
+        $t->contains('Late &amp; undertime', $b);
+        $t->contains('1 h late, 2 h undertime - the pay for that time is taken off', $b);
+        $t->contains('−₱250.00', $b);
+        $t->notContains('no reason was recorded', $b, 'every peso has a reason');
+
+        // Kin Senas: the deduction (with its reason), and a late arrival that cost nothing says so
+        $b = $page($k, 'Kin Senas')['body'];
+        $t->contains('Uniform / ID Deduction', $b);
+        $t->contains('−₱200.00', $b);
+        $t->contains('1 h late - nothing deducted, the day was not left short', $b);
+        $t->notContains('not in the timesheet and not on approved leave', $b, 'no absent line for someone who was never absent');
+
+        // someone with nothing to explain is not given an empty box
+        $t->notContains('Why your pay is what it is', $page($j, 'Plain Joe')['body']);
+
+        // an amount no entry explains (a line edited in the database) is shown as such, never silently
+        getDB()->prepare("UPDATE payroll SET other_deductions = other_deductions + 75, net_pay = net_pay - 75 WHERE id = ?")->execute([$line['id']]);
+        $b = $page($m, 'Mon Thly')['body'];
+        $t->contains('no reason was recorded for this amount', $b);
+        $t->contains('−₱75.00', $b);
+
+        // the printed payslip: the admin's copy and the employee's own
+        foreach (['admin' => Http::page('print-doc.php', [], ['doc' => 'payslip', 'payroll_id' => $line['id'], 'auto' => '0']),
+                  'employee' => $page($m, 'Mon Thly', 'employee/print-doc.php', ['payroll_id' => $line['id'], 'auto' => '0'])] as $who => $slip) {
+            $s = $slip['body'];
+            $t->same([], $slip['warnings'] ?? [], "$who print: no PHP warnings");
+            $t->contains('Holiday Bonus', $s, "$who print: bonus reason");
+            $t->contains('Attendance Bonus', $s, "$who print: the 1st half's bonus too");
+            $t->contains('+&#8369;500.00', $s);
+            $t->contains('Cash Advance', $s, "$who print: deduction reason");
+            $t->contains('-&#8369;300.00', $s);
+            $t->contains('no reason recorded', $s, "$who print: the unexplained amount");
+            $t->contains('Unpaid days (absent, or not in the timesheet)', $s, "$who print: absent");
+            $t->contains('Late &amp; undertime', $s, "$who print: late and undertime");
+        }
+    });
+
     /* ================================================================== F · totals file, manager, payslip, forecast */
 
     T::test('F - a totals file into the last cut-off pays the monthly employee for the month; into the 1st half it reports them as waiting', function (T $t) use ($lines, $sorted) {

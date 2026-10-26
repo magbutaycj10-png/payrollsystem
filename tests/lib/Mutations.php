@@ -3,7 +3,7 @@
  * Mutations - a self-check of the test suite itself: does it FAIL when the application is wrong?
  *
  *   run-tests.bat --mutation-check                  the current application: M01–M09, M12–M16 and M19–M20 on the original engine and
- *                                                   tables, plus M10–M11, M17–M18 and M21–M69, bugs that can only exist in the code the
+ *                                                   tables, plus M10–M11, M17–M18 and M21–M73, bugs that can only exist in the code the
  *                                                   audit, the 13th month, the typed monthly amounts (M46–M56) and the per-employee
  *                                                   pay schedule and contribution schedule (M58–M69) added
  *   run-tests.bat --mutation-check --app=<folder>   another copy; an older one gets only the mutants marked for it (the older copies
@@ -100,6 +100,9 @@ final class Mutations
             'M66' => ['The first load gives everybody the old default instead of how they were last paid', $h, "\$last[(int)\$r['employee_id']] = \$r['period_type'];", "\$last = [];", '16', 'fixed'],
             'M67' => ['create-period still accepts a Weekly period',                     'api/create-period.php', "if (\$asked === 'Weekly') {", "if (false) {", '16', 'fixed'],
             'M70' => ['A leave decided late does not reach the monthly-paid employee\'s open last cut-off (the 1st half is finalized)', $h, "WHERE p.status = 'Open' AND p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)", "WHERE 1 = 0 AND p.status = 'Open' AND p.period_type = 'Semi-Monthly' AND p.end_date >= LAST_DAY(p.start_date)", '18', 'fixed'],
+            'M71' => ['A monthly-paid employee\'s payslip does not explain the bonuses and deductions recorded against the 1st half', $h, "if (!\$own && !(\$month && \$a['hp_type'] !== 'Monthly' && \$a['hp_start'] >= \$f && \$a['hp_start'] <= \$t)) continue;", "if (!\$own) continue;", '18', 'fixed'],
+            'M72' => ['A payslip does not list the absent days', $h, "if (\$absent > 0) {\n            \$res['attendance'][] = ['label' => 'Absent',", "if (false) {\n            \$res['attendance'][] = ['label' => 'Absent',", '18', 'fixed'],
+            'M73' => ['A bonus / deduction no entry explains is left out of the payslip\'s reasons', $h, "if (\$gap >= 0.01) \$res['unlisted'][\$type] = \$gap;", "if (false) \$res['unlisted'][\$type] = \$gap;", '18', 'fixed'],
             'M68' => ['The tab of the Employees window does not hide the other tables (the marked-row data is wrong)', 'assets/js/employee.js', "tr.classList.toggle('brk-hit', pay > 0 && v >= lo && v < hi);", "tr.classList.toggle('brk-hit', pay > 0 && v >= lo);", '16', 'fixed'],
         ];
         // an entry without a sixth element applies to both versions of the application

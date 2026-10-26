@@ -445,8 +445,15 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     $parts = [];
     if ((float)($r['absent_days'] ?? 0) > 0)
         $parts[] = 'Unpaid days (absent, or not in the timesheet): <b>' . $num($r['absent_days']) . ' day(s)</b>' . $less($r['absent_deduction'] ?? 0);
-    if ((float)($r['undertime_hours'] ?? 0) > 0)
-        $parts[] = 'Undertime: <b>' . $num($r['undertime_hours']) . ' h</b>' . $less($r['undertime_deduction'] ?? 0);
+    $lateH  = (float)($r['late_hours'] ?? 0);
+    $underH = (float)($r['undertime_hours'] ?? 0);
+    if ($underH > 0 && $lateH > 0)
+        $parts[] = 'Late &amp; undertime: <b>' . $num($lateH) . ' h late, ' . $num($underH) . ' h undertime</b>' . $less($r['undertime_deduction'] ?? 0);
+    elseif ($underH > 0)
+        $parts[] = 'Undertime: <b>' . $num($underH) . ' h</b>' . $less($r['undertime_deduction'] ?? 0);
+    elseif ($lateH > 0)
+        $parts[] = 'Late: <b>' . $num($lateH) . ' h</b>' . ((float)($r['undertime_deduction'] ?? 0) > 0
+            ? $less($r['undertime_deduction']) : ' - nothing deducted, the day was not left short');
     if ((float)($r['leave_days'] ?? 0) > 0)
         $parts[] = 'Approved leave: <b>' . $num($r['leave_days']) . ' day(s)</b>, paid';
     if ((float)($r['days_off'] ?? 0) > 0)
@@ -454,6 +461,24 @@ function birPayslipCopy(array $r, array $ctx, string $copyLabel): string {
     $attLine = $parts
         ? '<div style="margin:1.4mm 0;font-size:7pt;color:#374151;">' . implode(' &nbsp;&middot;&nbsp; ', $parts) . '</div>'
         : '';
+
+    /* The reason behind every bonus and deduction on the slip: the admin's entries (Adjustment Details), and an amount no entry explains */
+    $why = $ctx['reasons'][(int)$r['id']] ?? null;
+    if ($why) {
+        $listed = function (array $entries, string $sign, float $unlisted): string {
+            $items = [];
+            foreach ($entries as $a) {
+                $items[] = birEsc($a['reason']) . ' <b>' . $sign . birPeso($a['amount']) . '</b>'
+                         . ((int)$a['finalize_cycle'] > 0 ? ' (revision)' : '');
+            }
+            if ($unlisted > 0) $items[] = 'no reason recorded <b>' . $sign . birPeso($unlisted) . '</b>';
+            return implode(' &nbsp;&middot;&nbsp; ', $items);
+        };
+        $bonusWhy = $listed($why['bonus'], '+', (float)$why['unlisted']['Bonus']);
+        $dedWhy   = $listed($why['deduction'], '-', (float)$why['unlisted']['Deduction']);
+        if ($bonusWhy !== '') $attLine .= '<div style="margin:.6mm 0;font-size:7pt;color:#374151;"><b>Bonus / Allowance:</b> ' . $bonusWhy . '</div>';
+        if ($dedWhy   !== '') $attLine .= '<div style="margin:.6mm 0;font-size:7pt;color:#374151;"><b>Other Deductions:</b> ' . $dedWhy . '</div>';
+    }
 
     return '
 <div class="copy">
@@ -541,6 +566,7 @@ function birRenderPayslipDoc(array $rows, array $ctx): string {
             : ['EMPLOYEE COPY', 'COMPANY COPY']);
 
     $ctx['admin_sig'] = empty($ctx['blank_sig']) ? adminSignatureData() : null;
+    $ctx['reasons']   = $rows ? payLineReasons(getDB(), $rows) : [];      /* why each bonus / deduction is on the slip */
 
     $sheets = '';
     foreach ($rows as $r) {
@@ -816,6 +842,7 @@ function birRenderAdjustmentDoc(array $rows, array $ctx): string {
             : ['EMPLOYEE COPY', 'COMPANY COPY']);
 
     $ctx['admin_sig'] = empty($ctx['blank_sig']) ? adminSignatureData() : null;
+    $ctx['reasons']   = $rows ? payLineReasons(getDB(), $rows) : [];      /* why each bonus / deduction is on the slip */
 
     $sheets = '';
     foreach ($rows as $h) {

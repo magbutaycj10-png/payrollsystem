@@ -524,7 +524,7 @@ function renderTargetLabels(field) {
     const t = TARGETS[field] || TARGETS.total_net;
     const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
     set('cardConsensusLabel', 'Consensus Forecast - ' + (typeof FC_NOUN !== 'undefined' ? FC_NOUN : 'Next Period') + ' ' + t.name);
-    set('chartTitle', 'Historical ' + t.name + ' + Forecast');
+    set('chartTitle', 'Historical ' + t.name + ' + Forecast (last 6 months)');
     set('fcTargetNote', t.name + ': ' + t.note);
 }
 
@@ -571,7 +571,18 @@ function renderCards(rfPred, arimaPred, history, field = 'total_net') {
 
 let fcChart = null;   /* the drawn chart, so a change of target replaces it instead of stacking a second one */
 
-function renderChart(history, rfPred, arimaPred, field = 'total_net') {
+/* The chart shows the last six calendar months, the newest period's month included. The models above are still trained on the whole
+   history; only the picture is cut, so it stays readable as the years pile up. */
+function lastSixMonths(history) {
+    const ym = r => { const m = /^(\d{4})-(\d{2})/.exec(String(r.start_date || '')); return m ? (+m[1]) * 12 + (+m[2]) - 1 : null; };
+    const newest = ym(history[history.length - 1]);
+    if (newest === null) return history.slice(-12);                       /* no dates: about six months of cut-offs */
+    const shown = history.filter(r => { const k = ym(r); return k === null || k >= newest - 5; });
+    return shown.length >= 2 ? shown : history.slice(-2);
+}
+
+function renderChart(allHistory, rfPred, arimaPred, field = 'total_net') {
+    const history    = lastSixMonths(allHistory);
     const labels     = history.map(r => r.label);
     const actuals    = history.map(r => r[field]);
     const seriesName = (TARGETS[field] || TARGETS.total_net).name;

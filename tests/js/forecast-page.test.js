@@ -29,7 +29,12 @@ ta('the page forecasts total labor cost by default: two-decimal amounts, labelle
   same($('cardConsensus').textContent, fmt((rf + ar) / 2), 'consensus card');
   same(window.__charts.length, 1, 'one chart drawn');
   same(window.__charts[0].data.datasets[0].label, 'Actual Total labor cost', 'chart series name');
-  same(window.__charts[0].data.datasets[0].data.slice(0, HIST.length), HIST.map(r => r.total_labor_cost), 'the chart plots labor cost');
+  // the chart shows only the last six calendar months (the newest period's month and the five before it); the models above use everything
+  const monthNo = r => { const [y, m] = r.start_date.split('-'); return (+y) * 12 + (+m); };
+  const SHOWN = HIST.filter(r => monthNo(r) >= monthNo(HIST[HIST.length - 1]) - 5);
+  truthy(SHOWN.length >= 2 && SHOWN.length < HIST.length, 'the data spans more than six months, so the cut is really tested: ' + SHOWN.length + ' of ' + HIST.length);
+  same(window.__charts[0].data.datasets[0].data.slice(0, SHOWN.length), SHOWN.map(r => r.total_labor_cost), 'the chart plots labor cost of the last six months only');
+  same(window.__charts[0].data.labels.length, SHOWN.length + 1, 'the shown periods plus the forecast point');
 });
 
 ta('choosing "Net pay" re-runs both models on net pay, relabels everything and redraws the chart (the old one is destroyed)', async () => {

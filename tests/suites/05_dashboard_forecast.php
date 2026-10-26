@@ -63,16 +63,47 @@ T::suite('05 · Dashboard forecast & status', function () {
         $t->same(0.0, qa_dashboard_data(Http::page('dashboard.php')['body'])['predicted'], 'floored at zero');
     });
 
-    T::test('the forecast uses the six MOST RECENT periods once there are more than six', function (T $t) {
+    T::test('the chart and the forecast use the last SIX MONTHS (the newest month included), not the oldest data', function (T $t) {
         Fixtures::reset();
-        // eight kinsenas cut-offs, Jan–Apr 2025 ; the last six are the ones that say something about next month
-        $nets = [10000, 10400, 11000, 11200, 12000, 12100, 13000, 13300];
+        // sixteen kinsenas cut-offs, Jan to Aug 2025: the window is Mar to Aug = the last twelve cut-offs
+        $nets = [9000, 9200, 9500, 9700, 10000, 10400, 11000, 11200, 12000, 12100, 13000, 13300, 13100, 13800, 14000, 14500];
         qa_history($nets);
         $d = qa_dashboard_data(Http::page('dashboard.php')['body']);
-        $lastSix = array_slice($nets, -6);
-        $t->eq($lastSix, array_map('intval', $d['net']), 'the chart/regression series: ' . json_encode($d['net']));
-        $t->money(sprintf('%.2f', qa_next_by_regression($lastSix)), $d['predicted'], 'prediction from the latest six');
+        $window = array_slice($nets, -12);
+        $t->eq($window, array_map('intval', $d['net']), 'the chart/regression series: ' . json_encode($d['net']));
+        $t->money(sprintf('%.2f', qa_next_by_regression($window)), $d['predicted'], 'prediction from the last six months');
+        // a series that fits inside six months is shown whole
+        Fixtures::reset();
+        $short = [10000, 10400, 11000, 11200, 12000, 12100, 13000, 13300];      // Jan to Apr
+        qa_history($short);
+        $d = qa_dashboard_data(Http::page('dashboard.php')['body']);
+        $t->eq($short, array_map('intval', $d['net']), 'four months: all eight cut-offs');
     }, ['defect' => 'D-04']);
+
+    T::test('the employee and manager dashboards chart the last six months too, and "vs. last period" still compares the two newest payslips', function (T $t) {
+        Fixtures::reset();
+        $db = getDB();
+        $emp = Fixtures::employee(['full_name' => 'Chart Person', 'base_salary' => '500.00']);
+        $ids = qa_history([9000, 9100, 9200, 9300, 9400, 9500, 9600, 9700, 9800, 9900, 10000, 10100, 10200, 10300, 10400, 10500]);   // Jan to Aug 2025
+        $db->exec("INSERT INTO payroll (period_id, employee_id, gross_pay, net_pay) SELECT id, (SELECT id FROM employees WHERE employee_code = '$emp'), 500, 500 + id FROM payroll_periods");
+        $db->exec("INSERT IGNORE INTO attendance_summary (period_id, employee_id, total_hours_worked) SELECT id, (SELECT id FROM employees WHERE employee_code = '$emp'), 80 FROM payroll_periods");
+        $db->prepare("INSERT INTO users (employee_id, full_name, email, password_hash, role) VALUES ((SELECT id FROM employees WHERE employee_code = ?), 'Chart Person', 'chart@test', 'x', 'Employee')")->execute([$emp]);
+        $eu = (int)$db->lastInsertId();
+        $html = Http::page('employee/dashboard.php', [], [], Http::employee($emp, $eu, 'Chart Person'))['body'];
+        preg_match('/const payLabels = (\[.*?\]);/s', $html, $m);
+        $labels = json_decode($m[1] ?? '[]', true);
+        $t->same(12, count($labels), 'Mar to Aug 2025 = twelve cut-offs: ' . json_encode($labels));
+        $t->contains('Last 6 months (12 period(s))', $html);
+        $t->contains('Mar 1-15, 2025', $m[1] ?? '');
+        $t->notContains('Feb 16-28, 2025', $m[1] ?? '');
+        $t->ok(preg_match('/Vs\. Last Period.*?\+₱\d/s', $html) === 1, 'the comparison with the previous payslip is still there');
+        // the manager's team-hours chart
+        $db->prepare("INSERT INTO users (full_name, email, password_hash, role) VALUES ('Mgr Chart', 'mgrchart@test', 'x', 'Manager')")->execute();
+        $mid = (int)$db->lastInsertId();
+        $db->prepare("INSERT INTO user_scopes (user_id, scope_type) VALUES (?, 'Global')")->execute([$mid]);
+        $mhtml = Http::page('manager/dashboard.php', [], [], Http::manager($mid, 'Mgr Chart', ''))['body'];
+        $t->contains('Last 6 months (12 period(s))', $mhtml, 'manager: team hours of the last six months');
+    });
 
     T::test('the prediction card says what it predicts: on a kinsenas calendar that is the next CUT-OFF, not "next month"', function (T $t) {
         Fixtures::reset();

@@ -243,13 +243,13 @@ T::suite('08 · The pharmacy\'s real timesheets, Feb–May 2026', function () {
         $S->series = $series;
     });
 
-    T::test('the dashboard\'s "predicted next payroll" uses the latest six cut-offs of this history (Mar 16 → May 16)', function (T $t) use ($S) {
+    T::test('the dashboard\'s "predicted next payroll" uses the last six MONTHS of this history (Feb to May: all of it)', function (T $t) use ($S) {
         $html = Http::page('dashboard.php')['body'];
         $d = qa_dashboard_data($html);
-        $lastSix = array_slice($S->series, -6);
+        $lastSix = $S->series;               // Feb to May is four months, so every cut-off is inside the six-month window
         fwrite(STDOUT, sprintf("         \033[2m(info) dashboard shows ₱%s from the series %s · independent regression on the latest six: ₱%s\033[0m\n",
             number_format($d['predicted'], 2), json_encode(array_map('intval', $d['net'])), number_format(qa_next_by_regression($lastSix), 2)));
-        $t->same(6, $d['n']);
-        $t->money(sprintf('%.2f', qa_next_by_regression($lastSix)), $d['predicted'], 'prediction from the latest six');
+        $t->same(count($S->series), $d['n']);
+        $t->money(sprintf('%.2f', qa_next_by_regression($lastSix)), $d['predicted'], 'prediction from the six-month window');
     }, ['defect' => 'D-04']);
 });

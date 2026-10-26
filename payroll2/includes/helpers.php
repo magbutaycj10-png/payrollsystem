@@ -1217,6 +1217,89 @@ function payLineRange(array $r): array {
 }
 
 /*
+ * WHY a pay line is what it is - the reason behind every bonus and every deduction on it, for the employee's payslip page and the
+ * printed payslip. Three sources, so nothing on the line is left without a reason:
+ *   - the admin's entries (Bonus & Deductions > Adjustment Details, table bonus_deductions). A monthly-paid employee's line in the
+ *     month's last cut-off also carries what was recorded against the 1st half (see syncMonthlyAdjustments), so those come with it;
+ *   - what attendance took out of Basic Pay: unpaid (absent) days, and late / undertime. These are already out of the Gross Pay, so
+ *     they are listed apart from the entries, which are added or taken after it;
+ *   - the part of the line's bonus or other deductions that no entry explains (an older line, a database edited by hand), kept as its
+ *     own amount so the listed reasons always add up to the line.
+ * $rows are pay lines in PAY_LINE_COLUMNS shape with their period's start_date and end_date. Returns payroll.id => [
+ *   'bonus' / 'deduction'  the entries (entry_type, amount, reason, entry_date, finalize_cycle - above 0 for one recorded after the
+ *                          period was finalized), oldest first
+ *   'attendance'           [['label', 'detail', 'amount' => pesos taken off Basic Pay (0 = shown only)]]
+ *   'unlisted'             ['Bonus' => pesos, 'Deduction' => pesos] no entry explains
+ * ]
+ */
+function payLineReasons(PDO $db, array $rows): array {
+    $ids = [];
+    $lo = $hi = '';
+    foreach ($rows as $r) {
+        if (empty($r['employee_id'])) continue;
+        [$f, $t] = payLineRange($r);
+        $ids[(int)$r['employee_id']] = true;
+        if ($f !== '' && ($lo === '' || $f < $lo)) $lo = $f;
+        if ($t !== '' && $t > $hi) $hi = $t;
+    }
+    $byEmp = [];
+    if ($ids && $lo !== '' && $hi !== '') {
+        $st = $db->prepare("SELECT h.employee_id, h.period_id, h.entry_date, h.type AS entry_type, h.amount, h.reason, h.finalize_cycle,
+                                   hp.start_date AS hp_start, hp.period_type AS hp_type
+                              FROM bonus_deductions h JOIN payroll_periods hp ON hp.id = h.period_id
+                             WHERE h.employee_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ") AND hp.start_date BETWEEN ? AND ?
+                          ORDER BY h.entry_date ASC, h.id ASC");
+        $st->execute(array_merge(array_keys($ids), [$lo, $hi]));
+        foreach ($st->fetchAll() as $a) $byEmp[(int)$a['employee_id']][] = $a;
+    }
+
+    $n   = fn($x) => rtrim(rtrim(number_format((float)$x, 1), '0'), '.');
+    $out = [];
+    foreach ($rows as $r) {
+        if (!isset($r['id'])) continue;
+        [$f, $t] = payLineRange($r);
+        /* a monthly-paid employee's line of the month's last cut-off: the entries of every cut-off of the month are on it */
+        $month = ($r['pay_schedule'] ?? '') === 'Monthly' && $f !== (string)($r['start_date'] ?? '');
+        $res   = ['bonus' => [], 'deduction' => [], 'attendance' => [], 'unlisted' => ['Bonus' => 0.0, 'Deduction' => 0.0]];
+        $sum   = ['Bonus' => 0.0, 'Deduction' => 0.0];
+        foreach ($byEmp[(int)($r['employee_id'] ?? 0)] ?? [] as $a) {
+            $own = (int)$a['period_id'] === (int)($r['period_id'] ?? 0);
+            if (!$own && !($month && $a['hp_type'] !== 'Monthly' && $a['hp_start'] >= $f && $a['hp_start'] <= $t)) continue;
+            $res[$a['entry_type'] === 'Bonus' ? 'bonus' : 'deduction'][] = $a;
+            $sum[$a['entry_type']] += (float)$a['amount'];
+        }
+        foreach (['Bonus' => (float)($r['bonus'] ?? $r['bonus_pay'] ?? 0), 'Deduction' => (float)($r['other_deductions'] ?? 0)] as $type => $onLine) {
+            $gap = round($onLine - $sum[$type], 2);
+            if ($gap >= 0.01) $res['unlisted'][$type] = $gap;
+        }
+
+        $absent    = (float)($r['absent_days'] ?? 0);
+        $absentDed = (float)($r['absent_deduction'] ?? $r['absence_deduction'] ?? 0);
+        if ($absent > 0) {
+            $res['attendance'][] = ['label' => 'Absent',
+                'detail' => $n($absent) . ' day(s) not in the timesheet and not on approved leave'
+                          . ($absentDed > 0 ? ' - one day\'s pay each' : ' - you are paid for the days you work, so these carry no pay'),
+                'amount' => $absentDed];
+        }
+        $late  = (float)($r['late_hours'] ?? 0);
+        $under = (float)($r['undertime_hours'] ?? 0);
+        $tardy = (float)($r['undertime_deduction'] ?? $r['tardy_undertime_deduction'] ?? 0);
+        if ($late > 0 || $under > 0 || $tardy > 0) {
+            $bits = [];
+            if ($late > 0)  $bits[] = $n($late) . ' h late';
+            if ($under > 0) $bits[] = $n($under) . ' h undertime';
+            $res['attendance'][] = [
+                'label'  => $late > 0 && $under > 0 ? 'Late & undertime' : ($late > 0 ? 'Late' : ($under > 0 ? 'Undertime' : 'Late / undertime')),
+                'detail' => ($bits ? implode(', ', $bits) : 'recorded')
+                          . ($tardy > 0 ? ' - the pay for that time is taken off' : ' - nothing deducted, the day was not left short'),
+                'amount' => $tardy];
+        }
+        $out[(int)$r['id']] = $res;
+    }
+    return $out;
+}
+
+/*
  * The calendar a forecast runs on, from the pay periods that hold payroll (period_type and start_date, oldest first): how often a pay
  * run happens in a month. A kinsenas shop has two a month - unless every run so far is a month's LAST cut-off (a company whose
  * employees are all paid monthly), which is one a month. The last period's own type decides otherwise.
@@ -1229,6 +1312,23 @@ function payrollCalendar(array $periodsWithPayroll): array {
         if ($periodsWithPayroll && !$firstHalf) $type = 'Monthly';     /* only the month-end runs pay anybody */
     }
     return ['period_type' => $type, 'periods_per_month' => match ($type) { 'Semi-Monthly' => 2, 'Weekly' => 4, default => 1 }];
+}
+
+/*
+ * The window every trend chart shows: the last N calendar months, counting the month of the newest period (6 by default).
+ * trendWindowStart('2026-10-20') = '2026-05-01'. The anchor is the newest period that has data, so a chart is never empty just
+ * because nothing was paid this very month.
+ */
+function trendWindowStart(string $date, int $months = 6): string {
+    $first = date('Y-m-01', strtotime($date));
+    return date('Y-m-01', strtotime($first . ' -' . max(0, $months - 1) . ' months'));
+}
+
+/* Keeps the rows of $rowsNewestFirst whose $key (a date) falls inside the window that ends with the newest row's month. */
+function withinTrendWindow(array $rowsNewestFirst, string $key = 'start_date', int $months = 6): array {
+    if (!$rowsNewestFirst) return [];
+    $from = trendWindowStart((string)$rowsNewestFirst[0][$key], $months);
+    return array_values(array_filter($rowsNewestFirst, fn($r) => (string)$r[$key] >= $from));
 }
 
 /* "Semi-Monthly · 1st half" etc., for period pickers and headings */

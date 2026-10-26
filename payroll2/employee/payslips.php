@@ -34,22 +34,25 @@ if ($rows) {
 }
 
 /*
- * Every bonus and deduction behind those figures, keyed by period, so the
- * employee can see WHY a net pay is what it is instead of only the total.
- * finalize_cycle > 0 marks an entry recorded after the period was closed.
+ * The reason behind every bonus and deduction on each payslip, so the employee
+ * can see WHY a net pay is what it is instead of only the total: the admin's
+ * entries (Adjustment Details), absent days, late / undertime - see
+ * payLineReasons(). finalize_cycle > 0 marks an entry recorded after the
+ * period was closed.
  */
-$adjustments = [];
-if ($rows) {
-    $adj = $db->prepare(
-        "SELECT h.period_id, h.entry_date, h.type AS entry_type, h.amount, h.reason, h.finalize_cycle
-           FROM bonus_deductions h JOIN employees e ON e.id = h.employee_id
-          WHERE e.employee_code = ?
-       ORDER BY h.entry_date ASC, h.id ASC"
-    );
-    $adj->execute([$e['id']]);
-    foreach ($adj->fetchAll() as $a) {
-        $adjustments[(int)$a['period_id']][] = $a;
-    }
+$reasons = payLineReasons($db, $rows);
+
+/* One line of the "why" list: what it is, where it came from, and the pesos */
+function reasonRow(string $label, string $detail, string $sign, float $amount, string $color, string $note = '', bool $revision = false): string {
+    $money = $sign === '' ? '' : $sign . '₱' . number_format($amount, 2);
+    return '<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--border);'
+         . 'border-radius:8px;margin-bottom:6px;background:' . ($revision ? '#fffbeb' : '#f9fafb') . ';">'
+         . '<span style="font-size:.82rem;"><strong style="color:' . $color . ';">' . htmlspecialchars($label) . '</strong>'
+         . ($detail !== '' ? '&nbsp;-&nbsp;' . htmlspecialchars($detail) : '')
+         . ($revision ? ' <span class="rev-tag">Revision</span>' : '')
+         . ($note !== '' ? '<br><small style="color:#9ca3af;">' . htmlspecialchars($note) . '</small>' : '')
+         . '</span>'
+         . '<span style="font-size:.9rem;font-weight:700;color:' . $color . ';">' . $money . '</span></div>';
 }
 ?>
 <!DOCTYPE html>
@@ -77,6 +80,7 @@ if ($rows) {
             font-size: .64rem; font-weight: 700; text-transform: uppercase;
             letter-spacing: .04em; vertical-align: middle; white-space: nowrap;
         }
+        .why-head { font-size: .74rem; color: var(--text-muted); margin: 9px 0 5px; }
         @media print {
             .no-print { display: none !important; }
             .payslip-card { page-break-inside: avoid; }
@@ -101,6 +105,13 @@ if ($rows) {
     <?php else: ?>
         <?php foreach ($rows as $r): ?>
         <?php $sig = $signatures[$r['id']] ?? null; ?>
+        <?php
+        $why      = $reasons[$r['id']] ?? ['bonus' => [], 'deduction' => [], 'attendance' => [], 'unlisted' => ['Bonus' => 0, 'Deduction' => 0]];
+        $govt     = (float)$r['withholding_tax'] + (float)$r['sss'] + (float)$r['philhealth'] + (float)$r['pagibig'];
+        $hasBonus = $why['bonus'] || $why['unlisted']['Bonus'] > 0;
+        $hasDed   = $why['deduction'] || $why['unlisted']['Deduction'] > 0 || abs($govt) >= 0.005;
+        $hasAtt   = (bool)$why['attendance'];
+        ?>
         <div class="payslip-card">
             <div class="payslip-header">
                 <div>
@@ -137,8 +148,7 @@ if ($rows) {
                     <div class="payslip-item-label">Bonus</div>
                     <div class="payslip-item-value" style="color:#16a34a;">₱<?= number_format($r['bonus'], 2) ?></div>
                 </div>
-                <?php $allDed = (float)$r['withholding_tax'] + (float)$r['sss'] + (float)$r['philhealth']
-                              + (float)$r['pagibig'] + (float)$r['other_deductions']; ?>
+                <?php $allDed = $govt + (float)$r['other_deductions']; ?>
                 <div class="payslip-item" title="Tax, SSS, PhilHealth, Pag-IBIG and other deductions - see Details">
                     <div class="payslip-item-label">Deductions</div>
                     <div class="payslip-item-value" style="color:#dc2626;">₱<?= number_format($allDed, 2) ?></div>
@@ -157,38 +167,48 @@ if ($rows) {
                     <?= htmlspecialchars($r['period_label']) ?> had been finalized<?php
                     ?><?= !empty($r['revised_at']) ? ' on ' . date('M d, Y', strtotime($r['revised_at'])) : '' ?>.
                     The figures above are the corrected ones and replace any earlier copy.
-                    <?php if (!empty($adjustments[$r['period_id']])): ?>
-                        See the bonus / deduction list below for what changed.
+                    <?php if (!empty($why['bonus']) || !empty($why['deduction'])): ?>
+                        See the list below for what changed.
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
 
-            <?php if (!empty($adjustments[$r['period_id']])): ?>
-                <!-- Every bonus and deduction folded into the figures above,
-                     straight from bonus_deductions. -->
+            <?php if ($hasBonus || $hasDed || $hasAtt): ?>
+                <!-- The reason behind every bonus and deduction in the figures
+                     above: the admin's entries (bonus_deductions), absent days,
+                     late / undertime. -->
                 <div style="margin-bottom:12px;">
-                    <div class="payslip-item-label" style="margin-bottom:6px;">Bonuses &amp; deductions this period</div>
-                    <?php foreach ($adjustments[$r['period_id']] as $a): ?>
-                        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
-                                    padding:7px 10px;border:1px solid var(--border);border-radius:8px;
-                                    margin-bottom:6px;background:<?= (int)$a['finalize_cycle'] > 0 ? '#fffbeb' : '#f9fafb' ?>;">
-                            <span style="font-size:.82rem;">
-                                <strong style="color:<?= $a['entry_type'] === 'Bonus' ? '#16a34a' : '#dc2626' ?>;">
-                                    <?= $a['entry_type'] ?>
-                                </strong>
-                                &nbsp;-&nbsp;<?= htmlspecialchars($a['reason']) ?>
-                                <?php if ((int)$a['finalize_cycle'] > 0): ?>
-                                    <span class="rev-tag">Revision</span>
-                                <?php endif; ?>
-                                <br>
-                                <small style="color:#9ca3af;"><?= date('M d, Y', strtotime($a['entry_date'])) ?></small>
-                            </span>
-                            <span style="font-size:.9rem;font-weight:700;
-                                         color:<?= $a['entry_type'] === 'Bonus' ? '#16a34a' : '#dc2626' ?>;">
-                                <?= $a['entry_type'] === 'Bonus' ? '+' : '−' ?>₱<?= number_format($a['amount'], 2) ?>
-                            </span>
-                        </div>
-                    <?php endforeach; ?>
+                    <div class="payslip-item-label" style="margin-bottom:2px;">Why your pay is what it is</div>
+
+                    <?php if ($hasBonus): ?>
+                        <div class="why-head">Bonuses - added to your pay</div>
+                        <?php foreach ($why['bonus'] as $a): ?>
+                            <?= reasonRow('Bonus', (string)$a['reason'], '+', (float)$a['amount'], '#16a34a', date('M d, Y', strtotime($a['entry_date'])), (int)$a['finalize_cycle'] > 0) ?>
+                        <?php endforeach; ?>
+                        <?php if ($why['unlisted']['Bonus'] > 0): ?>
+                            <?= reasonRow('Bonus', 'no reason was recorded for this amount - ask your admin', '+', $why['unlisted']['Bonus'], '#16a34a') ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if ($hasDed): ?>
+                        <div class="why-head">Deductions - taken from your pay (the Deductions amount above)</div>
+                        <?php if (abs($govt) >= 0.005): ?>
+                            <?= reasonRow('Tax & contributions', 'withholding tax, SSS, PhilHealth and Pag-IBIG - each amount is under Details', $govt >= 0 ? '−' : '+', abs($govt), '#6b7280') ?>
+                        <?php endif; ?>
+                        <?php foreach ($why['deduction'] as $a): ?>
+                            <?= reasonRow('Deduction', (string)$a['reason'], '−', (float)$a['amount'], '#dc2626', date('M d, Y', strtotime($a['entry_date'])), (int)$a['finalize_cycle'] > 0) ?>
+                        <?php endforeach; ?>
+                        <?php if ($why['unlisted']['Deduction'] > 0): ?>
+                            <?= reasonRow('Deduction', 'no reason was recorded for this amount - ask your admin', '−', $why['unlisted']['Deduction'], '#dc2626') ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
+
+                    <?php if ($hasAtt): ?>
+                        <div class="why-head">Attendance - already taken out of your Basic Pay, so it is not in the Deductions amount above</div>
+                        <?php foreach ($why['attendance'] as $a): ?>
+                            <?= reasonRow($a['label'], $a['detail'], $a['amount'] > 0 ? '−' : '', (float)$a['amount'], '#dc2626') ?>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
 
